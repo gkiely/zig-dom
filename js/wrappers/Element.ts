@@ -4,6 +4,7 @@ import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
 import { parseHtmlInto } from "./html-parser.ts";
+import { elementMatchesSelector, querySelectorAllInElement } from "./selector-engine.ts";
 
 type AttributeEntry = { name: string; value: string };
 type DatasetShape = Record<string, string>;
@@ -248,8 +249,7 @@ export class Element extends Node {
   }
 
   matches(selector: string): boolean {
-    const document = this.ownerDocument as Document;
-    return document.querySelectorAll(selector).some((candidate) => candidate === this);
+    return elementMatchesSelector(this, selector);
   }
 
   querySelector(selector: string): Element | null {
@@ -257,7 +257,6 @@ export class Element extends Node {
   }
 
   querySelectorAll(selector: string): Element[] {
-    const document = this.ownerDocument as Document;
-    return document.querySelectorAll(selector).filter((candidate) => this.contains(candidate));
+    return querySelectorAllInElement(this, selector);
   }
 }

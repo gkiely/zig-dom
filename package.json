@@ -17,10 +17,16 @@
     "verify:dom": "bun run build && ZIG_DOM_SKIP_TESTING_LIBRARY=1 bun test tests/unit tests/integration/dom",
     "verify:react": "bun run build && bun run scripts/smoke-bun-react.ts",
     "verify:wpt:tiny": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json",
+    "verify:wpt:selectors": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/selectors.json --expected wpt/expected/selectors.json",
+    "verify:wpt:events": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/events.json --expected wpt/expected/events.json",
+    "verify:wpt:parser": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/parser-fragments.json --expected wpt/expected/parser-fragments.json",
+    "verify:wpt:forms": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/forms.json --expected wpt/expected/forms.json",
+    "verify:wpt:custom-elements-shadow": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/custom-elements-shadow.json --expected wpt/expected/custom-elements-shadow.json",
     "verify:fast": "bun run verify:ffi && bun run verify:dom && bun run verify:react",
     "benchmark:dom": "bun run build && bun run scripts/benchmark-dom.ts",
     "test": "bun run build && bun test tests/unit tests/integration/dom tests/integration/react",
     "test:wpt:dom": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json",
+    "test:wpt:expanded": "bun run verify:wpt:selectors && bun run verify:wpt:events && bun run verify:wpt:parser && bun run verify:wpt:forms && bun run verify:wpt:custom-elements-shadow",
     "test:react": "bun run build && bun test tests/integration/react"
   },
   "devDependencies": {

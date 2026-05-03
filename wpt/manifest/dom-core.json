@@ -6,6 +6,7 @@
     { "file": "wpt/runner/tests/element-attributes.any.ts" },
     { "file": "wpt/runner/tests/window-location.any.ts" },
     { "file": "wpt/runner/tests/element-dataset.any.ts" },
+    { "file": "wpt/runner/tests/selectors-advanced.any.ts" },
     { "file": "wpt/runner/tests/storage-cookie.any.ts" },
     { "file": "wpt/runner/tests/html-harness-basic.html" },
     {

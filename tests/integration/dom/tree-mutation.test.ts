@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Window } from "../../../js/wrappers/Window";
 
 describe("native-backed tree mutation", () => {
   test("append, insert, replace, and remove maintain stable relationships", () => {
@@ -30,5 +31,42 @@ describe("native-backed tree mutation", () => {
     const button = document.querySelector("button.primary");
     expect(button?.textContent).toBe("Save");
     expect(document.getElementById("save")).toBe(button);
+  });
+
+  test("adoptNode detaches nodes and importNode clones into the target document", () => {
+    const externalWindow = new Window();
+    const source = externalWindow.document.createElement("article");
+    source.setAttribute("data-kind", "source");
+    source.appendChild(externalWindow.document.createTextNode("external"));
+
+    const imported = document.importNode(source, true);
+    expect(imported).not.toBe(source);
+    expect(imported.ownerDocument).toBe(document);
+    expect((imported as Element).getAttribute("data-kind")).toBe("source");
+
+    const localNode = document.createElement("section");
+    document.body.appendChild(localNode);
+    const adopted = document.adoptNode(localNode);
+    expect(adopted).toBe(localNode);
+    expect(adopted.parentNode).toBeNull();
+
+    externalWindow.close();
+  });
+
+  test("cross-window insertion throws DOMException-compatible names", () => {
+    const externalWindow = new Window();
+    const foreignNode = externalWindow.document.createElement("div");
+
+    let thrown: unknown;
+    try {
+      document.body.appendChild(foreignNode);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect((thrown as Error).name).toBe("HierarchyRequestError");
+
+    externalWindow.close();
   });
 });

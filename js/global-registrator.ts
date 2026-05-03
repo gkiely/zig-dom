@@ -1,9 +1,20 @@
 import { Comment } from "./wrappers/Comment.ts";
+import { ZigDOMException } from "./wrappers/DOMException.ts";
 import { Document } from "./wrappers/Document.ts";
 import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
 import { Element } from "./wrappers/Element.ts";
 import { CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./wrappers/Event.ts";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.ts";
+import {
+  HTMLButtonElement,
+  HTMLElement,
+  HTMLFormElement,
+  HTMLIFrameElement,
+  HTMLInputElement,
+  HTMLLabelElement,
+  HTMLOptionElement,
+  HTMLSelectElement,
+  HTMLTextAreaElement
+} from "./wrappers/HTMLElement.ts";
 import { MutationObserver } from "./wrappers/MutationObserver.ts";
 import { Node } from "./wrappers/Node.ts";
 import { Range, Selection } from "./wrappers/Range.ts";
@@ -32,6 +43,10 @@ export class GlobalRegistrator {
       HTMLIFrameElement,
       HTMLInputElement,
       HTMLFormElement,
+      HTMLLabelElement,
+      HTMLSelectElement,
+      HTMLOptionElement,
+      HTMLTextAreaElement,
       Text,
       Comment,
       DocumentFragment,
@@ -41,6 +56,7 @@ export class GlobalRegistrator {
       InputEvent,
       KeyboardEvent,
       MutationObserver,
+      DOMException: ZigDOMException,
       Range,
       Selection,
       Document,
@@ -50,6 +66,7 @@ export class GlobalRegistrator {
       localStorage: window.localStorage,
       sessionStorage: window.sessionStorage,
       customElements: window.customElements,
+      getComputedStyle: window.getComputedStyle,
       fetch: window.fetch,
       Headers: window.Headers,
       Request: window.Request,

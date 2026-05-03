@@ -44,6 +44,10 @@ const Window = struct {
 
 var global_windows: std.ArrayListUnmanaged(?*Window) = .empty;
 var next_window_handle: u64 = 1;
+var debug_windows_created: u64 = 0;
+var debug_windows_destroyed: u64 = 0;
+var debug_nodes_created: u64 = 0;
+var debug_nodes_destroyed: u64 = 0;
 
 fn resolveWindow(window_handle: u64) ?*Window {
     if (window_handle == 0) return null;
@@ -169,6 +173,7 @@ fn createNode(window: *Window, kind: api.NodeKind, name: []const u8, data: []con
     };
 
     try window.nodes.append(c_allocator, node);
+    debug_nodes_created += 1;
     return handle;
 }
 
@@ -778,6 +783,7 @@ fn createWindowInternal(out_window: *u64) u32 {
         .body_handle = 0,
     };
     next_window_handle += 1;
+    debug_windows_created += 1;
 
     registerWindow(window) catch {
         c_allocator.destroy(window);
@@ -814,11 +820,13 @@ fn destroyWindowInternal(window_handle: u64) void {
 
     for (window.nodes.items) |*node| {
         node.deinit();
+        debug_nodes_destroyed += 1;
     }
 
     window.nodes.deinit(c_allocator);
     unregisterWindow(window_handle);
     c_allocator.destroy(window);
+    debug_windows_destroyed += 1;
 }
 
 fn toNodeType(kind: api.NodeKind) u32 {
@@ -971,6 +979,8 @@ pub export fn zig_dom_node_append_child(parent: u64, child: u64) u32 {
 pub export fn zig_dom_window_append_child(window: u64, parent: u64, child: u64) u32 {
 
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
+    if (decodeNodeWindowHandle(parent) != 0 and decodeNodeWindowHandle(parent) != win.handle) return STATUS_HIERARCHY;
+    if (decodeNodeWindowHandle(child) != 0 and decodeNodeWindowHandle(child) != win.handle) return STATUS_HIERARCHY;
     const parent_node = resolveNode(win, parent) orelse return STATUS_INVALID_HANDLE;
     const child_node = resolveNode(win, child) orelse return STATUS_INVALID_HANDLE;
     return @intFromEnum(appendChildResolved(win, parent, parent_node, child, child_node));
@@ -1332,4 +1342,19 @@ pub export fn zig_dom_retain_handle(handle: u64) void {
 
 pub export fn zig_dom_release_handle(handle: u64) void {
     _ = handle;
+}
+
+pub export fn zig_dom_debug_reset_counters() void {
+    debug_windows_created = 0;
+    debug_windows_destroyed = 0;
+    debug_nodes_created = 0;
+    debug_nodes_destroyed = 0;
+}
+
+pub export fn zig_dom_debug_get_counters(out_windows_created: *u64, out_windows_destroyed: *u64, out_nodes_created: *u64, out_nodes_destroyed: *u64) u32 {
+    out_windows_created.* = debug_windows_created;
+    out_windows_destroyed.* = debug_windows_destroyed;
+    out_nodes_created.* = debug_nodes_created;
+    out_nodes_destroyed.* = debug_nodes_destroyed;
+    return STATUS_OK;
 }

@@ -73,4 +73,24 @@ describe("native handles", () => {
 
     expect(() => window.document.createElement("span")).toThrow("Window is closed");
   });
+
+  test("debug counters stay balanced across repeated create/close cycles", () => {
+    native.debugResetCounters();
+
+    for (let index = 0; index < 25; index += 1) {
+      const window = new Window();
+      const root = window.document.createElement("div");
+      for (let i = 0; i < 20; i += 1) {
+        const child = window.document.createElement("span");
+        child.textContent = `node-${index}-${i}`;
+        root.appendChild(child);
+      }
+      window.document.body.appendChild(root);
+      window.close();
+    }
+
+    const counters = native.debugGetCounters();
+    expect(counters.windowsCreated).toBe(counters.windowsDestroyed);
+    expect(counters.nodesCreated).toBe(counters.nodesDestroyed);
+  });
 });

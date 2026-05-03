@@ -1,0 +1,5 @@
+{
+  "tests": [
+    { "file": "wpt/runner/tests/events-basic.any.ts" }
+  ]
+}

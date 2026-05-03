@@ -1,9 +1,11 @@
 import { native } from "../ffi.ts";
 import { Comment } from "./Comment.ts";
+import { ZigDOMException } from "./DOMException.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
 import { Node } from "./Node.ts";
 import { Range, Selection } from "./Range.ts";
+import { canUseNativeSelector, querySelectorAllInDocument } from "./selector-engine.ts";
 import { Text } from "./Text.ts";
 import type { Window } from "./Window.ts";
 
@@ -106,15 +108,51 @@ export class Document extends Node {
 
   querySelector(selector: string): Element | null {
     this._window.assertOpen();
-    const handle = native.documentQuerySelector(this._handle, selector);
-    return this._window.getNode(handle) as Element | null;
+    if (canUseNativeSelector(selector)) {
+      const handle = native.documentQuerySelector(this._handle, selector);
+      return this._window.getNode(handle) as Element | null;
+    }
+
+    return this.querySelectorAll(selector)[0] ?? null;
   }
 
   querySelectorAll(selector: string): Element[] {
     this._window.assertOpen();
-    return native.documentQuerySelectorAll(this._handle, selector)
-      .map((handle) => this._window.getNode(handle))
-      .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE));
+    if (canUseNativeSelector(selector)) {
+      return native.documentQuerySelectorAll(this._handle, selector)
+        .map((handle) => this._window.getNode(handle))
+        .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE));
+    }
+
+    return querySelectorAllInDocument(this, selector);
+  }
+
+  adoptNode<TNode extends Node>(node: TNode): TNode {
+    this._window.assertOpen();
+
+    if (node.nodeType === Node.DOCUMENT_NODE) {
+      throw new ZigDOMException("A Document node cannot be adopted.", "NotSupportedError", 9);
+    }
+
+    if (node._window !== this._window) {
+      throw new ZigDOMException("Cannot adopt nodes across different windows.", "WrongDocumentError", 4);
+    }
+
+    if (node.parentNode) {
+      node.parentNode.removeChild(node);
+    }
+
+    return node;
+  }
+
+  importNode<TNode extends Node>(node: TNode, deep = false): TNode {
+    this._window.assertOpen();
+
+    if (node.nodeType === Node.DOCUMENT_NODE) {
+      throw new ZigDOMException("A Document node cannot be imported.", "NotSupportedError", 9);
+    }
+
+    return cloneNodeIntoDocument(this, node, deep) as TNode;
   }
 
   reset(): void {
@@ -122,4 +160,42 @@ export class Document extends Node {
     native.documentReset(this._handle);
     this._window.setActiveElement(null);
   }
+}
+
+function cloneNodeIntoDocument(document: Document, source: Node, deep: boolean): Node {
+  if (source.nodeType === Node.TEXT_NODE) {
+    return document.createTextNode(source.textContent);
+  }
+
+  if (source.nodeType === Node.COMMENT_NODE) {
+    return document.createComment(source.textContent);
+  }
+
+  if (source.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+    const fragment = document.createDocumentFragment();
+    if (deep) {
+      for (const child of source.childNodes.toArray()) {
+        fragment.appendChild(cloneNodeIntoDocument(document, child, true));
+      }
+    }
+    return fragment;
+  }
+
+  if (source.nodeType === Node.ELEMENT_NODE) {
+    const sourceElement = source as unknown as Element;
+    const clone = document.createElement(sourceElement.tagName.toLowerCase());
+    for (const attribute of sourceElement.attributes) {
+      clone.setAttribute(attribute.name, attribute.value);
+    }
+
+    if (deep) {
+      for (const child of source.childNodes.toArray()) {
+        clone.appendChild(cloneNodeIntoDocument(document, child, true));
+      }
+    }
+
+    return clone;
+  }
+
+  throw new ZigDOMException(`Unsupported node type for import: ${source.nodeType}`, "NotSupportedError", 9);
 }

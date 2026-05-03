@@ -1,12 +1,23 @@
 import { native } from "../ffi.ts";
 import { Comment } from "./Comment.ts";
 import { CustomElementRegistry } from "./CustomElementRegistry.ts";
+import { ZigDOMException } from "./DOMException.ts";
 import { Document } from "./Document.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
 import { CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./HTMLElement.ts";
-import { MutationObserver } from "./MutationObserver.ts";
+import {
+  HTMLButtonElement,
+  HTMLElement,
+  HTMLFormElement,
+  HTMLIFrameElement,
+  HTMLInputElement,
+  HTMLLabelElement,
+  HTMLOptionElement,
+  HTMLSelectElement,
+  HTMLTextAreaElement
+} from "./HTMLElement.ts";
+import { MutationObserver, type InternalMutationRecord } from "./MutationObserver.ts";
 import { Node } from "./Node.ts";
 import { Range, Selection } from "./Range.ts";
 import { Storage } from "./Storage.ts";
@@ -22,6 +33,10 @@ type CustomElementLifecycle = {
   constructor: {
     observedAttributes?: string[];
   };
+};
+
+type MutationObserverLike = {
+  enqueueRecord(record: InternalMutationRecord): void;
 };
 
 export interface WindowOptions {
@@ -44,6 +59,13 @@ export interface WindowLocation {
   replace(next: string): void;
   toString(): string;
 }
+
+type ComputedStyleLike = {
+  cssText: string;
+  display: string;
+  visibility: string;
+  getPropertyValue(name: string): string;
+};
 
 class WindowLocationImpl implements WindowLocation {
   #url: URL;
@@ -158,6 +180,7 @@ export class Window {
   #activeElementHandle: number | null = null;
   readonly #selection = new Selection();
   readonly #cookies = new Map<string, string>();
+  readonly #mutationObservers = new Set<MutationObserverLike>();
 
   #closed = false;
 
@@ -168,6 +191,10 @@ export class Window {
   readonly HTMLIFrameElement = HTMLIFrameElement;
   readonly HTMLInputElement = HTMLInputElement;
   readonly HTMLFormElement = HTMLFormElement;
+  readonly HTMLLabelElement = HTMLLabelElement;
+  readonly HTMLSelectElement = HTMLSelectElement;
+  readonly HTMLOptionElement = HTMLOptionElement;
+  readonly HTMLTextAreaElement = HTMLTextAreaElement;
   readonly Text = Text;
   readonly Comment = Comment;
   readonly DocumentFragment = DocumentFragment;
@@ -176,6 +203,7 @@ export class Window {
   readonly MouseEvent = MouseEvent;
   readonly InputEvent = InputEvent;
   readonly KeyboardEvent = KeyboardEvent;
+  readonly DOMException = ZigDOMException;
   readonly MutationObserver = MutationObserver;
   readonly Range = Range;
   readonly Selection = Selection;
@@ -238,6 +266,7 @@ export class Window {
     this.FormData = globalThis.FormData;
     this.Blob = globalThis.Blob;
     this.File = globalThis.File;
+    this.getComputedStyle = this.getComputedStyle.bind(this);
   }
 
   assertOpen(): void {
@@ -294,6 +323,14 @@ export class Window {
           wrapped = new HTMLButtonElement(this, handle, kind, skipInitialStyleSync);
         } else if (tagName === "form") {
           wrapped = new HTMLFormElement(this, handle, kind, skipInitialStyleSync);
+        } else if (tagName === "label") {
+          wrapped = new HTMLLabelElement(this, handle, kind, skipInitialStyleSync);
+        } else if (tagName === "select") {
+          wrapped = new HTMLSelectElement(this, handle, kind, skipInitialStyleSync);
+        } else if (tagName === "option") {
+          wrapped = new HTMLOptionElement(this, handle, kind, skipInitialStyleSync);
+        } else if (tagName === "textarea") {
+          wrapped = new HTMLTextAreaElement(this, handle, kind, skipInitialStyleSync);
         } else if (tagName === "iframe") {
           wrapped = new HTMLIFrameElement(this, handle, kind, skipInitialStyleSync);
         } else {
@@ -407,7 +444,23 @@ export class Window {
   }
 
   notifyAttributeChanged(element: Element, name: string, oldValue: string | null, newValue: string | null): void {
-    if (!this.customElements.hasDefinitions || oldValue === newValue) {
+    if (oldValue === newValue) {
+      return;
+    }
+
+    this.emitMutationRecord({
+      type: "attributes",
+      target: element,
+      addedNodes: [],
+      removedNodes: [],
+      previousSibling: null,
+      nextSibling: null,
+      attributeName: name,
+      attributeNamespace: null,
+      oldValue
+    });
+
+    if (!this.customElements.hasDefinitions) {
       return;
     }
 
@@ -423,6 +476,56 @@ export class Window {
     }
 
     lifecycle.attributeChangedCallback.call(element, normalized, oldValue, newValue);
+  }
+
+  notifyChildListMutation(target: Node, addedNodes: Node[], removedNodes: Node[], previousSibling: Node | null, nextSibling: Node | null): void {
+    this.emitMutationRecord({
+      type: "childList",
+      target,
+      addedNodes,
+      removedNodes,
+      previousSibling,
+      nextSibling,
+      attributeName: null,
+      attributeNamespace: null,
+      oldValue: null
+    });
+  }
+
+  notifyCharacterDataChanged(target: Node, oldValue: string): void {
+    this.emitMutationRecord({
+      type: "characterData",
+      target,
+      addedNodes: [],
+      removedNodes: [],
+      previousSibling: null,
+      nextSibling: null,
+      attributeName: null,
+      attributeNamespace: null,
+      oldValue
+    });
+  }
+
+  registerMutationObserver(observer: MutationObserverLike): void {
+    this.#mutationObservers.add(observer);
+  }
+
+  unregisterMutationObserver(observer: MutationObserverLike): void {
+    this.#mutationObservers.delete(observer);
+  }
+
+  hasMutationObservers(): boolean {
+    return this.#mutationObservers.size > 0;
+  }
+
+  private emitMutationRecord(record: InternalMutationRecord): void {
+    if (this.#mutationObservers.size === 0) {
+      return;
+    }
+
+    for (const observer of this.#mutationObservers) {
+      observer.enqueueRecord(record);
+    }
   }
 
   #walkElementSubtree(root: Node, visit: (element: Element) => void): void {
@@ -466,6 +569,7 @@ export class Window {
     if (this.#closed) return;
     this.#closed = true;
     this.#activeElementHandle = null;
+    this.#mutationObservers.clear();
     native.destroyWindow(this._nativeWindowHandle);
     this.#nodeCache.length = 0;
   }
@@ -514,6 +618,30 @@ export class Window {
     const name = pair.slice(0, separatorIndex).trim();
     const value = pair.slice(separatorIndex + 1).trim();
     this.#cookies.set(name, value);
+  }
+
+  getComputedStyle(element: Element): ComputedStyleLike {
+    this.assertOpen();
+
+    const declarations = new Map<string, string>();
+    const styleText = element.getAttribute("style") ?? "";
+    for (const part of styleText.split(";")) {
+      const [rawName, rawValue] = part.split(":");
+      const name = rawName?.trim().toLowerCase();
+      const value = rawValue?.trim();
+      if (name && value) {
+        declarations.set(name, value);
+      }
+    }
+
+    return {
+      cssText: styleText,
+      display: declarations.get("display") ?? "block",
+      visibility: declarations.get("visibility") ?? "visible",
+      getPropertyValue(name: string): string {
+        return declarations.get(name.trim().toLowerCase()) ?? "";
+      }
+    };
   }
 
   setTimeout!: typeof globalThis.setTimeout;

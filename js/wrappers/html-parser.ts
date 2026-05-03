@@ -29,11 +29,46 @@ function parseAttributes(element: Element, source: string): void {
   let match: RegExpExecArray | null = null;
   while ((match = attrRegex.exec(source)) !== null) {
     const name = match[1];
-    const value = match[2] ?? match[3] ?? match[4] ?? "";
+    const value = decodeHtmlEntities(match[2] ?? match[3] ?? match[4] ?? "");
     if (name !== "/") {
       element.setAttribute(name, value);
     }
   }
+}
+
+function decodeHtmlEntities(input: string): string {
+  if (!input.includes("&")) {
+    return input;
+  }
+
+  return input.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (_match, entity: string) => {
+    if (entity.startsWith("#x") || entity.startsWith("#X")) {
+      const codePoint = Number.parseInt(entity.slice(2), 16);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : _match;
+    }
+
+    if (entity.startsWith("#")) {
+      const codePoint = Number.parseInt(entity.slice(1), 10);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : _match;
+    }
+
+    switch (entity) {
+      case "amp":
+        return "&";
+      case "lt":
+        return "<";
+      case "gt":
+        return ">";
+      case "quot":
+        return '"';
+      case "apos":
+        return "'";
+      case "nbsp":
+        return "\u00A0";
+      default:
+        return _match;
+    }
+  });
 }
 
 export function parseHtmlInto(parent: Element, html: string): void {
@@ -84,7 +119,7 @@ export function parseHtmlInto(parent: Element, html: string): void {
       continue;
     }
 
-    const text = token;
+    const text = decodeHtmlEntities(token);
     if (text.length > 0) {
       appendNode(stack, document.createTextNode(text));
     }

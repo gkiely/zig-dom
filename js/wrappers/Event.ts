@@ -6,6 +6,7 @@ export interface EventListenerObjectLike {
 
 export interface EventListenerOptionsLike {
   capture?: boolean;
+  passive?: boolean;
 }
 
 export interface AddEventListenerOptionsLike extends EventListenerOptionsLike {
@@ -13,9 +14,11 @@ export interface AddEventListenerOptionsLike extends EventListenerOptionsLike {
 }
 
 type ListenerEntry = {
+  original: EventListenerCallback | EventListenerObjectLike;
   callback: EventListenerCallback;
   capture: boolean;
   once: boolean;
+  passive: boolean;
 };
 
 export class Event {
@@ -27,6 +30,7 @@ export class Event {
   readonly type: string;
   readonly bubbles: boolean;
   readonly cancelable: boolean;
+  readonly composed: boolean;
 
   target: EventTargetBase | null = null;
   currentTarget: EventTargetBase | null = null;
@@ -35,11 +39,13 @@ export class Event {
 
   #propagationStopped = false;
   #immediatePropagationStopped = false;
+  #path: EventTargetBase[] = [];
 
   constructor(type: string, init?: EventInit) {
     this.type = type;
     this.bubbles = Boolean(init?.bubbles);
     this.cancelable = Boolean(init?.cancelable);
+    this.composed = Boolean(init?.composed);
   }
 
   preventDefault(): void {
@@ -64,6 +70,14 @@ export class Event {
   get immediatePropagationStopped(): boolean {
     return this.#immediatePropagationStopped;
   }
+
+  composedPath(): EventTarget[] {
+    return [...this.#path] as unknown as EventTarget[];
+  }
+
+  setPath(path: EventTargetBase[]): void {
+    this.#path = path;
+  }
 }
 
 export class CustomEvent<T = unknown> extends Event {
@@ -79,12 +93,14 @@ export class MouseEvent extends Event {
   readonly clientX: number;
   readonly clientY: number;
   readonly button: number;
+  readonly relatedTarget: EventTarget | null;
 
   constructor(type: string, init?: MouseEventInit) {
     super(type, init);
     this.clientX = init?.clientX ?? 0;
     this.clientY = init?.clientY ?? 0;
     this.button = init?.button ?? 0;
+    this.relatedTarget = (init?.relatedTarget as EventTarget | null) ?? null;
   }
 }
 
@@ -107,6 +123,7 @@ export class KeyboardEvent extends Event {
   readonly altKey: boolean;
   readonly metaKey: boolean;
   readonly repeat: boolean;
+  readonly location: number;
 
   constructor(type: string, init?: KeyboardEventInit) {
     super(type, init);
@@ -117,6 +134,7 @@ export class KeyboardEvent extends Event {
     this.altKey = Boolean(init?.altKey);
     this.metaKey = Boolean(init?.metaKey);
     this.repeat = Boolean(init?.repeat);
+    this.location = init?.location ?? 0;
   }
 }
 
@@ -129,26 +147,25 @@ export class EventTargetBase {
     const listenerCallback: EventListenerCallback = typeof callback === "function" ? callback : (event) => callback.handleEvent(event);
     const capture = typeof options === "boolean" ? options : Boolean(options?.capture);
     const once = Boolean(typeof options === "object" && options?.once);
+    const passive = Boolean(typeof options === "object" && options?.passive);
 
     const existing = this.#listeners.get(type) ?? [];
-    if (existing.some((entry) => entry.callback === listenerCallback && entry.capture === capture)) {
+    if (existing.some((entry) => entry.original === callback && entry.capture === capture)) {
       return;
     }
 
-    existing.push({ callback: listenerCallback, capture, once });
+    existing.push({ original: callback, callback: listenerCallback, capture, once, passive });
     this.#listeners.set(type, existing);
   }
 
   removeEventListener(type: string, callback: EventListenerCallback | EventListenerObjectLike | null, options?: boolean | EventListenerOptionsLike): void {
     if (!callback) return;
-
-    const listenerCallback: EventListenerCallback = typeof callback === "function" ? callback : (event) => callback.handleEvent(event);
     const capture = typeof options === "boolean" ? options : Boolean(options?.capture);
 
     const existing = this.#listeners.get(type);
     if (!existing || existing.length === 0) return;
 
-    const filtered = existing.filter((entry) => !(entry.callback === listenerCallback && entry.capture === capture));
+    const filtered = existing.filter((entry) => !(entry.original === callback && entry.capture === capture));
     if (filtered.length === 0) {
       this.#listeners.delete(type);
       return;
@@ -184,7 +201,7 @@ export class EventTargetBase {
       }
       listener.callback(event);
       if (listener.once) {
-        this.removeEventListener(event.type, listener.callback, { capture: listener.capture });
+        this.removeEventListener(event.type, listener.original, { capture: listener.capture });
       }
       if (event.immediatePropagationStopped) {
         break;

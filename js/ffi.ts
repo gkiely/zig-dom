@@ -1,6 +1,7 @@
 import { dlopen, ptr, suffix, toArrayBuffer, type Pointer } from "bun:ffi";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { domExceptionForStatus } from "./wrappers/DOMException.ts";
 
 export const enum NativeStatus {
   Ok = 0,
@@ -35,7 +36,7 @@ function statusName(status: number): string {
 
 function assertStatus(status: number, operation: string): void {
   if (status !== NativeStatus.Ok) {
-    throw new Error(`${operation} failed: ${statusName(status)} (${status})`);
+    throw domExceptionForStatus(status, operation, `${statusName(status)} (${status})`);
   }
 }
 
@@ -105,7 +106,9 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_free_string: { returns: "void", args: ["ptr", "usize"] },
   zig_dom_free_handle_array: { returns: "void", args: ["ptr", "usize"] },
   zig_dom_retain_handle: { returns: "void", args: ["u64"] },
-  zig_dom_release_handle: { returns: "void", args: ["u64"] }
+  zig_dom_release_handle: { returns: "void", args: ["u64"] },
+  zig_dom_debug_reset_counters: { returns: "void", args: [] },
+  zig_dom_debug_get_counters: { returns: "u32", args: ["ptr", "ptr", "ptr", "ptr"] }
 });
 
 const encoder = new TextEncoder();
@@ -267,7 +270,7 @@ export const native = {
   appendChildInWindow(window: number, parent: number, child: number): void {
     const status = nativeLibrary.symbols.zig_dom_window_append_child(window, parent, child);
     if (status !== NativeStatus.Ok) {
-      throw new Error(`zig_dom_window_append_child failed: ${statusName(status)} (${status})`);
+      throw domExceptionForStatus(status, "zig_dom_window_append_child", `${statusName(status)} (${status})`);
     }
   },
   insertBefore(parent: number, child: number, referenceChild: number): void {
@@ -413,6 +416,29 @@ export const native = {
   },
   releaseHandle(handle: number): void {
     nativeLibrary.symbols.zig_dom_release_handle(handle);
+  },
+  debugResetCounters(): void {
+    nativeLibrary.symbols.zig_dom_debug_reset_counters();
+  },
+  debugGetCounters(): { windowsCreated: number; windowsDestroyed: number; nodesCreated: number; nodesDestroyed: number } {
+    const windowsCreated = new BigUint64Array(1);
+    const windowsDestroyed = new BigUint64Array(1);
+    const nodesCreated = new BigUint64Array(1);
+    const nodesDestroyed = new BigUint64Array(1);
+    const status = nativeLibrary.symbols.zig_dom_debug_get_counters(
+      ptr(windowsCreated),
+      ptr(windowsDestroyed),
+      ptr(nodesCreated),
+      ptr(nodesDestroyed)
+    );
+    assertStatus(status, "zig_dom_debug_get_counters");
+
+    return {
+      windowsCreated: Number(windowsCreated[0]),
+      windowsDestroyed: Number(windowsDestroyed[0]),
+      nodesCreated: Number(nodesCreated[0]),
+      nodesDestroyed: Number(nodesDestroyed[0])
+    };
   }
 };
 

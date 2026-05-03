@@ -85,7 +85,13 @@ export class Node extends EventTargetBase {
 
   set textContent(value: string | null) {
     this._window.assertOpen();
+    const trackCharacterData = this._window.hasMutationObservers() &&
+      (this.#nodeType === Node.TEXT_NODE || this.#nodeType === Node.COMMENT_NODE);
+    const previousValue = trackCharacterData ? this.textContent : "";
     native.setNodeTextContent(this._handle, value ?? "");
+    if (trackCharacterData) {
+      this._window.notifyCharacterDataChanged(this, previousValue);
+    }
   }
 
   get nodeValue(): string | null {
@@ -111,14 +117,28 @@ export class Node extends EventTargetBase {
       return child;
     }
 
-    if (!this._window.customElements.hasDefinitions) {
-      native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, child._handle);
+    const trackMutations = this._window.hasMutationObservers();
+    if (!trackMutations && !this._window.customElements.hasDefinitions) {
+      native.appendChild(this._handle, child._handle);
       return child;
     }
 
-    const previousParent = child.parentNode;
+    const previousParent = trackMutations ? child.parentNode : null;
+    const previousSibling = trackMutations ? child.previousSibling : null;
+    const nextSibling = trackMutations ? child.nextSibling : null;
     const wasConnected = this._window.isConnectedNode(child);
     native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, child._handle);
+
+    if (trackMutations) {
+      this._window.notifyChildListMutation(this, [child], [], child.previousSibling, child.nextSibling);
+      if (previousParent && previousParent !== this) {
+        this._window.notifyChildListMutation(previousParent, [], [child], previousSibling, nextSibling);
+      }
+    }
+
+    if (!this._window.customElements.hasDefinitions) {
+      return child;
+    }
 
     const isConnected = this._window.isConnectedNode(child);
     if (!wasConnected && isConnected) {
@@ -144,14 +164,28 @@ export class Node extends EventTargetBase {
       return newChild;
     }
 
-    if (!this._window.customElements.hasDefinitions) {
+    const trackMutations = this._window.hasMutationObservers();
+    if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
       return newChild;
     }
 
-    const previousParent = newChild.parentNode;
+    const previousParent = trackMutations ? newChild.parentNode : null;
+    const previousSibling = trackMutations ? newChild.previousSibling : null;
+    const nextSibling = trackMutations ? newChild.nextSibling : null;
     const wasConnected = this._window.isConnectedNode(newChild);
     native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+
+    if (trackMutations) {
+      this._window.notifyChildListMutation(this, [newChild], [], newChild.previousSibling, newChild.nextSibling);
+      if (previousParent && previousParent !== this) {
+        this._window.notifyChildListMutation(previousParent, [], [newChild], previousSibling, nextSibling);
+      }
+    }
+
+    if (!this._window.customElements.hasDefinitions) {
+      return newChild;
+    }
 
     const isConnected = this._window.isConnectedNode(newChild);
     if (!wasConnected && isConnected) {
@@ -168,14 +202,24 @@ export class Node extends EventTargetBase {
 
   removeChild<TNode extends Node>(child: TNode): TNode {
     this._window.assertOpen();
-
-    if (!this._window.customElements.hasDefinitions) {
+    const trackMutations = this._window.hasMutationObservers();
+    if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.removeChild(this._handle, child._handle);
       return child;
     }
 
+    const previousSibling = trackMutations ? child.previousSibling : null;
+    const nextSibling = trackMutations ? child.nextSibling : null;
     const wasConnected = this._window.isConnectedNode(child);
     native.removeChild(this._handle, child._handle);
+    if (trackMutations) {
+      this._window.notifyChildListMutation(this, [], [child], previousSibling, nextSibling);
+    }
+
+    if (!this._window.customElements.hasDefinitions) {
+      return child;
+    }
+
     const isConnected = this._window.isConnectedNode(child);
     if (wasConnected && !isConnected) {
       this._window.notifyDisconnectedSubtree(child);
@@ -186,16 +230,32 @@ export class Node extends EventTargetBase {
 
   replaceChild<TNode extends Node>(newChild: Node, oldChild: TNode): TNode {
     this._window.assertOpen();
-
-    if (!this._window.customElements.hasDefinitions) {
+    const trackMutations = this._window.hasMutationObservers();
+    if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.replaceChild(this._handle, newChild._handle, oldChild._handle);
       return oldChild;
     }
 
+    const oldPreviousSibling = trackMutations ? oldChild.previousSibling : null;
+    const oldNextSibling = trackMutations ? oldChild.nextSibling : null;
     const oldWasConnected = this._window.isConnectedNode(oldChild);
     const newWasConnected = this._window.isConnectedNode(newChild);
-    const newPreviousParent = newChild.parentNode;
+    const newPreviousParent = trackMutations ? newChild.parentNode : null;
+    const newPreviousSibling = trackMutations ? newChild.previousSibling : null;
+    const newNextSibling = trackMutations ? newChild.nextSibling : null;
     native.replaceChild(this._handle, newChild._handle, oldChild._handle);
+
+    if (trackMutations) {
+      this._window.notifyChildListMutation(this, [], [oldChild], oldPreviousSibling, oldNextSibling);
+      this._window.notifyChildListMutation(this, [newChild], [], newChild.previousSibling, newChild.nextSibling);
+      if (newPreviousParent && newPreviousParent !== this) {
+        this._window.notifyChildListMutation(newPreviousParent, [], [newChild], newPreviousSibling, newNextSibling);
+      }
+    }
+
+    if (!this._window.customElements.hasDefinitions) {
+      return oldChild;
+    }
 
     const oldIsConnected = this._window.isConnectedNode(oldChild);
     const newIsConnected = this._window.isConnectedNode(newChild);
@@ -363,6 +423,7 @@ export class Node extends EventTargetBase {
       propagationPath.push(cursor);
       cursor = cursor.parentNode;
     }
+    event.setPath([...propagationPath]);
 
     for (let i = propagationPath.length - 1; i >= 1; i -= 1) {
       if (event.propagationStopped) break;

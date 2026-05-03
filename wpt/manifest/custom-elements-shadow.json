@@ -1,0 +1,5 @@
+{
+  "tests": [
+    { "file": "wpt/runner/tests/custom-elements-shadow.any.ts" }
+  ]
+}

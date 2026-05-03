@@ -2,12 +2,23 @@ import { PropertySymbol } from "./compatibility/happy-dom-symbols.ts";
 import { GlobalRegistrator } from "./global-registrator.ts";
 import { Comment } from "./wrappers/Comment.ts";
 import { CustomElementRegistry } from "./wrappers/CustomElementRegistry.ts";
+import { ZigDOMException } from "./wrappers/DOMException.ts";
 import { Document } from "./wrappers/Document.ts";
 import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
 import { Element } from "./wrappers/Element.ts";
 import { CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./wrappers/Event.ts";
 import { HTMLCollection } from "./wrappers/HTMLCollection.ts";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.ts";
+import {
+  HTMLButtonElement,
+  HTMLElement,
+  HTMLFormElement,
+  HTMLIFrameElement,
+  HTMLInputElement,
+  HTMLLabelElement,
+  HTMLOptionElement,
+  HTMLSelectElement,
+  HTMLTextAreaElement
+} from "./wrappers/HTMLElement.ts";
 import { MutationObserver } from "./wrappers/MutationObserver.ts";
 import { Node } from "./wrappers/Node.ts";
 import { NodeList } from "./wrappers/NodeList.ts";
@@ -101,6 +112,7 @@ export {
   CustomEvent,
   Document,
   DocumentFragment,
+  ZigDOMException as DOMException,
   Element,
   Event,
   GlobalRegistrator,
@@ -110,6 +122,10 @@ export {
   HTMLFormElement,
   HTMLIFrameElement,
   HTMLInputElement,
+  HTMLLabelElement,
+  HTMLOptionElement,
+  HTMLSelectElement,
+  HTMLTextAreaElement,
   InputEvent,
   KeyboardEvent,
   MouseEvent,
