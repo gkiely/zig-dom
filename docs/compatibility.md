@@ -27,7 +27,7 @@
 - Shadow DOM basics: `HTMLElement.attachShadow({ mode })` and `shadowRoot` (open mode) are implemented.
 - Registration: GlobalRegistrator preload setup with idempotent register/reset/unregister.
 - Compatibility exports: PropertySymbol and browser-like Browser/BrowserContext/Page with lifecycle/content/url coverage in integration tests.
-- Test harnesses: Bun unit/integration tests, React smoke integration, tiny WPT-style subset runner with `.any.ts`, `.html` (inline + `META: script=` includes), and manifest-driven variants.
+- Test harnesses: Bun unit/integration tests, React smoke integration, tiny WPT-style subset runner with `.any.ts`, `.html` (inline + `META: script=` includes), and manifest-driven variant/variants execution.
 - Source import policy: TypeScript source now uses `.ts` relative import specifiers with compiler rewrite to emitted `.js` paths.
 
 ## Known gaps
@@ -35,7 +35,7 @@
 - Selector engine currently supports basic selectors and descendant combinators only.
 - HTML parser for innerHTML is pragmatic and not fully spec-complete.
 - Event system supports capture/target/bubble and common event classes, but not full DOM Events and UI Events edge-case parity.
-- WPT runner supports tiny in-repo subset files, basic `.html` harness execution, `META: script=` includes, and manifest variants, but not full upstream testharness HTML loading (idlharness/full resource model).
+- WPT runner supports tiny in-repo subset files, basic `.html` harness execution, `META: script=` includes, and manifest variant/variants options, but not full upstream testharness HTML loading (idlharness/full resource model).
 - Expected-failure map is intentionally strict: each entry must include non-empty `reason` and `owner`, and duplicate file/subtest keys are rejected.
 - Custom Elements and Shadow DOM advanced lifecycle semantics are not implemented yet.
 - Benchmark caveats: `global_register_ms` and cross-runtime React smoke are not available for happy-dom/jsdom in the current harness.
@@ -48,7 +48,7 @@
 - `bun run verify:react`: pass (React smoke)
 - `bun run verify:wpt:tiny`: pass (11/11 subtests pass, 0 expected fail)
 - `bun run verify:fast`: pass
-- `bun test`: pass (29 tests across 14 files, 91 assertions)
+- `bun test`: pass (30 tests across 14 files, 92 assertions)
 - tiny WPT files include TypeScript (`.any.ts`) plus `.html` harness coverage with `META: script=` includes and variants, covering `compareDocumentPosition`, location, dataset, and storage/cookie basics.
 - `bun run benchmark:dom`: pass and writes `docs/benchmarks/latest.json` with zig-dom vs happy-dom vs jsdom metrics.
 

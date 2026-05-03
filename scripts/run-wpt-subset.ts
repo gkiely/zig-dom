@@ -5,6 +5,7 @@ import { Window } from "../js/wrappers/Window";
 
 type ManifestEntry = {
   file: string;
+  variant?: string;
   variants?: string[];
 };
 
@@ -89,6 +90,25 @@ function testUrl(file: string, variant?: string): string {
   const normalizedFile = file.replaceAll("\\", "/");
   const base = `http://localhost/${normalizedFile}`;
   return variant ? `${base}${normalizeVariant(variant)}` : base;
+}
+
+function expandEntryVariants(entry: ManifestEntry): Array<string | undefined> {
+  const single = entry.variant?.trim();
+  const many = entry.variants?.map((variant) => variant.trim()).filter((variant) => variant.length > 0) ?? [];
+
+  if (single && many.length > 0) {
+    throw new Error(`Manifest entry for ${entry.file} cannot define both variant and variants.`);
+  }
+
+  if (single) {
+    return [single];
+  }
+
+  if (many.length > 0) {
+    return many;
+  }
+
+  return [undefined];
 }
 
 function resolveScriptPath(entryFile: string, scriptRef: string): string {
@@ -375,13 +395,8 @@ for (const entry of expected.expectedFailures) {
 
 const allResults: SubtestResult[] = [];
 for (const entry of manifest.tests) {
-  if (entry.variants && entry.variants.length > 0) {
-    for (const variant of entry.variants) {
-      const fileResults = await runEntry(entry.file, variant);
-      allResults.push(...fileResults);
-    }
-  } else {
-    const fileResults = await runEntry(entry.file);
+  for (const variant of expandEntryVariants(entry)) {
+    const fileResults = await runEntry(entry.file, variant);
     allResults.push(...fileResults);
   }
 }

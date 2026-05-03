@@ -29,3 +29,17 @@ test("tiny wpt subset runner fails when expected failure metadata is incomplete"
   expect(result.exitCode).not.toBe(0);
   expect(stderr).toContain("Both reason and owner are required");
 });
+
+test("tiny wpt subset runner accepts single variant entries", () => {
+  const result = Bun.spawnSync([
+    "bun",
+    "run",
+    "scripts/run-wpt-subset.ts",
+    "--manifest",
+    "tests/fixtures/wpt-runner/manifest-single-variant.json",
+    "--expected",
+    "tests/fixtures/wpt-runner/expected-empty.json"
+  ]);
+
+  expect(result.exitCode).toBe(0);
+});
