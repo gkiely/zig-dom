@@ -37,6 +37,18 @@ test("input and submit behavior (cold)", () => {
   expect(getByText("submitted:Ada")).toBeDefined();
 });
 
+test("input and submit behavior (warm)", () => {
+  const { getByLabelText, getByText } = render(<FormHarness />);
+  const input = getByLabelText("name") as HTMLInputElement;
+
+  fireEvent.input(input, { target: { value: "Ada" } });
+  fireEvent.change(input, { target: { value: "Ada" } });
+  fireEvent.click(getByText("Submit"));
+
+  expect((input as unknown as { value: string }).value).toBe("Ada");
+  expect(getByText("submitted:Ada")).toBeDefined();
+});
+
 function AdvancedFormHarness(): JSX.Element {
   return (
     <form>
@@ -75,26 +87,4 @@ test("form controls support default values and reset", () => {
   expect(textarea.value).toBe("Initial note");
   expect(select.value).toBe("b");
 });
-test("input and submit behavior (cold)", () => {
-  const { getByLabelText, getByText } = render(<FormHarness />);
-  const input = getByLabelText("name") as HTMLInputElement;
 
-  fireEvent.input(input, { target: { value: "Ada" } });
-  fireEvent.change(input, { target: { value: "Ada" } });
-  fireEvent.click(getByText("Submit"));
-
-  expect((input as unknown as { value: string }).value).toBe("Ada");
-  expect(getByText("submitted:Ada")).toBeDefined();
-});
-
-test("input and submit behavior (warm)", () => {
-  const { getByLabelText, getByText } = render(<FormHarness />);
-  const input = getByLabelText("name") as HTMLInputElement;
-
-  fireEvent.input(input, { target: { value: "Ada" } });
-  fireEvent.change(input, { target: { value: "Ada" } });
-  fireEvent.click(getByText("Submit"));
-
-  expect((input as unknown as { value: string }).value).toBe("Ada");
-  expect(getByText("submitted:Ada")).toBeDefined();
-});
