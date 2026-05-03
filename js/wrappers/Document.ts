@@ -20,6 +20,10 @@ function asciiLowercase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
+function splitAsciiWhitespace(value: string): string[] {
+  return value.match(/[^\t\n\f\r ]+/g) ?? [];
+}
+
 function isValidXmlName(value: string): boolean {
   return value.length > 0;
 }
@@ -502,13 +506,13 @@ export class Document extends Node {
 
   getElementsByClassName(classNames: string): HTMLCollection {
     this._window.assertOpen();
-    const tokens = classNames.trim().split(/\s+/).filter((token) => token.length > 0);
+    const tokens = splitAsciiWhitespace(String(classNames));
     if (tokens.length === 0) {
       return new HTMLCollection(() => []);
     }
 
     return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
-      const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter((token) => token.length > 0);
+      const classes = splitAsciiWhitespace(element.getAttribute("class") ?? "");
       return tokens.every((token) => classes.includes(token));
     }));
   }

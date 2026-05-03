@@ -1,5 +1,6 @@
 import { native } from "../ffi.ts";
 import type { Document } from "./Document.ts";
+import { ZigDOMException } from "./DOMException.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
@@ -25,6 +26,10 @@ function propertyToDataAttribute(name: string): string {
 
 function asciiLowercase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
+function splitAsciiWhitespace(value: string): string[] {
+  return value.match(/[^\t\n\f\r ]+/g) ?? [];
 }
 
 class DOMTokenList {
@@ -221,6 +226,28 @@ export class Element extends Node {
       return null;
     }
     return children.item(children.length - 1);
+  }
+
+  get previousElementSibling(): Element | null {
+    let sibling = this.previousSibling;
+    while (sibling) {
+      if (sibling.nodeType === Node.ELEMENT_NODE) {
+        return sibling as Element;
+      }
+      sibling = sibling.previousSibling;
+    }
+    return null;
+  }
+
+  get nextElementSibling(): Element | null {
+    let sibling = this.nextSibling;
+    while (sibling) {
+      if (sibling.nodeType === Node.ELEMENT_NODE) {
+        return sibling as Element;
+      }
+      sibling = sibling.nextSibling;
+    }
+    return null;
   }
 
   get attributes(): Array<{ name: string; value: string }> {
@@ -638,6 +665,72 @@ export class Element extends Node {
     return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
   }
 
+  insertAdjacentElement(position: string, element: Element): Element | null {
+    if (!(element instanceof Node) || element.nodeType !== Node.ELEMENT_NODE) {
+      throw new TypeError("The provided value is not an Element.");
+    }
+
+    const normalized = String(position).toLowerCase();
+    switch (normalized) {
+      case "beforebegin": {
+        const parent = this.parentNode;
+        if (!parent) {
+          return null;
+        }
+        parent.insertBefore(element, this);
+        return element;
+      }
+      case "afterbegin":
+        this.insertBefore(element, this.firstChild);
+        return element;
+      case "beforeend":
+        this.appendChild(element);
+        return element;
+      case "afterend": {
+        const parent = this.parentNode;
+        if (!parent) {
+          return null;
+        }
+        parent.insertBefore(element, this.nextSibling);
+        return element;
+      }
+      default:
+        throw new ZigDOMException("The position is not one of the supported values.", "SyntaxError", 12);
+    }
+  }
+
+  insertAdjacentText(position: string, data: string): null {
+    const document = this.ownerDocument ?? this._window.document;
+    const text = document.createTextNode(String(data));
+    const normalized = String(position).toLowerCase();
+    switch (normalized) {
+      case "beforebegin": {
+        const parent = this.parentNode;
+        if (!parent) {
+          return null;
+        }
+        parent.insertBefore(text, this);
+        return null;
+      }
+      case "afterbegin":
+        this.insertBefore(text, this.firstChild);
+        return null;
+      case "beforeend":
+        this.appendChild(text);
+        return null;
+      case "afterend": {
+        const parent = this.parentNode;
+        if (!parent) {
+          return null;
+        }
+        parent.insertBefore(text, this.nextSibling);
+        return null;
+      }
+      default:
+        throw new ZigDOMException("The position is not one of the supported values.", "SyntaxError", 12);
+    }
+  }
+
   getElementsByTagName(tagName: string): HTMLCollection {
     const expectedHtmlName = asciiLowercase(tagName);
     return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
@@ -663,13 +756,13 @@ export class Element extends Node {
   }
 
   getElementsByClassName(classNames: string): HTMLCollection {
-    const tokens = classNames.trim().split(/\s+/).filter((token) => token.length > 0);
+    const tokens = splitAsciiWhitespace(String(classNames));
     if (tokens.length === 0) {
       return new HTMLCollection(() => []);
     }
 
     return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
-      const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter((token) => token.length > 0);
+      const classes = splitAsciiWhitespace(element.getAttribute("class") ?? "");
       return tokens.every((token) => classes.includes(token));
     }));
   }

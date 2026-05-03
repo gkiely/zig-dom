@@ -733,6 +733,8 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       invalidcharactererr: 5,
       notfounderror: 8,
       notfounderr: 8,
+      syntaxerror: 12,
+      syntaxerr: 12,
       invalidstateerror: 11,
       invalidstateerr: 11,
       invalidnodetypeerror: 24,
