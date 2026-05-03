@@ -1,7 +1,7 @@
 import { native } from "../ffi.ts";
 import { Comment } from "./Comment.ts";
-import { ZigDOMException } from "./DOMException.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
+import { ZigDOMException } from "./DOMException.ts";
 import { Element } from "./Element.ts";
 import { Node } from "./Node.ts";
 import { Range, Selection } from "./Range.ts";
