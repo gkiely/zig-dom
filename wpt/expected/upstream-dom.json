@@ -557,6 +557,414 @@
       "subtest": "__all__",
       "reason": "Range mutation and boundary semantics are incomplete",
       "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/abort/abort-signal-timeout.html",
+      "subtest": "__all__",
+      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/abort/reason-constructor.html",
+      "subtest": "__all__",
+      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/attributes-are-nodes.html",
+      "subtest": "__all__",
+      "reason": "Attr wrapper does not yet fully model Node subclass behavior",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-as-prototype.html",
+      "subtest": "__all__",
+      "reason": "Legacy HTMLCollection/NamedNodeMap exotic property semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-delete.html",
+      "subtest": "__all__",
+      "reason": "Legacy HTMLCollection/NamedNodeMap exotic property semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-own-props.html",
+      "subtest": "__all__",
+      "reason": "Legacy HTMLCollection/NamedNodeMap exotic property semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-supported-property-indices.html",
+      "subtest": "__all__",
+      "reason": "Legacy HTMLCollection/NamedNodeMap exotic property semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-supported-property-names.html",
+      "subtest": "__all__",
+      "reason": "Legacy HTMLCollection/NamedNodeMap exotic property semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/namednodemap-supported-property-names.html",
+      "subtest": "__all__",
+      "reason": "Legacy HTMLCollection/NamedNodeMap exotic property semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Body-FrameSet-Event-Handlers.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/CustomEvent.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-disabled-dynamic.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-bubbles-false.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-bubbles-true.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-click.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-detached-input-and-change.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-handlers-changed.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-multiple-cancelBubble.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-multiple-stopPropagation.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-omitted-capture.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-order.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-reenter.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-single-activation-behavior.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-target-moved.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-target-removed.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-throwing-multiple-globals.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-throwing.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-global-is-still-set-when-reporting-exception-onerror.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-global.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-handler-attribute-replace-preserves-passive.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-initEvent.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-subclasses-constructors.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-timestamp-cross-realm-getter.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-timestamp-high-resolution.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-timestamp-high-resolution.https.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-timestamp-safe-resolution.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-type-empty.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-handleEvent-cross-realm.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-handleEvent.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-incumbent-global-1.sub.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-incumbent-global-2.sub.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-invoke-legacy.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListenerOptions-capture.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventTarget-dispatchEvent.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/mouse-event-retarget.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/non-cancelable-when-passive/synthetic-events-cancelable.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/passive-by-default.html",
+      "subtest": "__all__",
+      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-replaceData.html",
+      "subtest": "__all__",
+      "reason": "CharacterData edge-case semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-substringData.html",
+      "subtest": "__all__",
+      "reason": "CharacterData edge-case semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-surrogates.html",
+      "subtest": "__all__",
+      "reason": "CharacterData edge-case semantics remain incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ChildNode-after.html",
+      "subtest": "__all__",
+      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ChildNode-before.html",
+      "subtest": "__all__",
+      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ChildNode-replaceWith.html",
+      "subtest": "__all__",
+      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-adoptNode.html",
+      "subtest": "__all__",
+      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-characterSet-normalization-1.html",
+      "subtest": "__all__",
+      "reason": "Encoding label normalization for Document metadata is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-characterSet-normalization-2.html",
+      "subtest": "__all__",
+      "reason": "Encoding label normalization for Document metadata is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-constructor.html",
+      "subtest": "__all__",
+      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_bmp.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_css.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_datauri_02.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_gif.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_javascripturi.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_jpg.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_mimeheader_01.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_png.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_txt.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_xml.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/createDocument.html",
+      "subtest": "__all__",
+      "reason": "Document contentType for non-HTML payloads is not implemented",
+      "owner": "compat"
     }
   ]
 }

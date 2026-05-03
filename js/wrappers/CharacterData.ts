@@ -20,6 +20,9 @@ export class CharacterData extends Node {
   }
 
   substringData(offset: number, count: number): string {
+    if (arguments.length < 2) {
+      throw new TypeError("Failed to execute 'substringData': 2 arguments required.");
+    }
     const start = normalizeOffset(offset, this.length);
     const size = normalizeCount(count);
     return this.data.slice(start, start + size);
@@ -30,6 +33,9 @@ export class CharacterData extends Node {
   }
 
   insertData(offset: number, data: string): void {
+    if (arguments.length < 2) {
+      throw new TypeError("Failed to execute 'insertData': 2 arguments required.");
+    }
     const start = normalizeOffset(offset, this.length);
     const source = this.data;
     const text = String(data);
@@ -37,6 +43,9 @@ export class CharacterData extends Node {
   }
 
   deleteData(offset: number, count: number): void {
+    if (arguments.length < 2) {
+      throw new TypeError("Failed to execute 'deleteData': 2 arguments required.");
+    }
     const start = normalizeOffset(offset, this.length);
     const size = normalizeCount(count);
     const source = this.data;
@@ -44,6 +53,9 @@ export class CharacterData extends Node {
   }
 
   replaceData(offset: number, count: number, data: string): void {
+    if (arguments.length < 3) {
+      throw new TypeError("Failed to execute 'replaceData': 3 arguments required.");
+    }
     const start = normalizeOffset(offset, this.length);
     const size = normalizeCount(count);
     const source = this.data;
@@ -53,17 +65,17 @@ export class CharacterData extends Node {
 }
 
 function normalizeOffset(offset: number, max: number): number {
-  const value = Number(offset);
-  if (!Number.isFinite(value) || value < 0 || value > max) {
+  const value = toUnsignedLong(offset);
+  if (value > max) {
     throw new ZigDOMException("The index is not in the allowed range.", "IndexSizeError", 1);
   }
-  return Math.floor(value);
+  return value;
 }
 
 function normalizeCount(count: number): number {
-  const value = Number(count);
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  return Math.max(0, Math.floor(value));
+  return toUnsignedLong(count);
+}
+
+function toUnsignedLong(value: unknown): number {
+  return Number(value) >>> 0;
 }
