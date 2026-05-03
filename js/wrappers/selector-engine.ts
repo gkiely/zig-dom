@@ -36,20 +36,7 @@ type ComplexSelector = {
 const IDENT_RE = /[a-zA-Z0-9_\-]/;
 
 export function canUseNativeSelector(selector: string): boolean {
-  const trimmed = selector.trim();
-  if (!trimmed) {
-    return true;
-  }
-
-  if (/[,:+~>]/.test(trimmed)) {
-    return false;
-  }
-
-  const attributeOperator = /\[[^\]]*[~|\^$*]=/;
-  if (attributeOperator.test(trimmed)) {
-    return false;
-  }
-
+  void selector;
   return true;
 }
 

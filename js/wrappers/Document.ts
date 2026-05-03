@@ -221,6 +221,7 @@ export class Document extends Node {
         XMLDocument: new () => Document;
       }).XMLDocument;
       const nextDocument = new XMLDocumentCtor();
+      Object.setPrototypeOf(nextDocument, XMLDocumentCtor.prototype);
 
       if (doctype) {
         const source = doctype as unknown as { name?: string; publicId?: string; systemId?: string };
@@ -236,6 +237,9 @@ export class Document extends Node {
       if (qualifiedName) {
         const root = nextDocument.createElementNS(namespace, qualifiedName);
         nextDocument.appendChild(root);
+        if (namespace === "http://www.w3.org/1999/xhtml" && root.localName === "html") {
+          root.textContent = "";
+        }
       }
 
       return nextDocument;
@@ -253,6 +257,7 @@ export class Document extends Node {
           Document: new () => Document;
         }).Document;
         const nextDocument = new DocumentCtor();
+        Object.setPrototypeOf(nextDocument, DocumentCtor.prototype);
         const doctype = createSyntheticDocumentType(nextDocument, "html", "", "");
         nextDocument.#doctypeCache = doctype;
         nextDocument.appendChild(doctype);
@@ -452,8 +457,11 @@ export class Document extends Node {
   cloneNode(deep = false): Document {
     this._window.assertOpen();
 
-    const DocumentCtor = (this as unknown as { constructor: new () => Document }).constructor;
-    const nextDocument = new DocumentCtor();
+    const nextDocument = createDocumentForClone(this);
+    const sourceCtor = (this as unknown as { constructor?: { prototype?: object } }).constructor;
+    if (sourceCtor?.prototype) {
+      Object.setPrototypeOf(nextDocument, sourceCtor.prototype);
+    }
 
     if (!deep) {
       return nextDocument;
@@ -475,6 +483,31 @@ export class Document extends Node {
     this.#doctypeCache = null;
     this._window.setActiveElement(null);
   }
+}
+
+function createDocumentForClone(source: Document): Document {
+  const sourceCtor = (source as unknown as { constructor?: new () => Document }).constructor;
+  const fallbackCtor = (source._window as unknown as { Document: new () => Document }).Document;
+
+  const constructors: Array<new () => Document> = [];
+  if (sourceCtor) {
+    constructors.push(sourceCtor);
+  }
+  constructors.push(fallbackCtor);
+
+  for (const ctor of constructors) {
+    try {
+      const candidate = new ctor();
+      const candidateLike = candidate as unknown as { _window?: unknown; appendChild?: unknown };
+      if (candidateLike._window && typeof candidateLike.appendChild === "function") {
+        return candidate;
+      }
+    } catch {
+      // Try the next constructor option.
+    }
+  }
+
+  return new fallbackCtor();
 }
 
 function cloneNodeIntoDocument(document: Document, source: Node, deep: boolean): Node {

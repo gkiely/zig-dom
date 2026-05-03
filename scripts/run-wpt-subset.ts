@@ -329,6 +329,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     done: () => void;
     step: (fn: () => void) => void;
     step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
+    step_func_done: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
     step_timeout: (fn: () => void, delay: number) => ReturnType<typeof setTimeout>;
     unreached_func: (message?: string) => () => never;
   }) => void) => {
@@ -356,6 +357,12 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => {
         return (...args: TArgs) => {
           testObj.step(() => fn(...args));
+        };
+      },
+      step_func_done: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => {
+        return (...args: TArgs) => {
+          testObj.step(() => fn(...args));
+          testObj.done();
         };
       },
       step_timeout: (fn: () => void, delay: number) => {
@@ -404,6 +411,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       done: () => void;
       step: (fn: () => void) => void;
       step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
+      step_func_done: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
       step_timeout: (fn: () => void, delay: number) => ReturnType<typeof setTimeout>;
       unreached_func: (message?: string) => () => never;
     }) => void),

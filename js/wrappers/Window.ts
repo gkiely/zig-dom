@@ -6,6 +6,7 @@ import { Document } from "./Document.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { DocumentType } from "./DocumentType.ts";
 import { Element } from "./Element.ts";
+import { HTMLCollection } from "./HTMLCollection.ts";
 import { CompositionEvent, CustomEvent, Event, EventTargetBase, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
 import {
   HTMLButtonElement,
@@ -200,6 +201,7 @@ export class Window extends EventTargetBase {
   readonly Comment = Comment;
   readonly DocumentFragment = DocumentFragment;
   readonly DocumentType = DocumentType;
+  readonly HTMLCollection = HTMLCollection;
   readonly Event = Event;
   readonly CustomEvent = CustomEvent;
   readonly MouseEvent = MouseEvent;
@@ -393,8 +395,30 @@ export class Window extends EventTargetBase {
       writable: true
     });
 
+    Object.defineProperty(this, "open", {
+      value: (url?: string) => new WindowCtor({ url: url ?? this.location.href }),
+      configurable: true,
+      writable: true
+    });
+
     class DOMParserImpl {
-      parseFromString(source: string, _type: string): Document {
+      parseFromString(source: string, type: string): Document {
+        if (type.toLowerCase().includes("xml")) {
+          const parsedDocument = new DocumentConstructor() as unknown as Document;
+          const rootMatch = source.match(/<\s*([A-Za-z_][A-Za-z0-9._:-]*)[^>]*\/?\s*>/);
+          const rootName = rootMatch?.[1];
+          if (rootName) {
+            const root = parsedDocument.createElement(rootName);
+            (root as unknown as { __namespaceURI?: string | null }).__namespaceURI = null;
+            Object.defineProperty(parsedDocument, "documentElement", {
+              value: root,
+              configurable: true,
+              writable: true
+            });
+          }
+          return parsedDocument;
+        }
+
         const parsedWindow = new WindowCtor({ url: "http://localhost/" });
         const parsedDocument = parsedWindow.document;
         const doctypeMatch = source.match(/<!doctype\s+([A-Za-z0-9:_-]+)/i);

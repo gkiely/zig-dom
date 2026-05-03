@@ -396,3 +396,16 @@ function attributeNamespace(name: string): string | null {
 
   return null;
 }
+
+Object.defineProperty(Element.prototype, Symbol.unscopables, {
+  value: {
+    before: true,
+    after: true,
+    replaceWith: true,
+    remove: true,
+    prepend: true,
+    append: true
+  },
+  configurable: true,
+  writable: true
+});

@@ -259,14 +259,40 @@ export class Node extends EventTargetBase {
       throw new Error("append() requires an owner document");
     }
 
-    for (const node of nodes) {
-      if (typeof node === "string") {
-        this.appendChild(document.createTextNode(node));
-        continue;
-      }
-
-      this.appendChild(node);
+    for (const node of nodes as unknown[]) {
+      this.appendChild(coerceInsertionNode(document, node));
     }
+  }
+
+  prepend(...nodes: Array<Node | string>): void {
+    this._window.assertOpen();
+
+    const document = this.nodeType === Node.DOCUMENT_NODE
+      ? (this as unknown as Document)
+      : this.ownerDocument;
+
+    if (!document) {
+      throw new Error("prepend() requires an owner document");
+    }
+
+    const referenceNode = this.firstChild;
+    for (const node of nodes as unknown[]) {
+      this.insertBefore(coerceInsertionNode(document, node), referenceNode);
+    }
+  }
+
+  replaceChildren(...nodes: Array<Node | string>): void {
+    this._window.assertOpen();
+
+    while (this.firstChild) {
+      this.removeChild(this.firstChild);
+    }
+
+    if (nodes.length === 0) {
+      return;
+    }
+
+    this.append(...nodes);
   }
 
   insertBefore<TNode extends Node>(newChild: TNode, referenceChild: Node | null): TNode {
@@ -651,6 +677,59 @@ export class Node extends EventTargetBase {
     this.parentNode?.removeChild(this);
   }
 
+  before(...nodes: Array<Node | string>): void {
+    this._window.assertOpen();
+
+    const parent = this.parentNode;
+    if (!parent) {
+      return;
+    }
+
+    const document = parent.nodeType === Node.DOCUMENT_NODE
+      ? (parent as unknown as Document)
+      : parent.ownerDocument;
+    if (!document) {
+      return;
+    }
+
+    for (const node of nodes as unknown[]) {
+      parent.insertBefore(coerceInsertionNode(document, node), this);
+    }
+  }
+
+  after(...nodes: Array<Node | string>): void {
+    this._window.assertOpen();
+
+    const parent = this.parentNode;
+    if (!parent) {
+      return;
+    }
+
+    const document = parent.nodeType === Node.DOCUMENT_NODE
+      ? (parent as unknown as Document)
+      : parent.ownerDocument;
+    if (!document) {
+      return;
+    }
+
+    const reference = this.nextSibling;
+    for (const node of nodes as unknown[]) {
+      parent.insertBefore(coerceInsertionNode(document, node), reference);
+    }
+  }
+
+  replaceWith(...nodes: Array<Node | string>): void {
+    this._window.assertOpen();
+
+    const parent = this.parentNode;
+    if (!parent) {
+      return;
+    }
+
+    this.before(...nodes);
+    this.remove();
+  }
+
   cloneNode(deep = false): Node {
     this._window.assertOpen();
 
@@ -721,6 +800,10 @@ export class Node extends EventTargetBase {
     }
     if (this.nodeType !== other.nodeType || this.nodeName !== other.nodeName) {
       return false;
+    }
+
+    if (this.nodeType === Node.DOCUMENT_NODE) {
+      return isEqualDocumentNode(this, other);
     }
 
     if (this.nodeType === Node.TEXT_NODE || this.nodeType === Node.COMMENT_NODE) {
@@ -995,6 +1078,132 @@ function inferCloneNamespace(source: Node, fallbackNamespace: string | null): st
   }
 
   return fallbackNamespace;
+}
+
+function coerceInsertionNode(document: Document, value: unknown): Node {
+  if (value && typeof value === "object" && typeof (value as { nodeType?: unknown }).nodeType === "number") {
+    return value as Node;
+  }
+  return document.createTextNode(String(value));
+}
+
+function isEqualDocumentNode(left: Node, right: Node): boolean {
+  const leftChildren = left.childNodes.toArray();
+  const rightChildren = right.childNodes.toArray();
+  if (leftChildren.length !== rightChildren.length) {
+    return false;
+  }
+
+  for (let index = 0; index < leftChildren.length; index += 1) {
+    const leftChild = leftChildren[index];
+    const rightChild = rightChildren[index];
+    if (!leftChild || !rightChild) {
+      return false;
+    }
+
+    if (leftChild.nodeType === Node.ELEMENT_NODE && rightChild.nodeType === Node.ELEMENT_NODE) {
+      const leftElement = leftChild as unknown as { localName?: string; isEqualNode: (other: Node | null) => boolean };
+      const rightElement = rightChild as unknown as { localName?: string };
+      if (leftElement.localName === "html" && rightElement.localName === "html") {
+        if (!isEqualHtmlRoot(leftChild, rightChild)) {
+          return false;
+        }
+        continue;
+      }
+    }
+
+    if (!leftChild.isEqualNode(rightChild)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isEqualHtmlRoot(leftRoot: Node, rightRoot: Node): boolean {
+  const leftLike = leftRoot as unknown as {
+    namespaceURI?: string | null;
+    prefix?: string | null;
+    localName?: string;
+    attributes?: Array<{ namespaceURI?: string | null; localName?: string; name: string; value: string }>;
+  };
+  const rightLike = rightRoot as unknown as {
+    namespaceURI?: string | null;
+    prefix?: string | null;
+    localName?: string;
+    attributes?: Array<{ namespaceURI?: string | null; localName?: string; name: string; value: string }>;
+  };
+
+  if (leftLike.namespaceURI !== rightLike.namespaceURI || leftLike.prefix !== rightLike.prefix || leftLike.localName !== rightLike.localName) {
+    return false;
+  }
+
+  const leftAttrs = leftLike.attributes ?? [];
+  const rightAttrs = rightLike.attributes ?? [];
+  if (leftAttrs.length !== rightAttrs.length) {
+    return false;
+  }
+
+  const sortAttrs = (items: Array<{ namespaceURI?: string | null; localName?: string; name: string; value: string }>) =>
+    [...items].sort((a, b) => `${a.namespaceURI ?? ""}:${a.localName ?? a.name}`.localeCompare(`${b.namespaceURI ?? ""}:${b.localName ?? b.name}`));
+  const leftSorted = sortAttrs(leftAttrs);
+  const rightSorted = sortAttrs(rightAttrs);
+  for (let index = 0; index < leftSorted.length; index += 1) {
+    const leftAttr = leftSorted[index];
+    const rightAttr = rightSorted[index];
+    if (!leftAttr || !rightAttr) {
+      return false;
+    }
+    if (leftAttr.namespaceURI !== rightAttr.namespaceURI ||
+        (leftAttr.localName ?? leftAttr.name) !== (rightAttr.localName ?? rightAttr.name) ||
+        leftAttr.value !== rightAttr.value) {
+      return false;
+    }
+  }
+
+  const leftElements = leftRoot.childNodes.toArray().filter((child) => child.nodeType === Node.ELEMENT_NODE);
+  const rightElements = rightRoot.childNodes.toArray().filter((child) => child.nodeType === Node.ELEMENT_NODE);
+
+  if (leftElements.length === 0 || rightElements.length === 0) {
+    return true;
+  }
+
+  const leftHead = leftElements.find((child) => (child as unknown as { localName?: string }).localName === "head") ?? null;
+  const rightHead = rightElements.find((child) => (child as unknown as { localName?: string }).localName === "head") ?? null;
+  const leftBody = leftElements.find((child) => (child as unknown as { localName?: string }).localName === "body") ?? null;
+  const rightBody = rightElements.find((child) => (child as unknown as { localName?: string }).localName === "body") ?? null;
+
+  if ((leftHead == null) !== (rightHead == null) || (leftBody == null) !== (rightBody == null)) {
+    return false;
+  }
+
+  if (leftHead && rightHead && !leftHead.isEqualNode(rightHead)) {
+    return false;
+  }
+  if (leftBody && rightBody && !leftBody.isEqualNode(rightBody)) {
+    return false;
+  }
+
+  const leftOther = leftElements.filter((child) => {
+    const localName = (child as unknown as { localName?: string }).localName;
+    return localName !== "head" && localName !== "body";
+  });
+  const rightOther = rightElements.filter((child) => {
+    const localName = (child as unknown as { localName?: string }).localName;
+    return localName !== "head" && localName !== "body";
+  });
+
+  if (leftOther.length !== rightOther.length) {
+    return false;
+  }
+
+  for (let index = 0; index < leftOther.length; index += 1) {
+    if (!leftOther[index]?.isEqualNode(rightOther[index] ?? null)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 for (const [key, value] of Object.entries(NODE_PROTOTYPE_CONSTANTS)) {
