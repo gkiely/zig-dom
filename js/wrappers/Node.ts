@@ -1,5 +1,6 @@
 import { native } from "../ffi.ts";
 import type { Document } from "./Document.ts";
+import { ZigDOMException } from "./DOMException.ts";
 import type { Element } from "./Element.ts";
 import { Event, EventTargetBase } from "./Event.ts";
 import { NodeList } from "./NodeList.ts";
@@ -316,6 +317,15 @@ export class Node extends EventTargetBase {
 
   removeChild<TNode extends Node>(child: TNode): TNode {
     this._window.assertOpen();
+
+    if (!(child instanceof Node)) {
+      throw new TypeError("Failed to execute 'removeChild' on 'Node': parameter 1 is not of type 'Node'.");
+    }
+
+    if (child.parentNode !== this) {
+      throw new ZigDOMException("The object can not be found here.", "NotFoundError", 8);
+    }
+
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.removeChild(this._handle, child._handle);
@@ -344,6 +354,36 @@ export class Node extends EventTargetBase {
 
   replaceChild<TNode extends Node>(newChild: Node, oldChild: TNode): TNode {
     this._window.assertOpen();
+
+    if (!(newChild instanceof Node) || !(oldChild instanceof Node)) {
+      throw new TypeError("Failed to execute 'replaceChild' on 'Node': parameters must be Nodes.");
+    }
+
+    if (oldChild.parentNode !== this) {
+      throw new ZigDOMException("The object can not be found here.", "NotFoundError", 8);
+    }
+
+    if (
+      this.nodeType === Node.TEXT_NODE ||
+      this.nodeType === Node.COMMENT_NODE ||
+      this.nodeType === Node.PROCESSING_INSTRUCTION_NODE ||
+      this.nodeType === Node.DOCUMENT_TYPE_NODE
+    ) {
+      throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+    }
+
+    let ancestor: Node | null = this;
+    while (ancestor) {
+      if (ancestor === newChild) {
+        throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+      }
+      ancestor = ancestor.parentNode;
+    }
+
+    if (this.nodeType === Node.DOCUMENT_NODE && (newChild.nodeType === Node.DOCUMENT_NODE || newChild.nodeType === Node.TEXT_NODE)) {
+      throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+    }
+
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.replaceChild(this._handle, newChild._handle, oldChild._handle);
@@ -528,6 +568,21 @@ export class Node extends EventTargetBase {
         if (!clone) {
           throw new Error("cloneNode() failed to produce an element clone");
         }
+
+        const sourceElement = this as unknown as {
+          namespaceURI?: string | null;
+          prefix?: string | null;
+          localName?: string;
+        };
+        const cloneElement = clone as unknown as {
+          __namespaceURI?: string | null;
+          __prefix?: string | null;
+          __localName?: string;
+        };
+        cloneElement.__namespaceURI = sourceElement.namespaceURI ?? null;
+        cloneElement.__prefix = sourceElement.prefix ?? null;
+        cloneElement.__localName = sourceElement.localName ?? this.nodeName.toLowerCase();
+
         if (!deep) {
           while (clone.firstChild) {
             clone.removeChild(clone.firstChild);

@@ -270,13 +270,22 @@ export class Window extends EventTargetBase {
     });
 
     const htmlElementAliases = [
+      "HTMLAudioElement",
       "HTMLAnchorElement",
       "HTMLAreaElement",
+      "HTMLBaseElement",
       "HTMLBodyElement",
       "HTMLBRElement",
+      "HTMLCanvasElement",
+      "HTMLDataElement",
+      "HTMLDataListElement",
+      "HTMLDialogElement",
       "HTMLDivElement",
       "HTMLDListElement",
+      "HTMLDirectoryElement",
+      "HTMLEmbedElement",
       "HTMLFieldSetElement",
+      "HTMLFontElement",
       "HTMLFrameElement",
       "HTMLFrameSetElement",
       "HTMLHeadElement",
@@ -290,6 +299,8 @@ export class Window extends EventTargetBase {
       "HTMLMenuElement",
       "HTMLMetaElement",
       "HTMLMeterElement",
+      "HTMLModElement",
+      "HTMLMapElement",
       "HTMLOListElement",
       "HTMLObjectElement",
       "HTMLOptGroupElement",
@@ -315,6 +326,8 @@ export class Window extends EventTargetBase {
       "HTMLTimeElement",
       "HTMLTitleElement",
       "HTMLTrackElement",
+      "HTMLUnknownElement",
+      "HTMLVideoElement",
       "HTMLUListElement"
     ];
 
@@ -327,6 +340,32 @@ export class Window extends EventTargetBase {
           writable: true
         });
       }
+    }
+
+    if (!("HTMLUnknownElement" in selfRecord)) {
+      Object.defineProperty(this, "HTMLUnknownElement", {
+        value: HTMLElement,
+        configurable: true,
+        writable: true
+      });
+    }
+
+    if (!("Attr" in selfRecord)) {
+      class AttrImpl {}
+      Object.defineProperty(this, "Attr", {
+        value: AttrImpl,
+        configurable: true,
+        writable: true
+      });
+    }
+
+    if (!("DocumentType" in selfRecord)) {
+      class DocumentTypeImpl {}
+      Object.defineProperty(this, "DocumentType", {
+        value: DocumentTypeImpl,
+        configurable: true,
+        writable: true
+      });
     }
 
     const WindowCtor = this.constructor as {

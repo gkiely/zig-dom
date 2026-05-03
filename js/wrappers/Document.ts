@@ -27,8 +27,12 @@ type SyntheticNodeLike = {
   cloneNode(deep?: boolean): unknown;
 };
 
-function createSyntheticAttr(name: string, namespaceURI: string | null): Attr {
-  const attr = {
+function createSyntheticAttr(document: Document, name: string, namespaceURI: string | null): Attr {
+  const AttrCtor = ((document._window as unknown as {
+    Attr?: new () => Record<string, unknown>;
+  }).Attr) ?? class {};
+
+  const attr = Object.assign(new AttrCtor(), {
     nodeType: Node.ATTRIBUTE_NODE,
     nodeName: name,
     name,
@@ -66,11 +70,11 @@ function createSyntheticAttr(name: string, namespaceURI: string | null): Attr {
       return candidate.name === this.name && candidate.value === this.value && candidate.namespaceURI === this.namespaceURI;
     },
     cloneNode() {
-      const clone = createSyntheticAttr(this.name, this.namespaceURI) as unknown as { value: string };
+      const clone = createSyntheticAttr(document, this.name, this.namespaceURI) as unknown as { value: string };
       clone.value = this.value;
       return clone;
     }
-  };
+  });
 
   return attr as unknown as Attr;
 }
@@ -82,12 +86,16 @@ function createSyntheticDocumentType(
   systemId = "",
   parentNode: Document | null = null
 ): DocumentType {
+  const DocumentTypeCtor = ((document._window as unknown as {
+    DocumentType?: new () => Record<string, unknown>;
+  }).DocumentType) ?? class {};
+
   const doctype: SyntheticNodeLike & {
     name: string;
     publicId: string;
     systemId: string;
     ownerDocument: Document;
-  } = {
+  } = Object.assign(new DocumentTypeCtor(), {
     nodeType: Node.DOCUMENT_TYPE_NODE,
     nodeName: name,
     name,
@@ -120,7 +128,7 @@ function createSyntheticDocumentType(
     cloneNode() {
       return createSyntheticDocumentType(document, doctype.name, doctype.publicId, doctype.systemId, null);
     }
-  };
+  });
 
   return doctype as unknown as DocumentType;
 }
@@ -367,11 +375,11 @@ export class Document extends Node {
   }
 
   createAttribute(name: string): Attr {
-    return createSyntheticAttr(name, null);
+    return createSyntheticAttr(this, name, null);
   }
 
   createAttributeNS(namespace: string | null, qualifiedName: string): Attr {
-    return createSyntheticAttr(qualifiedName, namespace);
+    return createSyntheticAttr(this, qualifiedName, namespace);
   }
 
   createTextNode(data: string): Text {
