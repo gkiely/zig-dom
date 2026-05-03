@@ -2,9 +2,11 @@ import { Comment } from "./wrappers/Comment.ts";
 import { Document } from "./wrappers/Document.ts";
 import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
 import { Element } from "./wrappers/Element.ts";
-import { CustomEvent, Event, MouseEvent } from "./wrappers/Event.ts";
+import { CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./wrappers/Event.ts";
 import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.ts";
+import { MutationObserver } from "./wrappers/MutationObserver.ts";
 import { Node } from "./wrappers/Node.ts";
+import { Range, Selection } from "./wrappers/Range.ts";
 import { Text } from "./wrappers/Text.ts";
 import { Window, type WindowOptions } from "./wrappers/Window.ts";
 
@@ -36,9 +38,18 @@ export class GlobalRegistrator {
       Event,
       CustomEvent,
       MouseEvent,
+      InputEvent,
+      KeyboardEvent,
+      MutationObserver,
+      Range,
+      Selection,
       Document,
       navigator: { userAgent: "zig-dom" },
-      happyDOM: window.happyDOM
+      happyDOM: window.happyDOM,
+      getSelection: () => window.getSelection(),
+      localStorage: window.localStorage,
+      sessionStorage: window.sessionStorage,
+      customElements: window.customElements
     };
 
     for (const [key, value] of Object.entries(assignments)) {

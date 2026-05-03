@@ -1,14 +1,18 @@
 import { PropertySymbol } from "./compatibility/happy-dom-symbols.ts";
+import { CustomElementRegistry } from "./wrappers/CustomElementRegistry.ts";
 import { GlobalRegistrator } from "./global-registrator.ts";
 import { Comment } from "./wrappers/Comment.ts";
 import { Document } from "./wrappers/Document.ts";
 import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
 import { Element } from "./wrappers/Element.ts";
-import { CustomEvent, Event, MouseEvent } from "./wrappers/Event.ts";
+import { CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./wrappers/Event.ts";
 import { HTMLCollection } from "./wrappers/HTMLCollection.ts";
 import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.ts";
+import { MutationObserver } from "./wrappers/MutationObserver.ts";
 import { Node } from "./wrappers/Node.ts";
 import { NodeList } from "./wrappers/NodeList.ts";
+import { Range, Selection } from "./wrappers/Range.ts";
+import { Storage } from "./wrappers/Storage.ts";
 import { Text } from "./wrappers/Text.ts";
 import { Window, type WindowOptions } from "./wrappers/Window.ts";
 
@@ -93,6 +97,7 @@ export {
   Browser,
   BrowserContext,
   Comment,
+  CustomElementRegistry,
   CustomEvent,
   Document,
   DocumentFragment,
@@ -105,11 +110,17 @@ export {
   HTMLFormElement,
   HTMLIFrameElement,
   HTMLInputElement,
+  InputEvent,
+  KeyboardEvent,
   MouseEvent,
+  MutationObserver,
   Node,
   NodeList,
   Page,
   PropertySymbol,
+  Range,
+  Selection,
+  Storage,
   Text,
   Window
 };

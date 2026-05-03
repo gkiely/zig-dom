@@ -3,6 +3,7 @@ import { Comment } from "./Comment.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
 import { Node } from "./Node.ts";
+import { Range, Selection } from "./Range.ts";
 import { Text } from "./Text.ts";
 import type { Window } from "./Window.ts";
 
@@ -40,9 +41,34 @@ export class Document extends Node {
     return this._window.location.href;
   }
 
+  get cookie(): string {
+    return this._window.getCookieString();
+  }
+
+  set cookie(value: string) {
+    this._window.setCookie(value);
+  }
+
+  get activeElement(): Element {
+    return this._window.getActiveElement() ?? this.body;
+  }
+
+  getSelection(): Selection {
+    return this._window.getSelection();
+  }
+
+  createRange(): Range {
+    return new Range();
+  }
+
   createElement(tagName: string): Element {
     const handle = native.createElement(this._handle, tagName);
-    return this._window.getNode(handle) as Element;
+    const element = this._window.getNode(handle) as Element;
+    const customConstructor = this._window.customElements.get(tagName.toLowerCase());
+    if (customConstructor && Object.getPrototypeOf(element) !== customConstructor.prototype) {
+      Object.setPrototypeOf(element, customConstructor.prototype);
+    }
+    return element;
   }
 
   createElementNS(_namespace: string | null, qualifiedName: string): Element {
@@ -82,5 +108,6 @@ export class Document extends Node {
 
   reset(): void {
     native.documentReset(this._handle);
+    this._window.setActiveElement(null);
   }
 }

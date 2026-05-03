@@ -88,6 +88,38 @@ export class MouseEvent extends Event {
   }
 }
 
+export class InputEvent extends Event {
+  readonly data: string | null;
+  readonly inputType: string;
+
+  constructor(type: string, init?: InputEventInit) {
+    super(type, init);
+    this.data = init?.data ?? null;
+    this.inputType = init?.inputType ?? "";
+  }
+}
+
+export class KeyboardEvent extends Event {
+  readonly key: string;
+  readonly code: string;
+  readonly ctrlKey: boolean;
+  readonly shiftKey: boolean;
+  readonly altKey: boolean;
+  readonly metaKey: boolean;
+  readonly repeat: boolean;
+
+  constructor(type: string, init?: KeyboardEventInit) {
+    super(type, init);
+    this.key = init?.key ?? "";
+    this.code = init?.code ?? "";
+    this.ctrlKey = Boolean(init?.ctrlKey);
+    this.shiftKey = Boolean(init?.shiftKey);
+    this.altKey = Boolean(init?.altKey);
+    this.metaKey = Boolean(init?.metaKey);
+    this.repeat = Boolean(init?.repeat);
+  }
+}
+
 export class EventTargetBase {
   #listeners = new Map<string, ListenerEntry[]>();
 

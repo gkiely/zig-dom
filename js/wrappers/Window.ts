@@ -1,12 +1,16 @@
 import { native } from "../ffi.ts";
 import { NativeHandleRegistry } from "../memory.ts";
 import { Comment } from "./Comment.ts";
+import { CustomElementRegistry } from "./CustomElementRegistry.ts";
 import { Document } from "./Document.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
-import { CustomEvent, Event, MouseEvent } from "./Event.ts";
+import { CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
 import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./HTMLElement.ts";
+import { MutationObserver } from "./MutationObserver.ts";
 import { Node } from "./Node.ts";
+import { Range, Selection } from "./Range.ts";
+import { Storage } from "./Storage.ts";
 import { Text } from "./Text.ts";
 
 export interface WindowOptions {
@@ -15,11 +19,135 @@ export interface WindowOptions {
   height?: number;
 }
 
+export interface WindowLocation {
+  href: string;
+  protocol: string;
+  host: string;
+  hostname: string;
+  port: string;
+  pathname: string;
+  search: string;
+  hash: string;
+  readonly origin: string;
+  assign(next: string): void;
+  replace(next: string): void;
+  toString(): string;
+}
+
+class WindowLocationImpl implements WindowLocation {
+  #url: URL;
+
+  constructor(initialHref: string) {
+    this.#url = new URL(initialHref);
+  }
+
+  #resolve(next: string): URL {
+    return new URL(next, this.#url);
+  }
+
+  get href(): string {
+    return this.#url.href;
+  }
+
+  set href(next: string) {
+    this.#url = this.#resolve(next);
+  }
+
+  get protocol(): string {
+    return this.#url.protocol;
+  }
+
+  set protocol(next: string) {
+    const updated = new URL(this.#url.href);
+    updated.protocol = next;
+    this.#url = updated;
+  }
+
+  get host(): string {
+    return this.#url.host;
+  }
+
+  set host(next: string) {
+    const updated = new URL(this.#url.href);
+    updated.host = next;
+    this.#url = updated;
+  }
+
+  get hostname(): string {
+    return this.#url.hostname;
+  }
+
+  set hostname(next: string) {
+    const updated = new URL(this.#url.href);
+    updated.hostname = next;
+    this.#url = updated;
+  }
+
+  get port(): string {
+    return this.#url.port;
+  }
+
+  set port(next: string) {
+    const updated = new URL(this.#url.href);
+    updated.port = next;
+    this.#url = updated;
+  }
+
+  get pathname(): string {
+    return this.#url.pathname;
+  }
+
+  set pathname(next: string) {
+    const updated = new URL(this.#url.href);
+    updated.pathname = next;
+    this.#url = updated;
+  }
+
+  get search(): string {
+    return this.#url.search;
+  }
+
+  set search(next: string) {
+    const updated = new URL(this.#url.href);
+    updated.search = next;
+    this.#url = updated;
+  }
+
+  get hash(): string {
+    return this.#url.hash;
+  }
+
+  set hash(next: string) {
+    const updated = new URL(this.#url.href);
+    updated.hash = next;
+    this.#url = updated;
+  }
+
+  get origin(): string {
+    return this.#url.origin;
+  }
+
+  assign(next: string): void {
+    this.href = next;
+  }
+
+  replace(next: string): void {
+    this.href = next;
+  }
+
+  toString(): string {
+    return this.href;
+  }
+}
+
 export class Window {
   readonly _nativeWindowHandle: number;
   readonly #documentHandle: number;
   readonly #nodeCache = new Map<number, Node>();
   readonly #handleRegistry = new NativeHandleRegistry(native);
+  #activeElementHandle: number | null = null;
+  readonly #selection = new Selection();
+  readonly #cookies = new Map<string, string>();
 
   #closed = false;
 
@@ -36,10 +164,18 @@ export class Window {
   readonly Event = Event;
   readonly CustomEvent = CustomEvent;
   readonly MouseEvent = MouseEvent;
+  readonly InputEvent = InputEvent;
+  readonly KeyboardEvent = KeyboardEvent;
+  readonly MutationObserver = MutationObserver;
+  readonly Range = Range;
+  readonly Selection = Selection;
   readonly Document = Document;
 
-  readonly location: { href: string };
+  readonly location: WindowLocation;
   readonly document: Document;
+  readonly localStorage = new Storage();
+  readonly sessionStorage = new Storage();
+  readonly customElements = new CustomElementRegistry();
 
   readonly happyDOM: {
     reset: () => void;
@@ -51,9 +187,7 @@ export class Window {
     this._nativeWindowHandle = native.createWindow();
     this.#documentHandle = native.windowDocument(this._nativeWindowHandle);
 
-    this.location = {
-      href: options?.url ?? "http://localhost/"
-    };
+    this.location = new WindowLocationImpl(options?.url ?? "http://localhost/");
 
     this.document = this.getNode(this.#documentHandle) as Document;
 
@@ -61,6 +195,11 @@ export class Window {
       reset: () => {
         this.assertOpen();
         this.document.reset();
+        this.setActiveElement(null);
+        this.#selection.removeAllRanges();
+        this.#cookies.clear();
+        this.localStorage.clear();
+        this.sessionStorage.clear();
       },
       close: () => {
         this.close();
@@ -157,8 +296,55 @@ export class Window {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#activeElementHandle = null;
     native.destroyWindow(this._nativeWindowHandle);
     this.#nodeCache.clear();
+  }
+
+  getActiveElement(): Element | null {
+    this.assertOpen();
+    if (!this.#activeElementHandle) {
+      return this.document.body;
+    }
+
+    const node = this.getNode(this.#activeElementHandle);
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+      return this.document.body;
+    }
+
+    return node as Element;
+  }
+
+  setActiveElement(element: Element | null): void {
+    this.assertOpen();
+    this.#activeElementHandle = element?._handle ?? null;
+  }
+
+  getSelection(): Selection {
+    this.assertOpen();
+    return this.#selection;
+  }
+
+  getCookieString(): string {
+    this.assertOpen();
+    return [...this.#cookies.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+  }
+
+  setCookie(cookieHeader: string): void {
+    this.assertOpen();
+    const pair = cookieHeader.split(";")[0]?.trim();
+    if (!pair) {
+      return;
+    }
+
+    const separatorIndex = pair.indexOf("=");
+    if (separatorIndex <= 0) {
+      return;
+    }
+
+    const name = pair.slice(0, separatorIndex).trim();
+    const value = pair.slice(separatorIndex + 1).trim();
+    this.#cookies.set(name, value);
   }
 
   setTimeout!: typeof globalThis.setTimeout;

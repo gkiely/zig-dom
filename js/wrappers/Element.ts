@@ -5,6 +5,50 @@ import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
 import { parseHtmlInto } from "./html-parser.ts";
 
+type AttributeEntry = { name: string; value: string };
+type DatasetShape = Record<string, string>;
+
+function attributeEntriesFromOuterHtml(outerHtml: string): AttributeEntry[] {
+  const firstTag = outerHtml.match(/^<[^>]+>/)?.[0];
+  if (!firstTag) {
+    return [];
+  }
+
+  const innerTag = firstTag.slice(1, -1).replace(/\/$/, "").trim();
+  const firstSpace = innerTag.search(/\s/);
+  if (firstSpace === -1) {
+    return [];
+  }
+
+  const attrSource = innerTag.slice(firstSpace + 1);
+  const attrRegex = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+  const entries: AttributeEntry[] = [];
+
+  let match: RegExpExecArray | null = null;
+  while ((match = attrRegex.exec(attrSource)) !== null) {
+    const name = match[1];
+    if (name === "/") {
+      continue;
+    }
+    entries.push({
+      name,
+      value: match[2] ?? match[3] ?? match[4] ?? ""
+    });
+  }
+
+  return entries;
+}
+
+function dataAttributeToProperty(name: string): string {
+  return name
+    .slice(5)
+    .replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+}
+
+function propertyToDataAttribute(name: string): string {
+  return `data-${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
+}
+
 class DOMTokenList {
   constructor(private readonly element: Element, private readonly attributeName: string) {}
 
@@ -51,6 +95,7 @@ class DOMTokenList {
 
 export class Element extends Node {
   readonly classList: DOMTokenList;
+  #datasetProxy: DatasetShape | null = null;
 
   constructor(window: Node["_window"], handle: number) {
     super(window, handle);
@@ -82,14 +127,60 @@ export class Element extends Node {
   }
 
   get attributes(): Array<{ name: string; value: string }> {
-    const marker = this.ownerDocument?.querySelectorAll("*") ?? [];
-    void marker;
-    const attrs: Array<{ name: string; value: string }> = [];
-    const id = this.getAttribute("id");
-    if (id !== null) attrs.push({ name: "id", value: id });
-    const className = this.getAttribute("class");
-    if (className !== null) attrs.push({ name: "class", value: className });
-    return attrs;
+    return attributeEntriesFromOuterHtml(this.outerHTML);
+  }
+
+  get dataset(): DatasetShape {
+    if (this.#datasetProxy) {
+      return this.#datasetProxy;
+    }
+
+    this.#datasetProxy = new Proxy({} as DatasetShape, {
+      get: (_target, property) => {
+        if (typeof property !== "string") {
+          return undefined;
+        }
+        return this.getAttribute(propertyToDataAttribute(property)) ?? undefined;
+      },
+      set: (_target, property, value) => {
+        if (typeof property !== "string") {
+          return false;
+        }
+        this.setAttribute(propertyToDataAttribute(property), String(value));
+        return true;
+      },
+      deleteProperty: (_target, property) => {
+        if (typeof property !== "string") {
+          return false;
+        }
+        this.removeAttribute(propertyToDataAttribute(property));
+        return true;
+      },
+      ownKeys: () => {
+        return this.attributes
+          .filter((attribute) => attribute.name.startsWith("data-"))
+          .map((attribute) => dataAttributeToProperty(attribute.name));
+      },
+      getOwnPropertyDescriptor: (_target, property) => {
+        if (typeof property !== "string") {
+          return undefined;
+        }
+
+        const value = this.getAttribute(propertyToDataAttribute(property));
+        if (value == null) {
+          return undefined;
+        }
+
+        return {
+          configurable: true,
+          enumerable: true,
+          value,
+          writable: true
+        };
+      }
+    });
+
+    return this.#datasetProxy;
   }
 
   get childNodes(): NodeList {

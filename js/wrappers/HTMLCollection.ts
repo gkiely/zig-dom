@@ -11,6 +11,10 @@ export class HTMLCollection implements Iterable<Element> {
     return this.getElements()[index] ?? null;
   }
 
+  namedItem(name: string): Element | null {
+    return this.getElements().find((element) => element.id === name || element.getAttribute("name") === name) ?? null;
+  }
+
   [Symbol.iterator](): Iterator<Element> {
     return this.getElements()[Symbol.iterator]();
   }

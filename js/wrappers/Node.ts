@@ -11,6 +11,13 @@ export class Node extends EventTargetBase {
   static readonly DOCUMENT_NODE = 9;
   static readonly DOCUMENT_FRAGMENT_NODE = 11;
 
+  static readonly DOCUMENT_POSITION_DISCONNECTED = 0x01;
+  static readonly DOCUMENT_POSITION_PRECEDING = 0x02;
+  static readonly DOCUMENT_POSITION_FOLLOWING = 0x04;
+  static readonly DOCUMENT_POSITION_CONTAINS = 0x08;
+  static readonly DOCUMENT_POSITION_CONTAINED_BY = 0x10;
+  static readonly DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 0x20;
+
   readonly _window: Window;
   readonly _handle: number;
 
@@ -133,6 +140,192 @@ export class Node extends EventTargetBase {
     this._window.assertOpen();
     native.replaceChild(this._handle, newChild._handle, oldChild._handle);
     return oldChild;
+  }
+
+  getRootNode(_options?: { composed?: boolean }): Node {
+    let cursor: Node = this;
+    while (cursor.parentNode) {
+      cursor = cursor.parentNode;
+    }
+    return cursor;
+  }
+
+  compareDocumentPosition(other: Node): number {
+    if (other === this) {
+      return 0;
+    }
+
+    const thisRoot = this.getRootNode();
+    const otherRoot = other.getRootNode();
+    if (thisRoot !== otherRoot) {
+      return Node.DOCUMENT_POSITION_DISCONNECTED | Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC | Node.DOCUMENT_POSITION_PRECEDING;
+    }
+
+    if (this.contains(other)) {
+      return Node.DOCUMENT_POSITION_CONTAINS | Node.DOCUMENT_POSITION_PRECEDING;
+    }
+    if (other.contains(this)) {
+      return Node.DOCUMENT_POSITION_CONTAINED_BY | Node.DOCUMENT_POSITION_FOLLOWING;
+    }
+
+    const thisPath: Node[] = [];
+    let thisCursor: Node | null = this;
+    while (thisCursor) {
+      thisPath.unshift(thisCursor);
+      thisCursor = thisCursor.parentNode;
+    }
+
+    const otherPath: Node[] = [];
+    let otherCursor: Node | null = other;
+    while (otherCursor) {
+      otherPath.unshift(otherCursor);
+      otherCursor = otherCursor.parentNode;
+    }
+
+    let splitIndex = 0;
+    while (
+      splitIndex < thisPath.length
+      && splitIndex < otherPath.length
+      && thisPath[splitIndex] === otherPath[splitIndex]
+    ) {
+      splitIndex += 1;
+    }
+
+    const commonParent = thisPath[splitIndex - 1];
+    const thisBranch = thisPath[splitIndex];
+    const otherBranch = otherPath[splitIndex];
+    if (!commonParent || !thisBranch || !otherBranch) {
+      return Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC;
+    }
+
+    for (const child of commonParent.childNodes) {
+      if (child === thisBranch) {
+        return Node.DOCUMENT_POSITION_FOLLOWING;
+      }
+      if (child === otherBranch) {
+        return Node.DOCUMENT_POSITION_PRECEDING;
+      }
+    }
+
+    return Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC;
+  }
+
+  cloneNode(deep = false): Node {
+    this._window.assertOpen();
+
+    if (this.nodeType === Node.DOCUMENT_NODE) {
+      throw new Error("cloneNode() is not supported on Document nodes");
+    }
+
+    const document = this.ownerDocument;
+    if (!document) {
+      throw new Error("cloneNode() requires an owner document");
+    }
+
+    switch (this.nodeType) {
+      case Node.TEXT_NODE:
+        return document.createTextNode(this.textContent);
+      case Node.COMMENT_NODE:
+        return document.createComment(this.textContent);
+      case Node.DOCUMENT_FRAGMENT_NODE: {
+        const fragment = document.createDocumentFragment();
+        if (deep) {
+          for (const child of this.childNodes) {
+            fragment.appendChild(child.cloneNode(true));
+          }
+        }
+        return fragment;
+      }
+      case Node.ELEMENT_NODE: {
+        const container = document.createElement("div");
+        container.innerHTML = this.outerHTML;
+        const clone = container.firstChild;
+        if (!clone) {
+          throw new Error("cloneNode() failed to produce an element clone");
+        }
+        if (!deep) {
+          while (clone.firstChild) {
+            clone.removeChild(clone.firstChild);
+          }
+        }
+        return clone;
+      }
+      default:
+        throw new Error(`cloneNode() is unsupported for nodeType ${this.nodeType}`);
+    }
+  }
+
+  isEqualNode(other: Node | null): boolean {
+    if (!other) {
+      return false;
+    }
+    if (this === other) {
+      return true;
+    }
+    if (this.nodeType !== other.nodeType || this.nodeName !== other.nodeName) {
+      return false;
+    }
+
+    if (this.nodeType === Node.TEXT_NODE || this.nodeType === Node.COMMENT_NODE) {
+      return this.textContent === other.textContent;
+    }
+
+    if (this.nodeType === Node.ELEMENT_NODE) {
+      const leftAttributes = ((this as unknown) as { attributes?: Array<{ name: string; value: string }> }).attributes ?? [];
+      const rightAttributes = ((other as unknown) as { attributes?: Array<{ name: string; value: string }> }).attributes ?? [];
+      if (leftAttributes.length !== rightAttributes.length) {
+        return false;
+      }
+
+      const sortByName = (a: { name: string; value: string }, b: { name: string; value: string }) => a.name.localeCompare(b.name);
+      const leftSorted = [...leftAttributes].sort(sortByName);
+      const rightSorted = [...rightAttributes].sort(sortByName);
+      for (let i = 0; i < leftSorted.length; i += 1) {
+        if (leftSorted[i]?.name !== rightSorted[i]?.name || leftSorted[i]?.value !== rightSorted[i]?.value) {
+          return false;
+        }
+      }
+    }
+
+    const leftChildren = this.childNodes.toArray();
+    const rightChildren = other.childNodes.toArray();
+    if (leftChildren.length !== rightChildren.length) {
+      return false;
+    }
+
+    for (let i = 0; i < leftChildren.length; i += 1) {
+      if (!leftChildren[i]?.isEqualNode(rightChildren[i] ?? null)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  normalize(): void {
+    this._window.assertOpen();
+
+    let previousText: Node | null = null;
+    for (const child of this.childNodes.toArray()) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        if (child.textContent.length === 0) {
+          this.removeChild(child);
+          continue;
+        }
+
+        if (previousText) {
+          previousText.textContent = `${previousText.textContent}${child.textContent}`;
+          this.removeChild(child);
+          continue;
+        }
+
+        previousText = child;
+        continue;
+      }
+
+      previousText = null;
+      child.normalize();
+    }
   }
 
   contains(other: Node | null): boolean {

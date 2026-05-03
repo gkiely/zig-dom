@@ -1,16 +1,24 @@
+import type { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
 import { Event } from "./Event.ts";
 
 class CSSStyleDeclaration {
+  readonly #onChange: (cssText: string) => void;
   #values = new Map<string, string>();
+
+  constructor(onChange: (cssText: string) => void) {
+    this.#onChange = onChange;
+  }
 
   setProperty(name: string, value: string): void {
     this.#values.set(name, value);
+    this.#onChange(this.cssText);
   }
 
   removeProperty(name: string): string {
     const current = this.#values.get(name) ?? "";
     this.#values.delete(name);
+    this.#onChange(this.cssText);
     return current;
   }
 
@@ -32,6 +40,7 @@ class CSSStyleDeclaration {
         this.#values.set(name, nextValue);
       }
     }
+    this.#onChange(this.cssText);
   }
 }
 
@@ -40,14 +49,84 @@ export class HTMLElement extends Element {
   onchange: ((event: Event) => void) | null = null;
   oninput: ((event: Event) => void) | null = null;
   readonly style: CSSStyleDeclaration;
+  #syncingStyleAttribute = false;
+  #shadowRootValue: DocumentFragment | null = null;
+  #shadowRootMode: ShadowRootMode | null = null;
 
   constructor(window: Element["_window"], handle: number) {
     super(window, handle);
-    this.style = new CSSStyleDeclaration();
+    this.style = new CSSStyleDeclaration((cssText) => {
+      if (this.#syncingStyleAttribute) {
+        return;
+      }
+
+      this.#syncingStyleAttribute = true;
+      if (cssText.length === 0) {
+        super.removeAttribute("style");
+      } else {
+        super.setAttribute("style", cssText);
+      }
+      this.#syncingStyleAttribute = false;
+    });
+
     const inlineStyle = this.getAttribute("style");
     if (inlineStyle) {
+      this.#syncingStyleAttribute = true;
       this.style.cssText = inlineStyle;
+      this.#syncingStyleAttribute = false;
     }
+  }
+
+  override setAttribute(name: string, value: string): void {
+    super.setAttribute(name, value);
+    if (name.toLowerCase() === "style" && !this.#syncingStyleAttribute) {
+      this.#syncingStyleAttribute = true;
+      this.style.cssText = value;
+      this.#syncingStyleAttribute = false;
+    }
+  }
+
+  override removeAttribute(name: string): void {
+    super.removeAttribute(name);
+    if (name.toLowerCase() === "style" && !this.#syncingStyleAttribute) {
+      this.#syncingStyleAttribute = true;
+      this.style.cssText = "";
+      this.#syncingStyleAttribute = false;
+    }
+  }
+
+  attachShadow(init: ShadowRootInit): DocumentFragment {
+    if (this.#shadowRootValue) {
+      throw new Error("Shadow root already attached");
+    }
+
+    const root = (this.ownerDocument ?? this._window.document).createDocumentFragment();
+    this.#shadowRootValue = root;
+    this.#shadowRootMode = init.mode;
+
+    const shadowRootMeta = root as unknown as { host: HTMLElement; mode: ShadowRootMode };
+    shadowRootMeta.host = this;
+    shadowRootMeta.mode = init.mode;
+    return root;
+  }
+
+  get shadowRoot(): DocumentFragment | null {
+    if (this.#shadowRootMode !== "open") {
+      return null;
+    }
+    return this.#shadowRootValue;
+  }
+
+  focus(): void {
+    this._window.setActiveElement(this);
+    this.dispatchEvent(new Event("focus"));
+  }
+
+  blur(): void {
+    if (this._window.document.activeElement === this) {
+      this._window.setActiveElement(null);
+    }
+    this.dispatchEvent(new Event("blur"));
   }
 }
 
