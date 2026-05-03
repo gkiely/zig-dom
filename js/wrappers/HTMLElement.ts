@@ -187,8 +187,31 @@ export class HTMLElement extends Element {
     if (normalizedName.startsWith("on")) {
       const handlerBody = String(value);
       const compiled = new Function("event", "window", `with (this) { with (window) { ${handlerBody} } }`);
+      const windowScope = this._window as unknown as Record<string | symbol, unknown> & {
+        __scriptContext?: Record<string, unknown>;
+      };
+      const scriptContext = windowScope.__scriptContext;
+      const handlerScope = scriptContext
+        ? new Proxy(scriptContext as Record<string | symbol, unknown>, {
+            has: (target, property) => Reflect.has(target, property) || Reflect.has(windowScope, property),
+            get: (target, property, receiver) => Reflect.has(target, property)
+              ? Reflect.get(target, property, receiver)
+              : Reflect.get(windowScope, property),
+            set: (target, property, nextValue, receiver) => {
+              if (Reflect.has(target, property) || !Reflect.has(windowScope, property)) {
+                return Reflect.set(target, property, nextValue);
+              }
+              return Reflect.set(windowScope, property, nextValue);
+            },
+            getOwnPropertyDescriptor: (target, property) => Reflect.getOwnPropertyDescriptor(target, property) ?? Reflect.getOwnPropertyDescriptor(windowScope, property),
+            ownKeys: (target) => {
+              const keySet = new Set([...Reflect.ownKeys(windowScope), ...Reflect.ownKeys(target)]);
+              return [...keySet];
+            }
+          })
+        : windowScope;
       (this as unknown as Record<string, unknown>)[normalizedName] = (event: Event) => {
-        compiled.call(this, event, this._window as unknown as Record<string, unknown>);
+        compiled.call(this, event, handlerScope as unknown as Record<string, unknown>);
       };
     }
 

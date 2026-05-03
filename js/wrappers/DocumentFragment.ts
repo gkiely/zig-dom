@@ -1,4 +1,5 @@
 import type { Element } from "./Element.ts";
+import { parseHtmlInto } from "./html-parser.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
@@ -12,6 +13,20 @@ export class DocumentFragment extends Node {
 
   get children(): HTMLCollection {
     return new HTMLCollection(() => this.childNodes.toArray().filter((node) => node.nodeType === Node.ELEMENT_NODE) as Element[]);
+  }
+
+  get innerHTML(): string {
+    return this.childNodes
+      .toArray()
+      .map((child) => child.outerHTML)
+      .join("");
+  }
+
+  set innerHTML(value: string) {
+    while (this.firstChild) {
+      this.removeChild(this.firstChild);
+    }
+    parseHtmlInto(this, value);
   }
 
   querySelector(selector: string): Element | null {

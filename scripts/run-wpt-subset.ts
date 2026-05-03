@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createContext, runInContext } from "node:vm";
 import { Window } from "../js/wrappers/Window";
 
 const globalAsyncErrors: string[] = [];
@@ -199,15 +200,20 @@ function parseMetaScripts(html: string): string[] {
 
 function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string): string[] {
   const scripts: string[] = [];
+  const htmlWithoutTemplates = maskTemplateBlocks(html).masked;
   const regex = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
   let match: RegExpExecArray | null = null;
 
-  while ((match = regex.exec(html)) !== null) {
+  while ((match = regex.exec(htmlWithoutTemplates)) !== null) {
     const attrs = match[1] ?? "";
     const body = match[2] ?? "";
     const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
     const srcValue = srcMatch?.[1] ?? srcMatch?.[2] ?? srcMatch?.[3];
     if (srcValue) {
+      const normalizedSrc = scriptFileRef(srcValue).toLowerCase();
+      if (normalizedSrc === "/resources/testharness.js" || normalizedSrc === "/resources/testharnessreport.js") {
+        continue;
+      }
       const sourcePath = resolveScriptPath(entryFile, srcValue, wptRootPath);
       scripts.push(readText(sourcePath));
       continue;
@@ -222,7 +228,26 @@ function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string)
 }
 
 function stripScriptTags(html: string): string {
-  return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const masked = maskTemplateBlocks(html);
+  const stripped = masked.masked.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  return unmaskTemplateBlocks(stripped, masked.templates);
+}
+
+function maskTemplateBlocks(html: string): { masked: string; templates: string[] } {
+  const templates: string[] = [];
+  const masked = html.replace(/<template\b[^>]*>[\s\S]*?<\/template>/gi, (templateMarkup) => {
+    const index = templates.push(templateMarkup) - 1;
+    return `__ZIG_DOM_TEMPLATE_BLOCK_${index}__`;
+  });
+  return { masked, templates };
+}
+
+function unmaskTemplateBlocks(html: string, templates: string[]): string {
+  let restored = html;
+  for (let index = 0; index < templates.length; index += 1) {
+    restored = restored.split(`__ZIG_DOM_TEMPLATE_BLOCK_${index}__`).join(templates[index] ?? "");
+  }
+  return restored;
 }
 
 function extractHeadAndBodyMarkup(html: string): { head: string; body: string } {
@@ -348,7 +373,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       },
       step: (fn: () => void) => {
         try {
-          fn();
+          fn.call(testObj);
         } catch (error) {
           failError = error;
           resolveDone();
@@ -356,12 +381,12 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       },
       step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => {
         return (...args: TArgs) => {
-          testObj.step(() => fn(...args));
+          testObj.step(() => fn.apply(testObj, args));
         };
       },
       step_func_done: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => {
         return (...args: TArgs) => {
-          testObj.step(() => fn(...args));
+          testObj.step(() => fn.apply(testObj, args));
           testObj.done();
         };
       },
@@ -379,7 +404,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
 
     if (callback) {
       try {
-        callback(testObj);
+        callback.call(testObj, testObj);
       } catch (error) {
         failError = error;
         resolveDone();
@@ -657,9 +682,11 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   }
   assignNamedElementGlobals(context, window);
 
+  const vmContext = createContext(context);
+  const vmGlobalThis = runInContext("globalThis", vmContext) as unknown as Record<string, unknown>;
+  (window as unknown as { __scriptContext?: Record<string, unknown> }).__scriptContext = vmGlobalThis;
   const executeScript = (source: string) => {
-    const fn = new Function("context", `with (context) {\n${source}\n}`);
-    fn(context);
+    runInContext(source, vmContext, { filename: file });
   };
 
   const allScripts: string[] = [];

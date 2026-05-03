@@ -365,13 +365,21 @@ export class Document extends Node {
   createTextNode(data: string): Text {
     this._window.assertOpen();
     const handle = native.createTextNode(this._handle, data);
-    return this._window.createKnownNode(handle, Node.TEXT_NODE) as Text;
+    const node = this._window.createKnownNode(handle, Node.TEXT_NODE) as Text;
+    if (data.includes("\u0000")) {
+      (node as unknown as { __textContentOverride?: string }).__textContentOverride = data;
+    }
+    return node;
   }
 
   createComment(data: string): Comment {
     this._window.assertOpen();
     const handle = native.createComment(this._handle, data);
-    return this._window.createKnownNode(handle, Node.COMMENT_NODE) as Comment;
+    const node = this._window.createKnownNode(handle, Node.COMMENT_NODE) as Comment;
+    if (data.includes("\u0000")) {
+      (node as unknown as { __textContentOverride?: string }).__textContentOverride = data;
+    }
+    return node;
   }
 
   createProcessingInstruction(target: string, data: string): ProcessingInstruction {

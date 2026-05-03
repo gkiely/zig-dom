@@ -71,7 +71,7 @@ function decodeHtmlEntities(input: string): string {
   });
 }
 
-export function parseHtmlInto(parent: Element, html: string): void {
+export function parseHtmlInto(parent: Element | DocumentFragment, html: string): void {
   const document = parent.ownerDocument as Document;
   const fragment = document.createDocumentFragment();
   const stack: Array<Element | DocumentFragment> = [fragment];

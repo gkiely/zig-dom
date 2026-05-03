@@ -127,6 +127,11 @@ export class Node extends EventTargetBase {
     }
 
     const value = native.nodeTextContent(this._handle);
+    const cachedOverride = (this as unknown as { __textContentOverride?: string }).__textContentOverride;
+    if (typeof cachedOverride === "string") {
+      return cachedOverride;
+    }
+
     // Native returns a NUL sentinel for empty character data.
     if (value === "\u0000") {
       return "";
@@ -169,6 +174,12 @@ export class Node extends EventTargetBase {
     const rawValue = value as unknown;
     const nextValue = rawValue == null ? "" : String(rawValue);
     native.setNodeTextContent(this._handle, nextValue);
+    const mutableNode = this as unknown as { __textContentOverride?: string };
+    if (nextValue.includes("\u0000")) {
+      mutableNode.__textContentOverride = nextValue;
+    } else {
+      delete mutableNode.__textContentOverride;
+    }
     if (trackCharacterData) {
       this._window.notifyCharacterDataChanged(this, previousValue);
     }
@@ -233,6 +244,7 @@ export class Node extends EventTargetBase {
     }
 
     if (!this._window.customElements.hasDefinitions) {
+      scheduleIFrameLoadIfNeeded(child);
       refreshDocumentElementFlag(this);
       return child;
     }
@@ -247,6 +259,7 @@ export class Node extends EventTargetBase {
       this._window.notifyConnectedSubtree(child);
     }
 
+    scheduleIFrameLoadIfNeeded(child);
     refreshDocumentElementFlag(this);
     return child;
   }
@@ -355,6 +368,7 @@ export class Node extends EventTargetBase {
     }
 
     if (!this._window.customElements.hasDefinitions) {
+      scheduleIFrameLoadIfNeeded(newChild);
       refreshDocumentElementFlag(this);
       return newChild;
     }
@@ -369,6 +383,7 @@ export class Node extends EventTargetBase {
       this._window.notifyConnectedSubtree(newChild);
     }
 
+    scheduleIFrameLoadIfNeeded(newChild);
     refreshDocumentElementFlag(this);
     return newChild;
   }
@@ -564,6 +579,7 @@ export class Node extends EventTargetBase {
     }
 
     if (!this._window.customElements.hasDefinitions) {
+      scheduleIFrameLoadIfNeeded(newChild as Node);
       refreshDocumentElementFlag(this);
       return oldChild;
     }
@@ -581,15 +597,25 @@ export class Node extends EventTargetBase {
       this._window.notifyConnectedSubtree(newChild);
     }
 
+    scheduleIFrameLoadIfNeeded(newChild as Node);
     refreshDocumentElementFlag(this);
     return oldChild;
   }
 
-  getRootNode(_options?: { composed?: boolean }): Node {
+  getRootNode(options?: { composed?: boolean }): Node {
     let cursor: Node = this;
     while (cursor.parentNode) {
       cursor = cursor.parentNode;
     }
+
+    if (options?.composed) {
+      const rootWithHost = cursor as Node & { host?: Node | null };
+      const host = rootWithHost.host;
+      if (host) {
+        return host.getRootNode(options);
+      }
+    }
+
     return cursor;
   }
 
@@ -1267,6 +1293,35 @@ function isEqualDocumentNode(left: Node, right: Node): boolean {
   }
 
   return true;
+}
+
+function scheduleIFrameLoadIfNeeded(node: Node): void {
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return;
+  }
+
+  const elementLike = node as unknown as {
+    tagName?: string;
+    dispatchEvent?: (event: Event) => boolean;
+    __pendingInitialLoadEvent?: boolean;
+  };
+
+  if ((elementLike.tagName ?? "").toLowerCase() !== "iframe") {
+    return;
+  }
+
+  if (elementLike.__pendingInitialLoadEvent) {
+    return;
+  }
+
+  elementLike.__pendingInitialLoadEvent = true;
+  node._window.queueMicrotask(() => {
+    elementLike.__pendingInitialLoadEvent = false;
+    if (!node.isConnected) {
+      return;
+    }
+    elementLike.dispatchEvent?.(new Event("load"));
+  });
 }
 
 function isEqualHtmlRoot(leftRoot: Node, rightRoot: Node): boolean {

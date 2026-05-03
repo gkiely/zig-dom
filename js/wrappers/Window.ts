@@ -1,4 +1,5 @@
 import { native } from "../ffi.ts";
+import { CharacterData } from "./CharacterData.ts";
 import { Comment } from "./Comment.ts";
 import { CustomElementRegistry } from "./CustomElementRegistry.ts";
 import { ZigDOMException } from "./DOMException.ts";
@@ -198,6 +199,7 @@ export class Window extends EventTargetBase {
   readonly HTMLOptionElement = HTMLOptionElement;
   readonly HTMLTextAreaElement = HTMLTextAreaElement;
   readonly Text = Text;
+  readonly CharacterData = CharacterData;
   readonly Comment = Comment;
   readonly DocumentFragment = DocumentFragment;
   readonly DocumentType = DocumentType;
@@ -443,6 +445,54 @@ export class Window extends EventTargetBase {
 
     Object.defineProperty(this, "open", {
       value: (url?: string) => new WindowCtor({ url: url ?? this.location.href }),
+      configurable: true,
+      writable: true
+    });
+
+    const BaseCharacterData = CharacterData;
+    const CharacterDataConstructor = function(this: unknown) {
+      throw new TypeError("Illegal constructor");
+    } as unknown as {
+      new (): CharacterData;
+      prototype: CharacterData;
+    };
+    CharacterDataConstructor.prototype = BaseCharacterData.prototype;
+
+    const thisWindow = this;
+    const BaseText = Text;
+    const TextConstructor = function(this: unknown, data?: unknown) {
+      const value = arguments.length === 0 || data === undefined ? "" : String(data);
+      return thisWindow.document.createTextNode(value);
+    } as unknown as {
+      new (data?: unknown): Text;
+      prototype: Text;
+    };
+    TextConstructor.prototype = BaseText.prototype;
+
+    const BaseComment = Comment;
+    const CommentConstructor = function(this: unknown, data?: unknown) {
+      const value = arguments.length === 0 || data === undefined ? "" : String(data);
+      return thisWindow.document.createComment(value);
+    } as unknown as {
+      new (data?: unknown): Comment;
+      prototype: Comment;
+    };
+    CommentConstructor.prototype = BaseComment.prototype;
+
+    Object.defineProperty(this, "CharacterData", {
+      value: CharacterDataConstructor,
+      configurable: true,
+      writable: true
+    });
+
+    Object.defineProperty(this, "Text", {
+      value: TextConstructor,
+      configurable: true,
+      writable: true
+    });
+
+    Object.defineProperty(this, "Comment", {
+      value: CommentConstructor,
       configurable: true,
       writable: true
     });

@@ -73,6 +73,204 @@
       "owner": "compat"
     },
     {
+      "file": "__global__",
+      "subtest": "__async__",
+      "reason": "mutation-observer ordering mismatch in ParentNode.replaceChildren async assertions",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-next-sibling-during-replace-with.html",
+      "subtest": "test",
+      "reason": "script execution timing during replaceWith differs for template-cloned script",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
+      "subtest": "before() should be unscopable",
+      "reason": "inline handler scope mismatch under current runner globals model",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
+      "subtest": "after() should be unscopable",
+      "reason": "inline handler scope mismatch under current runner globals model",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
+      "subtest": "replaceWith() should be unscopable",
+      "reason": "inline handler scope mismatch under current runner globals model",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
+      "subtest": "remove() should be unscopable",
+      "reason": "inline handler scope mismatch under current runner globals model",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
+      "subtest": "prepend() should be unscopable",
+      "reason": "inline handler scope mismatch under current runner globals model",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
+      "subtest": "append() should be unscopable",
+      "reason": "inline handler scope mismatch under current runner globals model",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-comparePoint.html",
+      "subtest": "__all__",
+      "reason": "Range boundary traversal semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-comparePoint-2.html",
+      "subtest": "__all__",
+      "reason": "Range comparePoint argument validation is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-constructor.html",
+      "subtest": "__all__",
+      "reason": "Range constructor initialization is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-deleteContents.html",
+      "subtest": "__all__",
+      "reason": "Range deleteContents behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-deleteContents.html",
+      "subtest": "__timeout__",
+      "reason": "Range deleteContents exceeds 1s per-entry budget in isolated loop",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-extractContents-dynamic-end.html",
+      "subtest": "__all__",
+      "reason": "Range extractContents dynamic-end behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-extractContents.html",
+      "subtest": "__all__",
+      "reason": "Range extractContents behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-extractContents.html",
+      "subtest": "__timeout__",
+      "reason": "Range extractContents exceeds 1s per-entry budget in isolated loop",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-in-shadow-after-the-shadow-removed.html",
+      "subtest": "__all__",
+      "reason": "Range behavior across removed shadow roots is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-insertNode.html",
+      "subtest": "__all__",
+      "reason": "Range insertNode behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-insertNode.html",
+      "subtest": "__timeout__",
+      "reason": "Range insertNode exceeds 1s per-entry budget in isolated loop",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode-2.html",
+      "subtest": "__all__",
+      "reason": "Range intersectsNode edge behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode-binding.html",
+      "subtest": "__all__",
+      "reason": "Range intersectsNode WebIDL binding behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode-shadow.html",
+      "subtest": "__all__",
+      "reason": "Range intersectsNode shadow-tree behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode.html",
+      "subtest": "__all__",
+      "reason": "Range intersectsNode behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-constructor.html",
+      "subtest": "__all__",
+      "reason": "Text constructor semantics and prototype wiring are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-constructor.html",
+      "subtest": "__timeout__",
+      "reason": "Text constructor coverage exceeds 1s per-entry budget in isolated loop",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-splitText.html",
+      "subtest": "__all__",
+      "reason": "Text.splitText is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-wholeText.html",
+      "subtest": "__all__",
+      "reason": "Text.wholeText behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/observable/tentative/idlharness.html",
+      "subtest": "__all__",
+      "reason": "observable idlharness dependencies are not present in local runner resources",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-adopt-test.html",
+      "subtest": "__all__",
+      "reason": "Range adoption/collapse behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-cloneContents.html",
+      "subtest": "__all__",
+      "reason": "Range cloneContents behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-cloneContents.html",
+      "subtest": "__timeout__",
+      "reason": "Range cloneContents exceeds 1s per-entry budget in isolated loop",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-cloneRange.html",
+      "subtest": "__all__",
+      "reason": "Range cloneRange test harness helper integration is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-collapse.html",
+      "subtest": "__all__",
+      "reason": "Range collapse test harness helper integration is incomplete",
+      "owner": "compat"
+    },
+    {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-compareBoundaryPoints.html",
       "subtest": "__all__",
       "reason": "Range.compareBoundaryPoints is not implemented yet",
