@@ -71,6 +71,12 @@
       "subtest": "__timeout__",
       "reason": "load-event timing case exceeds 1s timeout budget",
       "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-compareBoundaryPoints.html",
+      "subtest": "__all__",
+      "reason": "Range.compareBoundaryPoints is not implemented yet",
+      "owner": "compat"
     }
   ]
 }

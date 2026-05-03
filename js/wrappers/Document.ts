@@ -283,7 +283,10 @@ export class Document extends Node {
   }
 
   createRange(): Range {
-    return new Range();
+    const range = new Range();
+    range.setStart(this, 0);
+    range.setEnd(this, 0);
+    return range;
   }
 
   createEvent(interfaceName: string): Event {

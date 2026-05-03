@@ -549,11 +549,18 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     const normalizedDetail = normalize(detail);
 
     const expectedCodeByName: Record<string, number> = {
+      indexsizeerror: 1,
+      indexsizeerr: 1,
       hierarchyrequesterror: 3,
       hierarchyrequesterr: 3,
+      wrongdocumenterror: 4,
+      wrongdocumenterr: 4,
       notfounderror: 8,
       notfounderr: 8,
-      invalidstateerror: 11
+      invalidstateerror: 11,
+      invalidstateerr: 11,
+      invalidnodetypeerror: 24,
+      invalidnodetypeerr: 24
     };
 
     if (typeof expected === "string") {
@@ -840,10 +847,11 @@ let unexpectedPass = 0;
 
 for (const result of allResults) {
   const key = `${result.file}::${result.name}`;
-  const expectedFailure = expectedMap.get(key);
+  const expectedByName = expectedMap.get(key);
+  const expectedByFile = expectedMap.get(`${result.file}::__all__`);
 
   if (result.status === "pass") {
-    if (expectedFailure) {
+    if (expectedByName) {
       unexpectedPass += 1;
       console.log(`UNEXPECTED_PASS ${result.file} :: ${result.name}`);
     } else {
@@ -854,6 +862,7 @@ for (const result of allResults) {
   }
 
   failed += 1;
+  const expectedFailure = expectedByName ?? expectedByFile;
   if (expectedFailure) {
     expectedFail += 1;
     console.log(`EXPECTED_FAIL ${result.file} :: ${result.name} :: ${expectedFailure.reason} (${expectedFailure.owner})`);
