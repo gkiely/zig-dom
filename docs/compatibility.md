@@ -27,4 +27,18 @@
 
 ## Verification log
 
-- Pending first full run after bootstrap.
+- `bun run build`: pass
+- `bun run verify:ffi`: pass (4 tests)
+- `bun run verify:dom`: pass (8 tests)
+- `bun run verify:react`: pass (React smoke)
+- `bun run verify:wpt:tiny`: pass (3/3 pass, 0 expected fail)
+- `bun run verify:fast`: pass
+- `bun test tests/integration/dom tests/integration/react`: pass (7 tests)
+
+## Warm-run timing (macOS)
+
+- `verify:ffi`: 0.36s
+- `verify:dom`: 0.96s
+- `verify:react`: 1.04s
+- `verify:wpt:tiny`: 0.03s
+- `verify:fast`: 2.32s

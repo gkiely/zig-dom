@@ -1,4 +1,4 @@
-import { cp, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,5 +19,5 @@ if (!existsSync(source)) {
 
 const target = join(rootDir, "dist", "native", `libzig_dom.${extension}`);
 mkdirSync(dirname(target), { recursive: true });
-cp(source, target, () => {});
+cpSync(source, target);
 console.log(`Native library copied to ${target}`);
