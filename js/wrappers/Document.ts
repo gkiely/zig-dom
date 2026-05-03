@@ -8,8 +8,8 @@ import { Text } from "./Text.ts";
 import type { Window } from "./Window.ts";
 
 export class Document extends Node {
-  constructor(window: Window, handle: number) {
-    super(window, handle);
+  constructor(window: Window, handle: number, nodeType = Node.DOCUMENT_NODE) {
+    super(window, handle, nodeType);
   }
 
   get defaultView(): Window {

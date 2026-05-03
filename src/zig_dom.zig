@@ -34,17 +34,43 @@ const Node = struct {
 
 const Window = struct {
     handle: u64,
-    nodes: std.AutoHashMapUnmanaged(u64, Node),
+    next_node_id: u32,
+    nodes: std.ArrayListUnmanaged(Node),
     document_handle: u64,
     html_handle: u64,
     head_handle: u64,
     body_handle: u64,
 };
 
-var global_windows = std.AutoHashMapUnmanaged(u64, *Window){};
-var global_node_to_window = std.AutoHashMapUnmanaged(u64, u64){};
+var global_windows: std.ArrayListUnmanaged(?*Window) = .empty;
 var next_window_handle: u64 = 1;
-var next_node_handle: u64 = 1024;
+
+fn resolveWindow(window_handle: u64) ?*Window {
+    if (window_handle == 0) return null;
+    const index: usize = @intCast(window_handle - 1);
+    if (index >= global_windows.items.len) return null;
+    return global_windows.items[index];
+}
+
+fn registerWindow(window: *Window) !void {
+    const index: usize = @intCast(window.handle - 1);
+    if (global_windows.items.len <= index) {
+        const old_len = global_windows.items.len;
+        try global_windows.resize(c_allocator, index + 1);
+        var fill_index = old_len;
+        while (fill_index <= index) : (fill_index += 1) {
+            global_windows.items[fill_index] = null;
+        }
+    }
+    global_windows.items[index] = window;
+}
+
+fn unregisterWindow(window_handle: u64) void {
+    if (window_handle == 0) return;
+    const index: usize = @intCast(window_handle - 1);
+    if (index >= global_windows.items.len) return;
+    global_windows.items[index] = null;
+}
 
 const STATUS_OK: u32 = @intFromEnum(api.Status.ok);
 const STATUS_INVALID_HANDLE: u32 = @intFromEnum(api.Status.invalid_handle);
@@ -84,22 +110,45 @@ fn makeOwnedLower(bytes: []const u8) ![]u8 {
     return copy;
 }
 
-fn resolveWindow(window_handle: u64) ?*Window {
-    return global_windows.get(window_handle);
+fn encodeNodeHandle(window_handle: u64, node_id: u32) u64 {
+    return (window_handle << 32) | @as(u64, node_id);
+}
+
+fn decodeNodeWindowHandle(node_handle: u64) u64 {
+    return node_handle >> 32;
+}
+
+fn decodeNodeId(node_handle: u64) u32 {
+    return @intCast(node_handle & 0xFFFF_FFFF);
 }
 
 fn resolveNodeWindow(node_handle: u64) ?*Window {
-    const window_handle = global_node_to_window.get(node_handle) orelse return null;
-    return global_windows.get(window_handle);
+    const window_handle = decodeNodeWindowHandle(node_handle);
+    if (window_handle == 0) return null;
+    return resolveWindow(window_handle);
 }
 
 fn resolveNode(window: *Window, node_handle: u64) ?*Node {
-    return window.nodes.getPtr(node_handle);
+    if (decodeNodeWindowHandle(node_handle) != window.handle) {
+        return null;
+    }
+
+    const node_id = decodeNodeId(node_handle);
+    if (node_id == 0) {
+        return null;
+    }
+
+    const index: usize = @intCast(node_id - 1);
+    if (index >= window.nodes.items.len) {
+        return null;
+    }
+
+    return &window.nodes.items[index];
 }
 
 fn createNode(window: *Window, kind: api.NodeKind, name: []const u8, data: []const u8, owner_document: u64, lowercase_name: bool) !u64 {
-    const handle = next_node_handle;
-    next_node_handle += 1;
+    window.next_node_id += 1;
+    const handle = encodeNodeHandle(window.handle, window.next_node_id);
 
     const owned_name = if (lowercase_name)
         try makeOwnedLower(name)
@@ -119,8 +168,7 @@ fn createNode(window: *Window, kind: api.NodeKind, name: []const u8, data: []con
         .attributes = .empty,
     };
 
-    try window.nodes.put(c_allocator, handle, node);
-    try global_node_to_window.put(c_allocator, handle, window.handle);
+    try window.nodes.append(c_allocator, node);
     return handle;
 }
 
@@ -722,7 +770,8 @@ fn createWindowInternal(out_window: *u64) u32 {
     const window = c_allocator.create(Window) catch return STATUS_OOM;
     window.* = .{
         .handle = next_window_handle,
-        .nodes = .{},
+        .next_node_id = 0,
+        .nodes = .empty,
         .document_handle = 0,
         .html_handle = 0,
         .head_handle = 0,
@@ -730,13 +779,13 @@ fn createWindowInternal(out_window: *u64) u32 {
     };
     next_window_handle += 1;
 
-    global_windows.put(c_allocator, window.handle, window) catch {
+    registerWindow(window) catch {
         c_allocator.destroy(window);
         return STATUS_OOM;
     };
 
     const document_handle = createNode(window, .document, "#document", "", 0, false) catch {
-        _ = global_windows.remove(window.handle);
+        unregisterWindow(window.handle);
         c_allocator.destroy(window);
         return STATUS_OOM;
     };
@@ -763,16 +812,12 @@ fn createWindowInternal(out_window: *u64) u32 {
 fn destroyWindowInternal(window_handle: u64) void {
     const window = resolveWindow(window_handle) orelse return;
 
-    var iter = window.nodes.iterator();
-    while (iter.next()) |entry| {
-        const node_handle = entry.key_ptr.*;
-        const node = entry.value_ptr;
+    for (window.nodes.items) |*node| {
         node.deinit();
-        _ = global_node_to_window.remove(node_handle);
     }
 
     window.nodes.deinit(c_allocator);
-    _ = global_windows.remove(window_handle);
+    unregisterWindow(window_handle);
     c_allocator.destroy(window);
 }
 

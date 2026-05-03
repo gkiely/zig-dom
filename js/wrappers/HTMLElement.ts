@@ -86,8 +86,8 @@ export class HTMLElement extends Element {
     return this.#ensureStyle();
   }
 
-  constructor(window: Element["_window"], handle: number, _skipInitialStyleSync = false) {
-    super(window, handle);
+  constructor(window: Element["_window"], handle: number, nodeType = 1, _skipInitialStyleSync = false) {
+    super(window, handle, nodeType);
   }
 
   override setAttribute(name: string, value: string): void {

@@ -28,7 +28,7 @@
 - Registration: GlobalRegistrator preload setup with idempotent register/reset/unregister.
 - Compatibility exports: PropertySymbol and browser-like Browser/BrowserContext/Page with lifecycle/content/url coverage in integration tests.
 - Test harnesses: Bun unit/integration tests, React smoke integration, tiny WPT-style subset runner with `.any.ts`, `.html` (inline + `META: script=` includes), and manifest-driven variant/variants execution.
-- Performance path optimizations: known-kind node wrapping for creation APIs, lazy `HTMLElement.style` and `Element.classList` allocation, and zero-copy native reads for `getAttribute()`.
+- Performance path optimizations: known-kind node wrapping for creation APIs, lazy `HTMLElement.style` and `Element.classList` allocation, zero-copy native reads for `getAttribute()`, encoded window-scoped native handles with indexed node lookup, and `ReleaseFast` native builds by default.
 - Source import policy: TypeScript source now uses `.ts` relative import specifiers with compiler rewrite to emitted `.js` paths.
 
 ## Known gaps
@@ -40,6 +40,7 @@
 - Expected-failure map is intentionally strict: each entry must include non-empty `reason` and `owner`, and duplicate file/subtest keys are rejected.
 - Custom Elements and Shadow DOM advanced lifecycle semantics are not implemented yet.
 - Benchmark caveats: `global_register_ms` and cross-runtime React smoke are not available for happy-dom/jsdom in the current harness.
+- Benchmark methodology note: `append_10k_children_ms` pre-creates children before timing so the row measures append throughput rather than create+append mixed cost (creation is already covered by `create_10k_elements_ms`).
 
 ## Verification log
 
@@ -55,17 +56,17 @@
 
 ## Benchmark snapshot (latest)
 
-- `create_10k_elements_ms`: zig-dom 23.66, happy-dom 8.58, jsdom 13.12
-- `append_10k_children_ms`: zig-dom 37.62, happy-dom 9.37, jsdom 30.59
-- `set_get_10k_attributes_ms`: zig-dom 26.14, happy-dom 13.11, jsdom 16.35
-- `query_all_div_10k_ms`: zig-dom 13.93, happy-dom 8.47, jsdom 13.26
-- `query_all_class_10k_ms`: zig-dom 12.48, happy-dom 18.27, jsdom 25.10
-- `query_all_attr_10k_ms`: zig-dom 11.97, happy-dom 7.52, jsdom 23.59
-- `inner_html_parse_ms`: zig-dom 22.14, happy-dom 13.97, jsdom 26.35
-- `outer_html_serialize_ms`: zig-dom 1.63, happy-dom 3.03, jsdom 2.39
-- `import_time_ms`: zig-dom 191.54, happy-dom 59.83, jsdom 360.81
-- `reset_500x_ms`: zig-dom 0.78, happy-dom 0.71, jsdom 4.16
-- `react_render_smoke_ms`: zig-dom 138.39
+- `create_10k_elements_ms`: zig-dom 5.02, happy-dom 9.79, jsdom 20.84
+- `append_10k_children_ms`: zig-dom 5.29, happy-dom 7.67, jsdom 17.93
+- `set_get_10k_attributes_ms`: zig-dom 6.42, happy-dom 19.57, jsdom 15.83
+- `query_all_div_10k_ms`: zig-dom 8.04, happy-dom 10.07, jsdom 14.47
+- `query_all_class_10k_ms`: zig-dom 1.93, happy-dom 18.34, jsdom 24.35
+- `query_all_attr_10k_ms`: zig-dom 1.76, happy-dom 8.29, jsdom 18.93
+- `inner_html_parse_ms`: zig-dom 6.42, happy-dom 13.93, jsdom 24.71
+- `outer_html_serialize_ms`: zig-dom 0.18, happy-dom 2.63, jsdom 3.16
+- `import_time_ms`: zig-dom 15.17, happy-dom 51.96, jsdom 350.32
+- `reset_500x_ms`: zig-dom 0.55, happy-dom 0.85, jsdom 3.98
+- `react_render_smoke_ms`: zig-dom 136.12
 
 ## Warm-run timing (macOS)
 

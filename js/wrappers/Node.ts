@@ -20,16 +20,18 @@ export class Node extends EventTargetBase {
 
   readonly _window: Window;
   readonly _handle: number;
+  readonly #nodeType: number;
 
-  constructor(window: Window, handle: number) {
+  constructor(window: Window, handle: number, nodeType?: number) {
     super();
     this._window = window;
     this._handle = handle;
+    this.#nodeType = nodeType ?? native.nodeType(handle);
   }
 
   get nodeType(): number {
     this._window.assertOpen();
-    return native.nodeType(this._handle);
+    return this.#nodeType;
   }
 
   get nodeName(): string {
@@ -102,9 +104,7 @@ export class Node extends EventTargetBase {
   }
 
   appendChild<TNode extends Node>(child: TNode): TNode {
-    this._window.assertOpen();
-
-    if (child instanceof this._window.DocumentFragment) {
+    if (child.#nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
       while (child.firstChild) {
         this.appendChild(child.firstChild);
       }

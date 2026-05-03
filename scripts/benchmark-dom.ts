@@ -286,10 +286,18 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
   });
 
   await withEnv("append_10k_children_ms", async (env) => {
+    const children: Element[] = [];
+    for (let i = 0; i < ELEMENT_COUNT; i += 1) {
+      children.push(env.document.createElement("div"));
+    }
+
     return measureMetric(() => {
       const parent = env.document.createElement("section");
       for (let i = 0; i < ELEMENT_COUNT; i += 1) {
-        parent.appendChild(env.document.createElement("div"));
+        const child = children[i];
+        if (child) {
+          parent.appendChild(child);
+        }
       }
       env.document.body.appendChild(parent);
     });

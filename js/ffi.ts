@@ -266,7 +266,9 @@ export const native = {
   },
   appendChildInWindow(window: number, parent: number, child: number): void {
     const status = nativeLibrary.symbols.zig_dom_window_append_child(window, parent, child);
-    assertStatus(status, "zig_dom_window_append_child");
+    if (status !== NativeStatus.Ok) {
+      throw new Error(`zig_dom_window_append_child failed: ${statusName(status)} (${status})`);
+    }
   },
   insertBefore(parent: number, child: number, referenceChild: number): void {
     const status = nativeLibrary.symbols.zig_dom_node_insert_before(parent, child, referenceChild);

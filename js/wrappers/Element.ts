@@ -67,8 +67,8 @@ export class Element extends Node {
   #datasetProxy: DatasetShape | null = null;
   #attributeCache: Map<string, string | null> | null = null;
 
-  constructor(window: Node["_window"], handle: number) {
-    super(window, handle);
+  constructor(window: Node["_window"], handle: number, nodeType = Node.ELEMENT_NODE) {
+    super(window, handle, nodeType);
   }
 
   get classList(): DOMTokenList {

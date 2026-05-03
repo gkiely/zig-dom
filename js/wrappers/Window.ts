@@ -142,7 +142,7 @@ class WindowLocationImpl implements WindowLocation {
 export class Window {
   readonly _nativeWindowHandle: number;
   readonly #documentHandle: number;
-  readonly #nodeCache = new Map<number, Node>();
+  readonly #nodeCache: Array<Node | undefined> = [];
   #activeElementHandle: number | null = null;
   readonly #selection = new Selection();
   readonly #cookies = new Map<string, string>();
@@ -238,7 +238,8 @@ export class Window {
     if (!handle) return null;
     this.assertOpen();
 
-    const existing = this.#nodeCache.get(handle);
+    const nodeId = handle % 0x1_0000_0000;
+    const existing = this.#nodeCache[nodeId];
     if (existing) {
       return existing;
     }
@@ -252,7 +253,8 @@ export class Window {
     if (!handle) return null;
     this.assertOpen();
 
-    const existing = this.#nodeCache.get(handle);
+    const nodeId = handle % 0x1_0000_0000;
+    const existing = this.#nodeCache[nodeId];
     if (existing) {
       return existing;
     }
@@ -264,37 +266,38 @@ export class Window {
     let wrapped: Node;
     switch (kind) {
       case Node.DOCUMENT_NODE:
-        wrapped = new Document(this, handle);
+        wrapped = new Document(this, handle, kind);
         break;
       case Node.ELEMENT_NODE: {
         const tagName = tagNameHint ?? native.nodeName(handle).toLowerCase();
         if (tagName === "input") {
-          wrapped = new HTMLInputElement(this, handle, skipInitialStyleSync);
+          wrapped = new HTMLInputElement(this, handle, kind, skipInitialStyleSync);
         } else if (tagName === "button") {
-          wrapped = new HTMLButtonElement(this, handle, skipInitialStyleSync);
+          wrapped = new HTMLButtonElement(this, handle, kind, skipInitialStyleSync);
         } else if (tagName === "form") {
-          wrapped = new HTMLFormElement(this, handle, skipInitialStyleSync);
+          wrapped = new HTMLFormElement(this, handle, kind, skipInitialStyleSync);
         } else if (tagName === "iframe") {
-          wrapped = new HTMLIFrameElement(this, handle, skipInitialStyleSync);
+          wrapped = new HTMLIFrameElement(this, handle, kind, skipInitialStyleSync);
         } else {
-          wrapped = new HTMLElement(this, handle, skipInitialStyleSync);
+          wrapped = new HTMLElement(this, handle, kind, skipInitialStyleSync);
         }
         break;
       }
       case Node.TEXT_NODE:
-        wrapped = new Text(this, handle);
+        wrapped = new Text(this, handle, kind);
         break;
       case Node.COMMENT_NODE:
-        wrapped = new Comment(this, handle);
+        wrapped = new Comment(this, handle, kind);
         break;
       case Node.DOCUMENT_FRAGMENT_NODE:
-        wrapped = new DocumentFragment(this, handle);
+        wrapped = new DocumentFragment(this, handle, kind);
         break;
       default:
         throw new Error(`Unsupported native node kind: ${kind}`);
     }
 
-    this.#nodeCache.set(handle, wrapped);
+    const nodeId = handle % 0x1_0000_0000;
+    this.#nodeCache[nodeId] = wrapped;
     return wrapped;
   }
 
@@ -318,7 +321,7 @@ export class Window {
     this.#closed = true;
     this.#activeElementHandle = null;
     native.destroyWindow(this._nativeWindowHandle);
-    this.#nodeCache.clear();
+    this.#nodeCache.length = 0;
   }
 
   getActiveElement(): Element | null {
