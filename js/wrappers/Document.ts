@@ -138,6 +138,7 @@ export class Document extends Node {
   #headCache: Element | null = null;
   #bodyCache: Element | null = null;
   #doctypeCache: DocumentType | null = null;
+  #childNodesViewCache: NodeList | null = null;
 
   constructor(window: Window, handle: number, nodeType = Node.DOCUMENT_NODE) {
     super(window, handle, nodeType);
@@ -148,17 +149,20 @@ export class Document extends Node {
   }
 
   override get childNodes(): NodeList {
-    const baseNodes = super.childNodes.toArray();
-    const doctype = this.doctype as unknown as Node | null;
-    if (!doctype) {
-      return super.childNodes;
+    if (this.#childNodesViewCache) {
+      return this.#childNodesViewCache;
     }
 
-    if (baseNodes.some((node) => node.nodeType === Node.DOCUMENT_TYPE_NODE)) {
-      return super.childNodes;
-    }
+    this.#childNodesViewCache = new NodeList(() => {
+      const baseNodes = super.childNodes.toArray();
+      const doctype = this.doctype as unknown as Node | null;
+      if (!doctype || baseNodes.some((node) => node.nodeType === Node.DOCUMENT_TYPE_NODE)) {
+        return baseNodes;
+      }
+      return [doctype, ...baseNodes];
+    });
 
-    return new NodeList(() => [doctype, ...baseNodes]);
+    return this.#childNodesViewCache;
   }
 
   get documentElement(): Element {

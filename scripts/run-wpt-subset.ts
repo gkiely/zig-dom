@@ -496,7 +496,25 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     }
   };
 
-  const assert_throws_dom = (expected: string | number, callback: () => void, message = "Expected DOM exception") => {
+  const assert_throws_dom = (
+    expected: string | number,
+    second: (() => void) | (new (...args: never[]) => unknown),
+    third?: () => void,
+    fourth?: string
+  ) => {
+    const callback = typeof third === "function"
+      ? third
+      : typeof second === "function"
+        ? (second as () => void)
+        : undefined;
+    const message = typeof fourth === "string"
+      ? fourth
+      : "Expected DOM exception";
+
+    if (!callback) {
+      throw new Error(`${message}: missing callback`);
+    }
+
     let thrown: unknown = null;
     try {
       callback();

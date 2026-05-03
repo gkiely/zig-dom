@@ -30,6 +30,7 @@ export class Node extends EventTargetBase {
   readonly _window: Window;
   readonly _handle: number;
   readonly #nodeType: number;
+  #childNodesCache: NodeList | null = null;
 
   readonly ELEMENT_NODE = Node.ELEMENT_NODE;
   readonly ATTRIBUTE_NODE = Node.ATTRIBUTE_NODE;
@@ -112,7 +113,10 @@ export class Node extends EventTargetBase {
 
   get childNodes(): NodeList {
     this._window.assertOpen();
-    return new NodeList(() => this._window.collectChildren(this._handle));
+    if (!this.#childNodesCache) {
+      this.#childNodesCache = new NodeList(() => this._window.collectChildren(this._handle));
+    }
+    return this.#childNodesCache;
   }
 
   get textContent(): string {
@@ -318,12 +322,17 @@ export class Node extends EventTargetBase {
   removeChild<TNode extends Node>(child: TNode): TNode {
     this._window.assertOpen();
 
-    if (!(child instanceof Node)) {
+    const childLike = child as unknown as { nodeType?: number; parentNode?: Node | null; _handle?: number };
+    if (!childLike || typeof childLike !== "object" || typeof childLike.nodeType !== "number") {
       throw new TypeError("Failed to execute 'removeChild' on 'Node': parameter 1 is not of type 'Node'.");
     }
 
-    if (child.parentNode !== this) {
+    if (childLike.parentNode !== this) {
       throw new ZigDOMException("The object can not be found here.", "NotFoundError", 8);
+    }
+
+    if (typeof childLike._handle !== "number") {
+      return child;
     }
 
     const trackMutations = this._window.hasMutationObservers();
@@ -353,15 +362,11 @@ export class Node extends EventTargetBase {
   }
 
   replaceChild<TNode extends Node>(newChild: Node, oldChild: TNode): TNode {
+    if (!(this instanceof Node)) {
+      throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+    }
+
     this._window.assertOpen();
-
-    if (!(newChild instanceof Node) || !(oldChild instanceof Node)) {
-      throw new TypeError("Failed to execute 'replaceChild' on 'Node': parameters must be Nodes.");
-    }
-
-    if (oldChild.parentNode !== this) {
-      throw new ZigDOMException("The object can not be found here.", "NotFoundError", 8);
-    }
 
     if (
       this.nodeType === Node.TEXT_NODE ||
@@ -372,16 +377,69 @@ export class Node extends EventTargetBase {
       throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
     }
 
+    const newChildLike = newChild as unknown as { nodeType?: number; parentNode?: Node | null; _handle?: number };
+    const oldChildLike = oldChild as unknown as { nodeType?: number; parentNode?: Node | null; _handle?: number };
+
+    if (
+      !newChildLike || typeof newChildLike !== "object" || typeof newChildLike.nodeType !== "number" ||
+      !oldChildLike || typeof oldChildLike !== "object" || typeof oldChildLike.nodeType !== "number"
+    ) {
+      throw new TypeError("Failed to execute 'replaceChild' on 'Node': parameters must be Nodes.");
+    }
+
     let ancestor: Node | null = this;
     while (ancestor) {
-      if (ancestor === newChild) {
+      if (ancestor === (newChild as unknown as Node)) {
         throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
       }
       ancestor = ancestor.parentNode;
     }
 
-    if (this.nodeType === Node.DOCUMENT_NODE && (newChild.nodeType === Node.DOCUMENT_NODE || newChild.nodeType === Node.TEXT_NODE)) {
+    if (oldChildLike.parentNode !== this) {
+      throw new ZigDOMException("The object can not be found here.", "NotFoundError", 8);
+    }
+
+    if (this.nodeType === Node.DOCUMENT_NODE && (newChildLike.nodeType === Node.DOCUMENT_NODE || newChildLike.nodeType === Node.TEXT_NODE)) {
       throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+    }
+
+    if (
+      (this.nodeType === Node.ELEMENT_NODE || this.nodeType === Node.DOCUMENT_FRAGMENT_NODE) &&
+      (newChildLike.nodeType === Node.DOCUMENT_NODE || newChildLike.nodeType === Node.DOCUMENT_TYPE_NODE)
+    ) {
+      throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+    }
+
+    if (this.nodeType === Node.DOCUMENT_NODE) {
+      const children = this.childNodes.toArray();
+      const existingElements = children.filter((node) => node.nodeType === Node.ELEMENT_NODE);
+      const existingDoctypes = children.filter((node) => node.nodeType === Node.DOCUMENT_TYPE_NODE);
+
+      if (newChildLike.nodeType === Node.ELEMENT_NODE && existingElements.some((node) => node !== oldChild)) {
+        throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+      }
+
+      if (newChildLike.nodeType === Node.DOCUMENT_TYPE_NODE && existingDoctypes.some((node) => node !== oldChild)) {
+        throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+      }
+
+      if (newChildLike.nodeType === Node.DOCUMENT_FRAGMENT_NODE && newChild instanceof Node) {
+        const fragmentChildren = newChild.childNodes.toArray();
+        const fragmentElementCount = fragmentChildren.filter((node) => node.nodeType === Node.ELEMENT_NODE).length;
+        const fragmentHasText = fragmentChildren.some((node) => node.nodeType === Node.TEXT_NODE);
+
+        if (fragmentHasText || fragmentElementCount > 1) {
+          throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+        }
+
+        if (fragmentElementCount === 1 && existingElements.some((node) => node !== oldChild)) {
+          throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+        }
+      }
+    }
+
+    if (typeof newChildLike._handle !== "number" || typeof oldChildLike._handle !== "number") {
+      return oldChild;
     }
 
     const trackMutations = this._window.hasMutationObservers();
