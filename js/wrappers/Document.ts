@@ -16,6 +16,10 @@ import type { Window } from "./Window.ts";
 const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
 const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
 
+function asciiLowercase(value: string): string {
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
 function createSyntheticAttr(document: Document, name: string, namespaceURI: string | null): Attr {
   const AttrCtor = ((document._window as unknown as {
     Attr?: new () => Record<string, unknown>;
@@ -333,7 +337,7 @@ export class Document extends Node {
 
   createElement(tagName: string): Element {
     this._window.assertOpen();
-    const normalizedTagName = tagName.toLowerCase();
+    const normalizedTagName = asciiLowercase(tagName);
     const handle = native.createElement(this._handle, normalizedTagName);
     const element = this._window.createKnownNode(handle, Node.ELEMENT_NODE, {
       tagName: normalizedTagName,
@@ -446,8 +450,18 @@ export class Document extends Node {
 
   getElementsByTagName(tagName: string): HTMLCollection {
     this._window.assertOpen();
-    const selector = tagName === "*" ? "*" : tagName.toLowerCase();
-    return new HTMLCollection(() => this.querySelectorAll(selector));
+    const expectedHtmlName = asciiLowercase(tagName);
+    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+      if (tagName === "*") {
+        return true;
+      }
+
+      const qualifiedName = element.prefix ? `${element.prefix}:${element.localName}` : element.localName;
+      if (element.namespaceURI === "http://www.w3.org/1999/xhtml") {
+        return qualifiedName === expectedHtmlName;
+      }
+      return qualifiedName === tagName;
+    }));
   }
 
   getElementsByTagNameNS(namespace: string | null, localName: string): HTMLCollection {

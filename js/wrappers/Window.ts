@@ -421,6 +421,15 @@ export class Window extends EventTargetBase {
       });
     }
 
+    if (!("NamedNodeMap" in selfRecord)) {
+      class NamedNodeMapImpl {}
+      Object.defineProperty(this, "NamedNodeMap", {
+        value: NamedNodeMapImpl,
+        configurable: true,
+        writable: true
+      });
+    }
+
     const WindowCtor = this.constructor as {
       new (options?: { url?: string }): Window;
     };

@@ -23,6 +23,10 @@ function propertyToDataAttribute(name: string): string {
   return `data-${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
 }
 
+function asciiLowercase(value: string): string {
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
 class DOMTokenList {
   constructor(private readonly element: Element, private readonly attributeName: string) {}
 
@@ -121,7 +125,7 @@ export class Element extends Node {
 
   #attributeKey(name: string): string {
     if (this.#isHtmlElement()) {
-      return name.toLowerCase();
+      return asciiLowercase(name);
     }
     return name;
   }
@@ -137,20 +141,28 @@ export class Element extends Node {
     return this.#classList;
   }
 
-  get relList(): DOMTokenList {
-    return new DOMTokenList(this, "rel");
+  get relList(): DOMTokenList | undefined {
+    const isSupportedHtml = this.namespaceURI === "http://www.w3.org/1999/xhtml" && ["a", "area", "link"].includes(this.localName);
+    const isSupportedSvg = this.namespaceURI === "http://www.w3.org/2000/svg" && this.localName === "a";
+    return isSupportedHtml || isSupportedSvg ? new DOMTokenList(this, "rel") : undefined;
   }
 
-  get htmlFor(): DOMTokenList {
-    return new DOMTokenList(this, "for");
+  get htmlFor(): DOMTokenList | undefined {
+    return this.namespaceURI === "http://www.w3.org/1999/xhtml" && this.localName === "output"
+      ? new DOMTokenList(this, "for")
+      : undefined;
   }
 
-  get sandbox(): DOMTokenList {
-    return new DOMTokenList(this, "sandbox");
+  get sandbox(): DOMTokenList | undefined {
+    return this.namespaceURI === "http://www.w3.org/1999/xhtml" && this.localName === "iframe"
+      ? new DOMTokenList(this, "sandbox")
+      : undefined;
   }
 
-  get sizes(): DOMTokenList {
-    return new DOMTokenList(this, "sizes");
+  get sizes(): DOMTokenList | undefined {
+    return this.namespaceURI === "http://www.w3.org/1999/xhtml" && this.localName === "link"
+      ? new DOMTokenList(this, "sizes")
+      : undefined;
   }
 
   get tagName(): string {
@@ -228,7 +240,7 @@ export class Element extends Node {
       cache.set(this.#attributeKey(attr.name), attr.value);
     }
     this.#attributeCache = cache;
-    return attrs.map((attr) => {
+    const collection = attrs.map((attr) => {
       const metadata = this.#attributeMetadata.get(attr.name);
       const name = this.#isHtmlElement() && !this.#nonHtmlAttributes.has(attr.name) && !metadata
         ? attr.name.toLowerCase()
@@ -242,6 +254,81 @@ export class Element extends Node {
       localName: metadata?.localName ?? attributeLocalName(name)
     };
     });
+    const collectionItems = Array.from(collection);
+    const named = collection as unknown as Array<{ name: string; value: string }> & Record<string, unknown>;
+    const namedNodeMapCtor = (this._window as unknown as { NamedNodeMap?: { prototype: Record<string, unknown> } }).NamedNodeMap;
+    const namedNodeMapPrototype = namedNodeMapCtor?.prototype;
+    if (namedNodeMapPrototype) {
+      const definePrototypeMethod = (name: string, value: Function) => {
+        if (!(name in namedNodeMapPrototype)) {
+          Object.defineProperty(namedNodeMapPrototype, name, {
+            value,
+            configurable: true,
+            writable: true
+          });
+        }
+      };
+      definePrototypeMethod("item", function(this: Array<{ name: string; value: string }>, index: number) {
+        return this[index] ?? null;
+      });
+      definePrototypeMethod("getNamedItem", function(this: Record<string, unknown>, name: string) {
+        return (this.__owner as Element).getAttributeNode(name);
+      });
+      definePrototypeMethod("getNamedItemNS", function(this: Record<string, unknown>, namespace: string | null, localName: string) {
+        return (this.__owner as Element).getAttributeNodeNS(namespace, localName);
+      });
+      definePrototypeMethod("setNamedItem", function(this: Array<{ name: string; value: string }> & Record<string, unknown>, attribute: Attr) {
+        const previous = (this.__owner as Element).setAttributeNode(attribute);
+        if (!(attribute.name in this)) {
+          this[attribute.name] = attribute;
+          Array.prototype.push.call(this, attribute as unknown as { name: string; value: string });
+        }
+        return previous;
+      });
+      definePrototypeMethod("setNamedItemNS", function(this: Array<{ name: string; value: string }> & Record<string, unknown>, attribute: Attr) {
+        const previous = (this.__owner as Element).setAttributeNodeNS(attribute);
+        if (!(attribute.name in this)) {
+          this[attribute.name] = attribute;
+          Array.prototype.push.call(this, attribute as unknown as { name: string; value: string });
+        }
+        return previous;
+      });
+      definePrototypeMethod("removeNamedItem", function(this: Array<{ name: string; value: string }> & Record<string, unknown>, name: string) {
+        const owner = this.__owner as Element;
+        const attr = (this[name] as Attr | undefined) ?? owner.getAttributeNode(name);
+        if (!attr) {
+          throw new DOMException("The node was not found.", "NotFoundError");
+        }
+        owner.removeAttribute(name);
+        delete this[name];
+        const index = Array.prototype.findIndex.call(this, (candidate: { name: string }) => candidate.name === name);
+        if (index >= 0) {
+          Array.prototype.splice.call(this, index, 1);
+        }
+        return attr;
+      });
+      definePrototypeMethod("removeNamedItemNS", function(this: Array<{ name: string; value: string }> & Record<string, unknown>, namespace: string | null, localName: string) {
+        const owner = this.__owner as Element;
+        const attr = owner.getAttributeNodeNS(namespace, localName);
+        if (!attr) {
+          throw new DOMException("The node was not found.", "NotFoundError");
+        }
+        owner.removeAttributeNS(namespace, localName);
+        delete this[attr.name];
+        return attr;
+      });
+      Object.setPrototypeOf(named, namedNodeMapPrototype);
+    }
+    Object.defineProperty(named, "__owner", {
+      value: this,
+      configurable: true
+    });
+    for (const attr of collectionItems) {
+      if (!(attr.name in named)) {
+        named[attr.name] = attr;
+      }
+    }
+    return collection;
   }
 
   get dataset(): DatasetShape {
@@ -373,6 +460,15 @@ export class Element extends Node {
     } as unknown as Attr;
   }
 
+  getAttributeNodeNS(namespace: string | null, localName: string): Attr | null {
+    for (const [name, metadata] of this.#attributeMetadata) {
+      if (metadata.namespaceURI === namespace && metadata.localName === localName) {
+        return this.getAttributeNode(name);
+      }
+    }
+    return namespace == null ? this.getAttributeNode(localName) : null;
+  }
+
   setAttributeNode(attribute: Attr): Attr | null {
     const previous = this.getAttributeNode(attribute.name);
     this.setAttribute(attribute.name, attribute.value ?? "");
@@ -384,7 +480,15 @@ export class Element extends Node {
   }
 
   setAttributeNodeNS(attribute: Attr): Attr | null {
-    return this.setAttributeNode(attribute);
+    const namespace = attribute.namespaceURI ?? null;
+    const qualifiedName = attribute.name;
+    const previous = this.getAttributeNodeNS(namespace, attribute.localName ?? attribute.name);
+    this.setAttributeNS(namespace, qualifiedName, attribute.value ?? "");
+
+    const mutableAttribute = attribute as unknown as { ownerElement?: Element | null };
+    mutableAttribute.ownerElement = this;
+
+    return previous;
   }
 
   setAttribute(name: string, value: string): void {
@@ -392,6 +496,8 @@ export class Element extends Node {
     const previousValue = this.getAttribute(key);
     native.setAttribute(this._handle, key, value);
     if (!this.#isHtmlElement()) {
+      this.#nonHtmlAttributes.set(key, value);
+    } else if (key !== name.toLowerCase()) {
       this.#nonHtmlAttributes.set(key, value);
     }
     if (!this.#attributeNamespaces.has(key)) {
@@ -449,6 +555,22 @@ export class Element extends Node {
     this.removeAttribute(localName);
   }
 
+  removeAttributeNode(attribute: Attr): Attr {
+    const namespace = attribute.namespaceURI ?? null;
+    const localName = attribute.localName ?? attribute.name;
+    const current = namespace == null ? this.getAttributeNode(attribute.name) : this.getAttributeNodeNS(namespace, localName);
+    if (!current) {
+      throw new DOMException("The node was not found.", "NotFoundError");
+    }
+    if (namespace == null) {
+      this.removeAttribute(attribute.name);
+    } else {
+      this.removeAttributeNS(namespace, localName);
+    }
+    (attribute as unknown as { ownerElement?: Element | null }).ownerElement = null;
+    return attribute;
+  }
+
   hasAttribute(name: string): boolean {
     const key = this.#attributeKey(name);
     if (!this.#isHtmlElement()) {
@@ -487,6 +609,22 @@ export class Element extends Node {
     return this.getAttributeNS(namespace, localName) != null;
   }
 
+  toggleAttribute(name: string, force?: boolean): boolean {
+    const exists = this.hasAttribute(name);
+    if (force === true || (!exists && force !== false)) {
+      this.setAttribute(name, "");
+      return true;
+    }
+    if (exists) {
+      this.removeAttribute(name);
+    }
+    return false;
+  }
+
+  getAttributeNames(): string[] {
+    return this.attributes.map((attribute) => attribute.name);
+  }
+
   matches(selector: string): boolean {
     return elementMatchesSelector(this, selector);
   }
@@ -501,8 +639,18 @@ export class Element extends Node {
   }
 
   getElementsByTagName(tagName: string): HTMLCollection {
-    const selector = tagName === "*" ? "*" : tagName.toLowerCase();
-    return new HTMLCollection(() => this.querySelectorAll(selector));
+    const expectedHtmlName = asciiLowercase(tagName);
+    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+      if (tagName === "*") {
+        return true;
+      }
+
+      const qualifiedName = element.prefix ? `${element.prefix}:${element.localName}` : element.localName;
+      if (element.namespaceURI === "http://www.w3.org/1999/xhtml") {
+        return qualifiedName === expectedHtmlName;
+      }
+      return qualifiedName === tagName;
+    }));
   }
 
   getElementsByTagNameNS(namespace: string | null, localName: string): HTMLCollection {
