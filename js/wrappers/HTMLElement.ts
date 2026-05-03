@@ -2,6 +2,7 @@ import type { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
 import { Event } from "./Event.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
+import type { Window } from "./Window.ts";
 
 class CSSStyleDeclaration {
   readonly #onChange: (cssText: string) => void;
@@ -184,10 +185,11 @@ export class HTMLElement extends Element {
     const normalizedName = name.toLowerCase();
 
     if (normalizedName.startsWith("on")) {
-      const currentHandler = (this as unknown as Record<string, unknown>)[normalizedName];
-      if (typeof currentHandler !== "function") {
-        (this as unknown as Record<string, unknown>)[normalizedName] = () => {};
-      }
+      const handlerBody = String(value);
+      const compiled = new Function("event", "window", `with (this) { with (window) { ${handlerBody} } }`);
+      (this as unknown as Record<string, unknown>)[normalizedName] = (event: Event) => {
+        compiled.call(this, event, this._window as unknown as Record<string, unknown>);
+      };
     }
 
     if (normalizedName === "style" && !this.#syncingStyleAttribute && this.#style) {
@@ -315,7 +317,25 @@ export class HTMLButtonElement extends HTMLElement {
   }
 }
 
-export class HTMLIFrameElement extends HTMLElement {}
+export class HTMLIFrameElement extends HTMLElement {
+  #contentWindow: Window | null = null;
+
+  get contentWindow(): Window {
+    if (this.#contentWindow) {
+      return this.#contentWindow;
+    }
+
+    const WindowCtor = this._window.constructor as {
+      new (options?: { url?: string }): Window;
+    };
+    this.#contentWindow = new WindowCtor({ url: this._window.location.href });
+    return this.#contentWindow;
+  }
+
+  get contentDocument(): Window["document"] {
+    return this.contentWindow.document;
+  }
+}
 
 export class HTMLInputElement extends HTMLElement {
   #value: string | null = null;

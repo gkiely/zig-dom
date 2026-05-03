@@ -6,8 +6,8 @@ import { Document } from "./Document.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { DocumentType } from "./DocumentType.ts";
 import { Element } from "./Element.ts";
-import { HTMLCollection } from "./HTMLCollection.ts";
 import { CompositionEvent, CustomEvent, Event, EventTargetBase, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
+import { HTMLCollection } from "./HTMLCollection.ts";
 import {
   HTMLButtonElement,
   HTMLElement,
@@ -262,11 +262,57 @@ export class Window extends EventTargetBase {
     Object.defineProperty(this, "self", { value: this, configurable: true });
     Object.defineProperty(this, "parent", { value: this, configurable: true });
     Object.defineProperty(this, "top", { value: this, configurable: true });
-    const framesLike = {
-      0: this,
-      length: 1,
-      item: (index: number) => (index === 0 ? this : null)
-    };
+    const framesLike = new Proxy({
+      item: (index: number) => this.collectFrameWindows()[index] ?? null
+    }, {
+      get: (target, property, receiver) => {
+        if (property === "length") {
+          return this.collectFrameWindows().length;
+        }
+
+        if (typeof property === "string" && /^\d+$/.test(property)) {
+          return this.collectFrameWindows()[Number(property)] ?? undefined;
+        }
+
+        return Reflect.get(target, property, receiver);
+      },
+      has: (target, property) => {
+        if (typeof property === "string" && /^\d+$/.test(property)) {
+          return Number(property) < this.collectFrameWindows().length;
+        }
+        return Reflect.has(target, property);
+      },
+      ownKeys: (target) => {
+        const frameWindows = this.collectFrameWindows();
+        const numeric = frameWindows.map((_, index) => String(index));
+        return [...Reflect.ownKeys(target), ...numeric, "length"];
+      },
+      getOwnPropertyDescriptor: (target, property) => {
+        if (property === "length") {
+          return {
+            configurable: true,
+            enumerable: false,
+            writable: false,
+            value: this.collectFrameWindows().length
+          };
+        }
+
+        if (typeof property === "string" && /^\d+$/.test(property)) {
+          const frameWindows = this.collectFrameWindows();
+          const index = Number(property);
+          if (index < frameWindows.length) {
+            return {
+              configurable: true,
+              enumerable: true,
+              writable: false,
+              value: frameWindows[index]
+            };
+          }
+        }
+
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      }
+    });
     Object.defineProperty(this, "frames", { value: framesLike, configurable: true });
     Object.defineProperty(this, "opener", {
       value: null,
@@ -555,9 +601,33 @@ export class Window extends EventTargetBase {
       if (cursor.nodeType === Node.DOCUMENT_NODE) {
         return true;
       }
+
+      if (cursor.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+        const host: Node | null | undefined = (cursor as unknown as { host?: Node | null }).host;
+        if (host) {
+          cursor = host;
+          continue;
+        }
+      }
+
       cursor = cursor.parentNode;
     }
     return false;
+  }
+
+  private collectFrameWindows(): Window[] {
+    const candidates = this.document.querySelectorAll("iframe") as unknown as Array<{
+      contentWindow?: Window | null;
+    }>;
+
+    const frames: Window[] = [];
+    for (const candidate of candidates) {
+      if (candidate.contentWindow) {
+        frames.push(candidate.contentWindow);
+      }
+    }
+
+    return frames;
   }
 
   upgradeElementInstance(element: Element, normalizedTagName?: string): void {

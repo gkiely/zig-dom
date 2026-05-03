@@ -27,6 +27,15 @@ type Manifest = {
   tests: ManifestEntry[];
 };
 
+type ExpectedEntry = {
+  file: string;
+  subtest: string;
+};
+
+type ExpectedMap = {
+  expectedFailures?: ExpectedEntry[];
+};
+
 type Summary = {
   pass: number;
   fail: number;
@@ -105,6 +114,12 @@ const startEntry = optionalNumberArg("--start-entry") ?? 0;
 const entryCount = optionalNumberArg("--entry-count");
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
+const expectedMap = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
+const expectedTimeoutFiles = new Set(
+  (expectedMap.expectedFailures ?? [])
+    .filter((entry) => entry.subtest === "__timeout__")
+    .map((entry) => entry.file)
+);
 
 const expandedEntries: Array<{ entry: ManifestEntry; variant: string | undefined }> = [];
 for (const entry of manifest.tests) {
@@ -169,7 +184,12 @@ for (let index = 0; index < selectedEntries.length; index += 1) {
 
   if (timedOut) {
     failed += 1;
-    console.log(`FAIL ${current.entry.file} :: __timeout__ :: timed out after ${entryTimeoutMs}ms`);
+    if (expectedTimeoutFiles.has(current.entry.file)) {
+      expectedFail += 1;
+      console.log(`EXPECTED_FAIL ${current.entry.file} :: __timeout__ :: timed out after ${entryTimeoutMs}ms`);
+    } else {
+      console.log(`FAIL ${current.entry.file} :: __timeout__ :: timed out after ${entryTimeoutMs}ms`);
+    }
   } else {
     const summary = parseSummary(combined);
     if (summary) {

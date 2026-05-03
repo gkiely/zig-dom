@@ -190,6 +190,9 @@ export class Node extends EventTargetBase {
   }
 
   appendChild<TNode extends Node>(child: TNode): TNode {
+    this._window.assertOpen();
+    validatePreInsertion(this, child, null);
+
     if (child.#nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
       while (child.firstChild) {
         this.appendChild(child.firstChild);
@@ -259,8 +262,14 @@ export class Node extends EventTargetBase {
       throw new Error("append() requires an owner document");
     }
 
-    for (const node of nodes as unknown[]) {
-      this.appendChild(coerceInsertionNode(document, node));
+    const insertionNodes = (nodes as unknown[]).map((node) => coerceInsertionNode(document, node));
+    if (insertionNodes.length === 0) {
+      return;
+    }
+
+    validateInsertionSequence(this, insertionNodes, null);
+    for (const node of insertionNodes) {
+      this.appendChild(node);
     }
   }
 
@@ -275,9 +284,15 @@ export class Node extends EventTargetBase {
       throw new Error("prepend() requires an owner document");
     }
 
+    const insertionNodes = (nodes as unknown[]).map((node) => coerceInsertionNode(document, node));
+    if (insertionNodes.length === 0) {
+      return;
+    }
+
     const referenceNode = this.firstChild;
-    for (const node of nodes as unknown[]) {
-      this.insertBefore(coerceInsertionNode(document, node), referenceNode);
+    validateInsertionSequence(this, insertionNodes, referenceNode);
+    for (const node of insertionNodes) {
+      this.insertBefore(node, referenceNode);
     }
   }
 
@@ -297,6 +312,7 @@ export class Node extends EventTargetBase {
 
   insertBefore<TNode extends Node>(newChild: TNode, referenceChild: Node | null): TNode {
     this._window.assertOpen();
+    validatePreInsertion(this, newChild, referenceChild);
 
     if (newChild instanceof this._window.DocumentFragment) {
       const children = newChild.childNodes.toArray();
@@ -1007,6 +1023,139 @@ function adoptForeignNodeForParent(parent: Node, foreignNode: Node): Node {
   const imported = destinationDocument.importNode(foreignNode, true);
   remapNodeIdentity(foreignNode, imported);
   return foreignNode;
+}
+
+function throwHierarchyRequestError(): never {
+  throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+}
+
+function validatePreInsertion(parent: Node, newChild: Node, referenceChild: Node | null): void {
+  const parentType = parent.nodeType;
+
+  if (
+    parentType === Node.TEXT_NODE ||
+    parentType === Node.COMMENT_NODE ||
+    parentType === Node.PROCESSING_INSTRUCTION_NODE ||
+    parentType === Node.DOCUMENT_TYPE_NODE
+  ) {
+    throwHierarchyRequestError();
+  }
+
+  if (referenceChild && referenceChild.parentNode !== parent) {
+    throw new ZigDOMException("The object can not be found here.", "NotFoundError", 8);
+  }
+
+  let ancestor: Node | null = parent;
+  while (ancestor) {
+    if (ancestor === newChild) {
+      throwHierarchyRequestError();
+    }
+    ancestor = ancestor.parentNode;
+  }
+
+  const nodesToInsert = newChild.nodeType === Node.DOCUMENT_FRAGMENT_NODE
+    ? newChild.childNodes.toArray()
+    : [newChild];
+
+  for (const candidate of nodesToInsert) {
+    let parentAncestor: Node | null = parent;
+    while (parentAncestor) {
+      if (parentAncestor === candidate) {
+        throwHierarchyRequestError();
+      }
+      parentAncestor = parentAncestor.parentNode;
+    }
+
+    const type = candidate.nodeType;
+    const isAllowedNodeType =
+      type === Node.DOCUMENT_FRAGMENT_NODE ||
+      type === Node.DOCUMENT_TYPE_NODE ||
+      type === Node.ELEMENT_NODE ||
+      type === Node.TEXT_NODE ||
+      type === Node.PROCESSING_INSTRUCTION_NODE ||
+      type === Node.COMMENT_NODE;
+    if (!isAllowedNodeType) {
+      throwHierarchyRequestError();
+    }
+
+    if (parentType !== Node.DOCUMENT_NODE && type === Node.DOCUMENT_TYPE_NODE) {
+      throwHierarchyRequestError();
+    }
+
+    if (
+      (parentType === Node.ELEMENT_NODE || parentType === Node.DOCUMENT_FRAGMENT_NODE) &&
+      type === Node.DOCUMENT_TYPE_NODE
+    ) {
+      throwHierarchyRequestError();
+    }
+  }
+
+  if (parentType !== Node.DOCUMENT_NODE) {
+    return;
+  }
+
+  const children = parent.childNodes.toArray();
+  if (newChild.parentNode === parent && newChild.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
+    const existingIndex = children.indexOf(newChild);
+    if (existingIndex >= 0) {
+      children.splice(existingIndex, 1);
+    }
+  }
+
+  const referenceIndex = referenceChild ? children.indexOf(referenceChild) : children.length;
+  if (referenceChild && referenceIndex < 0) {
+    throw new ZigDOMException("The object can not be found here.", "NotFoundError", 8);
+  }
+
+  const candidateChildren = [
+    ...children.slice(0, referenceIndex),
+    ...nodesToInsert,
+    ...children.slice(referenceIndex)
+  ];
+
+  let elementCount = 0;
+  let doctypeCount = 0;
+  let firstElementIndex = -1;
+  let firstDoctypeIndex = -1;
+
+  for (let index = 0; index < candidateChildren.length; index += 1) {
+    const type = candidateChildren[index]?.nodeType;
+    if (type === Node.TEXT_NODE) {
+      throwHierarchyRequestError();
+    }
+    if (type === Node.ELEMENT_NODE) {
+      elementCount += 1;
+      if (firstElementIndex < 0) {
+        firstElementIndex = index;
+      }
+    }
+    if (type === Node.DOCUMENT_TYPE_NODE) {
+      doctypeCount += 1;
+      if (firstDoctypeIndex < 0) {
+        firstDoctypeIndex = index;
+      }
+    }
+  }
+
+  if (elementCount > 1 || doctypeCount > 1) {
+    throwHierarchyRequestError();
+  }
+
+  if (firstElementIndex >= 0 && firstDoctypeIndex >= 0 && firstDoctypeIndex > firstElementIndex) {
+    throwHierarchyRequestError();
+  }
+}
+
+function validateInsertionSequence(parent: Node, insertionNodes: Node[], referenceChild: Node | null): void {
+  const syntheticFragment = {
+    nodeType: Node.DOCUMENT_FRAGMENT_NODE,
+    parentNode: null,
+    childNodes: {
+      toArray: () => insertionNodes
+    }
+  } as unknown as Node;
+
+  validatePreInsertion(parent, syntheticFragment, referenceChild);
 }
 
 function remapNodeIdentity(source: Node, replacement: Node): void {

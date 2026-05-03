@@ -71,9 +71,21 @@ export class Element extends Node {
   #datasetProxy: DatasetShape | null = null;
   #attributeCache: Map<string, string | null> | null = null;
   #attributeNamespaces: Map<string, string | null> = new Map();
+  #nonHtmlAttributes: Map<string, string> = new Map();
 
   constructor(window: Node["_window"], handle: number, nodeType = Node.ELEMENT_NODE) {
     super(window, handle, nodeType);
+  }
+
+  #attributeKey(name: string): string {
+    if (this.#isHtmlElement()) {
+      return name.toLowerCase();
+    }
+    return name;
+  }
+
+  #isHtmlElement(): boolean {
+    return this.namespaceURI === "http://www.w3.org/1999/xhtml";
   }
 
   get classList(): DOMTokenList {
@@ -142,17 +154,19 @@ export class Element extends Node {
   }
 
   get attributes(): Array<{ name: string; value: string }> {
-    const attrs = native.elementAttributes(this._handle) as AttributeEntry[];
+    const attrs = this.#isHtmlElement() || this.#nonHtmlAttributes.size === 0
+      ? (native.elementAttributes(this._handle) as AttributeEntry[])
+      : Array.from(this.#nonHtmlAttributes.entries()).map(([name, value]) => ({ name, value }));
     const ownerDocument = this.ownerDocument;
     const cache = new Map<string, string | null>();
     for (const attr of attrs) {
-      cache.set(attr.name.toLowerCase(), attr.value);
+      cache.set(this.#attributeKey(attr.name), attr.value);
     }
     this.#attributeCache = cache;
     return attrs.map((attr) => ({
       ...attr,
       ownerDocument,
-      namespaceURI: this.#attributeNamespaces.get(attr.name.toLowerCase()) ?? attributeNamespace(attr.name),
+      namespaceURI: this.#attributeNamespaces.get(this.#attributeKey(attr.name)) ?? attributeNamespace(attr.name),
       prefix: attributePrefix(attr.name),
       localName: attributeLocalName(attr.name)
     }));
@@ -242,7 +256,16 @@ export class Element extends Node {
   }
 
   getAttribute(name: string): string | null {
-    const key = name.toLowerCase();
+    const key = this.#attributeKey(name);
+    if (!this.#isHtmlElement()) {
+      if (this.#nonHtmlAttributes.has(key)) {
+        return this.#nonHtmlAttributes.get(key) ?? null;
+      }
+      if (this.#nonHtmlAttributes.size > 0) {
+        return null;
+      }
+    }
+
     if (this.#attributeCache?.has(key)) {
       return this.#attributeCache.get(key) ?? null;
     }
@@ -266,7 +289,7 @@ export class Element extends Node {
       value,
       ownerElement: this,
       ownerDocument: this.ownerDocument,
-      namespaceURI: this.#attributeNamespaces.get(name.toLowerCase()) ?? null
+      namespaceURI: this.#attributeNamespaces.get(this.#attributeKey(name)) ?? null
     } as unknown as Attr;
   }
 
@@ -285,9 +308,12 @@ export class Element extends Node {
   }
 
   setAttribute(name: string, value: string): void {
-    const key = name.toLowerCase();
+    const key = this.#attributeKey(name);
     const previousValue = this.getAttribute(key);
     native.setAttribute(this._handle, key, value);
+    if (!this.#isHtmlElement()) {
+      this.#nonHtmlAttributes.set(key, value);
+    }
     if (!this.#attributeNamespaces.has(key)) {
       this.#attributeNamespaces.set(key, attributeNamespace(name));
     }
@@ -299,9 +325,12 @@ export class Element extends Node {
   }
 
   setAttributeNS(namespace: string | null, qualifiedName: string, value: string): void {
-    const key = qualifiedName.toLowerCase();
+    const key = this.#attributeKey(qualifiedName);
     const previousValue = this.getAttribute(key);
     native.setAttribute(this._handle, key, value);
+    if (!this.#isHtmlElement()) {
+      this.#nonHtmlAttributes.set(key, value);
+    }
     this.#attributeNamespaces.set(key, namespace);
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
@@ -311,9 +340,12 @@ export class Element extends Node {
   }
 
   removeAttribute(name: string): void {
-    const key = name.toLowerCase();
+    const key = this.#attributeKey(name);
     const previousValue = this.getAttribute(key);
     native.removeAttribute(this._handle, key);
+    if (!this.#isHtmlElement()) {
+      this.#nonHtmlAttributes.delete(key);
+    }
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
@@ -327,7 +359,16 @@ export class Element extends Node {
   }
 
   hasAttribute(name: string): boolean {
-    const key = name.toLowerCase();
+    const key = this.#attributeKey(name);
+    if (!this.#isHtmlElement()) {
+      if (this.#nonHtmlAttributes.has(key)) {
+        return true;
+      }
+      if (this.#nonHtmlAttributes.size > 0) {
+        return false;
+      }
+    }
+
     if (this.#attributeCache?.has(key)) {
       return this.#attributeCache.get(key) != null;
     }

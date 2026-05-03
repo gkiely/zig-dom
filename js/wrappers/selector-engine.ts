@@ -6,9 +6,11 @@ type Combinator = "descendant" | "child" | "adjacent" | "sibling";
 type AttributeOperator = "=" | "~=" | "|=" | "^=" | "$=" | "*=";
 
 type AttributeSelector = {
+  namespaceAny: boolean;
   name: string;
   operator: AttributeOperator | null;
   value: string | null;
+  caseInsensitive: boolean;
 };
 
 type PseudoSelector = {
@@ -33,11 +35,9 @@ type ComplexSelector = {
   combinators: Combinator[];
 };
 
-const IDENT_RE = /[a-zA-Z0-9_\-]/;
-
 export function canUseNativeSelector(selector: string): boolean {
   void selector;
-  return true;
+  return false;
 }
 
 export function querySelectorAllInDocument(document: Document, selector: string): Element[] {
@@ -54,6 +54,11 @@ export function querySelectorAllInSubtree(root: Node, selector: string): Element
 }
 
 export function elementMatchesSelector(element: Element, selector: string): boolean {
+  const simpleId = parseSimpleIdSelector(selector);
+  if (simpleId != null) {
+    return element.id === simpleId;
+  }
+
   const selectors = parseSelectorList(selector);
   if (selectors.length === 0) {
     return false;
@@ -69,6 +74,11 @@ export function elementMatchesSelector(element: Element, selector: string): bool
 }
 
 function queryFromRoots(roots: Node[], selector: string, scopeRoot: Element | null, includeRoot: boolean): Element[] {
+  const simpleId = parseSimpleIdSelector(selector);
+  if (simpleId != null) {
+    return querySimpleIdFromRoots(roots, simpleId, includeRoot);
+  }
+
   const selectors = parseSelectorList(selector);
   if (selectors.length === 0) {
     return [];
@@ -116,6 +126,47 @@ function queryFromRoots(roots: Node[], selector: string, scopeRoot: Element | nu
   return matches;
 }
 
+function querySimpleIdFromRoots(roots: Node[], id: string, includeRoot: boolean): Element[] {
+  const matches: Element[] = [];
+  const seen = new Set<number>();
+
+  for (const root of roots) {
+    const stack: Node[] = [];
+    if (includeRoot) {
+      stack.push(root);
+    } else {
+      for (const child of root.childNodes.toArray()) {
+        stack.push(child);
+      }
+    }
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) {
+        continue;
+      }
+
+      if (current.nodeType === Node.ELEMENT_NODE) {
+        const element = current as unknown as Element;
+        if (element.id === id && !seen.has(element._handle)) {
+          seen.add(element._handle);
+          matches.push(element);
+        }
+      }
+
+      const children = current.childNodes.toArray();
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child) {
+          stack.push(child);
+        }
+      }
+    }
+  }
+
+  return matches;
+}
+
 function parseSelectorList(selector: string): ComplexSelector[] {
   const groups: string[] = [];
   let depthBracket = 0;
@@ -137,7 +188,7 @@ function parseSelectorList(selector: string): ComplexSelector[] {
   groups.push(selector.slice(start));
 
   return groups
-    .map((value) => parseComplexSelector(value.trim()))
+    .map((value) => parseComplexSelector(trimAsciiWhitespace(value)))
     .filter((value): value is ComplexSelector => value !== null);
 }
 
@@ -154,7 +205,7 @@ function parseComplexSelector(input: string): ComplexSelector | null {
 
   while (index < input.length) {
     let consumedWhitespace = false;
-    while (index < input.length && /\s/.test(input[index] ?? "")) {
+    while (index < input.length && isAsciiWhitespace(input[index] ?? "")) {
       index += 1;
       consumedWhitespace = true;
     }
@@ -219,7 +270,7 @@ function parseCompoundSelector(input: string, start: number): { compound: Compou
 
   while (index < input.length) {
     const ch = input[index];
-    if (!ch || ch === "," || ch === ">" || ch === "+" || ch === "~" || /\s/.test(ch)) {
+    if (!ch || ch === "," || ch === ">" || ch === "+" || ch === "~" || isAsciiWhitespace(ch)) {
       break;
     }
 
@@ -270,18 +321,40 @@ function parseCompoundSelector(input: string, start: number): { compound: Compou
 
 function parseAttributeSelector(input: string, start: number): { selector: AttributeSelector; next: number } | null {
   let index = start + 1;
-  while (index < input.length && /\s/.test(input[index] ?? "")) {
+  while (index < input.length && isAsciiWhitespace(input[index] ?? "")) {
     index += 1;
   }
 
-  const nameToken = readIdentifier(input, index);
+  let namespaceAny = false;
+  if (input[index] === "*" && input[index + 1] === "|") {
+    namespaceAny = true;
+    index += 2;
+  }
+
+  let nameToken = readIdentifier(input, index);
   if (!nameToken.value) {
     return null;
   }
-  let name = nameToken.value.toLowerCase();
+  let name = nameToken.value;
   index = nameToken.next;
 
-  while (index < input.length && /\s/.test(input[index] ?? "")) {
+  if (!namespaceAny && input[index] === "|") {
+    const namespace = name;
+    index += 1;
+    nameToken = readIdentifier(input, index);
+    if (!nameToken.value) {
+      return null;
+    }
+    name = nameToken.value;
+    index = nameToken.next;
+
+    if (namespace !== "*") {
+      return null;
+    }
+    namespaceAny = true;
+  }
+
+  while (index < input.length && isAsciiWhitespace(input[index] ?? "")) {
     index += 1;
   }
 
@@ -298,7 +371,7 @@ function parseAttributeSelector(input: string, start: number): { selector: Attri
   }
 
   if (operator) {
-    while (index < input.length && /\s/.test(input[index] ?? "")) {
+    while (index < input.length && isAsciiWhitespace(input[index] ?? "")) {
       index += 1;
     }
 
@@ -320,8 +393,18 @@ function parseAttributeSelector(input: string, start: number): { selector: Attri
     }
   }
 
-  while (index < input.length && /\s/.test(input[index] ?? "")) {
+  while (index < input.length && isAsciiWhitespace(input[index] ?? "")) {
     index += 1;
+  }
+
+  let caseInsensitive = false;
+  const modifier = (input[index] ?? "").toLowerCase();
+  if (modifier === "i" || modifier === "s") {
+    caseInsensitive = modifier === "i";
+    index += 1;
+    while (index < input.length && isAsciiWhitespace(input[index] ?? "")) {
+      index += 1;
+    }
   }
 
   if (input[index] !== "]") {
@@ -330,7 +413,7 @@ function parseAttributeSelector(input: string, start: number): { selector: Attri
 
   index += 1;
   return {
-    selector: { name, operator, value },
+    selector: { namespaceAny, name, operator, value, caseInsensitive },
     next: index
   };
 }
@@ -372,13 +455,114 @@ function parsePseudoSelector(input: string, start: number): { selector: PseudoSe
 
 function readIdentifier(input: string, start: number): { value: string; next: number } {
   let index = start;
-  while (index < input.length && IDENT_RE.test(input[index] ?? "")) {
-    index += 1;
+  let value = "";
+
+  while (index < input.length) {
+    const ch = input[index] ?? "";
+    if (!ch || isAsciiWhitespace(ch) || ",>+~#.:[]()=\"'*|^$".includes(ch)) {
+      break;
+    }
+
+    if (ch === "\u0000") {
+      value += "\uFFFD";
+      index += 1;
+      continue;
+    }
+
+    if (ch !== "\\") {
+      value += ch;
+      index += 1;
+      continue;
+    }
+
+    const parsedEscape = parseCssEscape(input, index);
+    value += parsedEscape.value;
+    index = parsedEscape.next;
   }
+
   return {
-    value: input.slice(start, index),
+    value,
     next: index
   };
+}
+
+function parseCssEscape(input: string, start: number): { value: string; next: number } {
+  let index = start + 1;
+  if (index >= input.length) {
+    return { value: "\uFFFD", next: index };
+  }
+
+  const first = input[index] ?? "";
+  if (/\r|\n|\f/.test(first)) {
+    // A backslash-newline pair is a line continuation and contributes no code point.
+    return { value: "", next: index + 1 };
+  }
+
+  let hex = "";
+  while (index < input.length && hex.length < 6) {
+    const ch = input[index] ?? "";
+    if (!/[0-9a-fA-F]/.test(ch)) {
+      break;
+    }
+    hex += ch;
+    index += 1;
+  }
+
+  if (hex.length > 0) {
+    if (index < input.length && isAsciiWhitespace(input[index] ?? "")) {
+      const ch = input[index] ?? "";
+      if (ch === "\r" && input[index + 1] === "\n") {
+        index += 2;
+      } else {
+        index += 1;
+      }
+    }
+
+    const codePoint = Number.parseInt(hex, 16);
+    if (codePoint === 0 || codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+      return { value: "\uFFFD", next: index };
+    }
+
+    return { value: String.fromCodePoint(codePoint), next: index };
+  }
+
+  const escaped = input[index] ?? "";
+  return { value: escaped, next: index + 1 };
+}
+
+function parseSimpleIdSelector(selector: string): string | null {
+  const input = trimAsciiWhitespace(selector);
+  if (!input.startsWith("#") || input.length <= 1) {
+    return null;
+  }
+
+  let index = 1;
+  let value = "";
+
+  while (index < input.length) {
+    const ch = input[index] ?? "";
+    if (!ch || isAsciiWhitespace(ch) || ",>+~[.:".includes(ch)) {
+      return null;
+    }
+
+    if (ch === "\\") {
+      const escaped = parseCssEscape(input, index);
+      value += escaped.value;
+      index = escaped.next;
+      continue;
+    }
+
+    if (ch === "\u0000") {
+      value += "\uFFFD";
+      index += 1;
+      continue;
+    }
+
+    value += ch;
+    index += 1;
+  }
+
+  return value;
 }
 
 function matchesComplex(element: Element, selector: ComplexSelector, scopeRoot: Element | null): boolean {
@@ -473,7 +657,19 @@ function matchesCompound(element: Element, compound: CompoundSelector, scopeRoot
 }
 
 function matchesAttributeSelector(element: Element, selector: AttributeSelector): boolean {
-  const actual = element.getAttribute(selector.name);
+  let actual: string | null = null;
+  if (selector.namespaceAny) {
+    const attributes = (element as unknown as {
+      attributes?: Array<{ name: string; localName?: string; value: string }>;
+    }).attributes ?? [];
+    const match = attributes.find((attribute) => (attribute.localName ?? attribute.name.split(":").pop() ?? attribute.name) === selector.name);
+    actual = match?.value ?? null;
+  } else {
+    const isHtmlElement = (element as unknown as { namespaceURI?: string | null }).namespaceURI === "http://www.w3.org/1999/xhtml";
+    const attributeName = isHtmlElement ? selector.name.toLowerCase() : selector.name;
+    actual = element.getAttribute(attributeName);
+  }
+
   if (actual == null) {
     return false;
   }
@@ -483,22 +679,46 @@ function matchesAttributeSelector(element: Element, selector: AttributeSelector)
   }
 
   const expected = selector.value ?? "";
+  const compare = (left: string, right: string): boolean => {
+    if (selector.caseInsensitive) {
+      return left.toLowerCase() === right.toLowerCase();
+    }
+    return left === right;
+  };
+  const normalize = (value: string): string => selector.caseInsensitive ? value.toLowerCase() : value;
+
   switch (selector.operator) {
     case "=":
-      return actual === expected;
+      return compare(actual, expected);
     case "~=":
-      return actual.split(/\s+/).filter(Boolean).includes(expected);
+      return actual.split(/\s+/).filter(Boolean).some((token) => compare(token, expected));
     case "|=":
-      return actual === expected || actual.startsWith(`${expected}-`);
+      return compare(actual, expected) || normalize(actual).startsWith(`${normalize(expected)}-`);
     case "^=":
-      return actual.startsWith(expected);
+      return normalize(actual).startsWith(normalize(expected));
     case "$=":
-      return actual.endsWith(expected);
+      return normalize(actual).endsWith(normalize(expected));
     case "*=":
-      return actual.includes(expected);
+      return normalize(actual).includes(normalize(expected));
     default:
       return false;
   }
+}
+
+function isAsciiWhitespace(value: string): boolean {
+  return value === " " || value === "\t" || value === "\n" || value === "\r" || value === "\f";
+}
+
+function trimAsciiWhitespace(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && isAsciiWhitespace(value[start] ?? "")) {
+    start += 1;
+  }
+  while (end > start && isAsciiWhitespace(value[end - 1] ?? "")) {
+    end -= 1;
+  }
+  return value.slice(start, end);
 }
 
 function matchesPseudoSelector(element: Element, pseudo: PseudoSelector, scopeRoot: Element | null): boolean {
