@@ -49,7 +49,14 @@ export class GlobalRegistrator {
       getSelection: () => window.getSelection(),
       localStorage: window.localStorage,
       sessionStorage: window.sessionStorage,
-      customElements: window.customElements
+      customElements: window.customElements,
+      fetch: window.fetch,
+      Headers: window.Headers,
+      Request: window.Request,
+      Response: window.Response,
+      FormData: window.FormData,
+      Blob: window.Blob,
+      File: window.File
     };
 
     for (const [key, value] of Object.entries(assignments)) {
