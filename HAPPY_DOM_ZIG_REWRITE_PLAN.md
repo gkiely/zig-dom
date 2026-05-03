@@ -121,20 +121,26 @@ Required scripts:
 - `bun run build:native`: build only the Zig dynamic library.
 - `bun run build:js`: build only the TypeScript package surface.
 - `bun run build`: run native and JS builds.
-- `bun run verify:ffi`: build native and run `tests/unit/ffi.test.ts`.
+- `bun run verify:ffi`: incrementally build native if needed and run `tests/unit/ffi.test.ts`.
 - `bun run verify:dom`: run focused unit tests and `tests/integration/dom`.
 - `bun run verify:react`: run `tests/integration/react/render.test.tsx` and update/print the React missing-API summary when it fails.
 - `bun run verify:wpt:tiny`: run only the tiny WPT manifest.
 - `bun run verify:fast`: run `verify:ffi`, `verify:dom`, and the React smoke. This must stay fast enough to run after nearly every ticket.
 - `bun test`: run the current stable local suite. Do not add slow or very flaky tests to the default command until they are useful for ordinary development.
 
-Speed targets:
+Warm-run speed targets:
 
-- `verify:ffi`: under 5 seconds after dependencies are installed.
-- `verify:dom`: under 10 seconds while the DOM surface is small.
-- `verify:react`: under 10 seconds for the first smoke test.
-- `verify:wpt:tiny`: under 10 seconds.
-- `verify:fast`: under 30 seconds through the first seven tickets.
+- `verify:ffi`: under 2 seconds when no native rebuild is needed; under 5 seconds with an incremental native rebuild.
+- `verify:dom`: under 3 seconds while the DOM surface is small.
+- `verify:react`: under 5 seconds for the first smoke test.
+- `verify:wpt:tiny`: under 5 seconds.
+- `verify:fast`: under 10 seconds through the first seven tickets when no native rebuild is needed; under 15 seconds with an incremental native rebuild.
+
+Cold-start exceptions:
+
+- First dependency install, first Zig build, WPT sync/download, and one-time cache population may exceed these targets.
+- Cold-start cost should never be hidden inside the daily loop without a note. If a command is slow because it downloads, vendors, or regenerates large files, split that work into an explicit setup/sync command.
+- Prefer incremental Zig builds and narrow Bun test paths. Do not make `verify:fast` depend on broad WPT, package install, full clean builds, or CI-only checks.
 
 Failure reporting:
 
