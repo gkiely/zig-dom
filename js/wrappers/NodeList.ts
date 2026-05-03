@@ -54,6 +54,19 @@ export class NodeList implements Iterable<Node> {
     }
   }
 
+  keys(): IterableIterator<number> {
+    const nodes = this.getNodes();
+    return nodes.keys();
+  }
+
+  values(): IterableIterator<Node> {
+    return this.getNodes().values();
+  }
+
+  entries(): IterableIterator<[number, Node]> {
+    return this.getNodes().entries();
+  }
+
   [Symbol.iterator](): Iterator<Node> {
     return this.getNodes()[Symbol.iterator]();
   }

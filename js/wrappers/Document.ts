@@ -5,15 +5,131 @@ import { ZigDOMException } from "./DOMException.ts";
 import { Element } from "./Element.ts";
 import { CompositionEvent, CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
 import { Node } from "./Node.ts";
+import { NodeList } from "./NodeList.ts";
 import { Range, Selection } from "./Range.ts";
 import { canUseNativeSelector, querySelectorAllInDocument } from "./selector-engine.ts";
 import { Text } from "./Text.ts";
 import type { Window } from "./Window.ts";
 
+const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
+const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
+
+type SyntheticNodeLike = {
+  nodeType: number;
+  nodeName: string;
+  textContent: string | null;
+  parentNode: Document | null;
+  parentElement: null;
+  lookupNamespaceURI(prefix: string | null): string | null;
+  isDefaultNamespace(namespace: string | null): boolean;
+  isSameNode(other: unknown): boolean;
+  isEqualNode(other: unknown): boolean;
+  cloneNode(deep?: boolean): unknown;
+};
+
+function createSyntheticAttr(name: string, namespaceURI: string | null): Attr {
+  const attr = {
+    nodeType: Node.ATTRIBUTE_NODE,
+    nodeName: name,
+    name,
+    value: "",
+    namespaceURI,
+    ownerElement: null as Element | null,
+    parentNode: null,
+    parentElement: null,
+    get textContent() {
+      return this.value;
+    },
+    set textContent(next: string | null) {
+      this.value = next ?? "";
+    },
+    lookupNamespaceURI(prefix: string | null) {
+      if (!this.ownerElement) {
+        return null;
+      }
+      return this.ownerElement.lookupNamespaceURI(prefix);
+    },
+    isDefaultNamespace(namespace: string | null) {
+      if (!this.ownerElement) {
+        return namespace == null || namespace === "";
+      }
+      return this.ownerElement.isDefaultNamespace(namespace);
+    },
+    isSameNode(other: unknown) {
+      return other === this;
+    },
+    isEqualNode(other: unknown) {
+      if (!other || typeof other !== "object") {
+        return false;
+      }
+      const candidate = other as { name?: string; value?: string; namespaceURI?: string | null };
+      return candidate.name === this.name && candidate.value === this.value && candidate.namespaceURI === this.namespaceURI;
+    },
+    cloneNode() {
+      const clone = createSyntheticAttr(this.name, this.namespaceURI) as unknown as { value: string };
+      clone.value = this.value;
+      return clone;
+    }
+  };
+
+  return attr as unknown as Attr;
+}
+
+function createSyntheticDocumentType(
+  document: Document,
+  name: string,
+  publicId = "",
+  systemId = "",
+  parentNode: Document | null = null
+): DocumentType {
+  const doctype: SyntheticNodeLike & {
+    name: string;
+    publicId: string;
+    systemId: string;
+    ownerDocument: Document;
+  } = {
+    nodeType: Node.DOCUMENT_TYPE_NODE,
+    nodeName: name,
+    name,
+    publicId,
+    systemId,
+    ownerDocument: document,
+    get textContent() {
+      return null;
+    },
+    set textContent(_value: string | null) {
+      // Intentionally ignored for DocumentType nodes.
+    },
+    parentNode,
+    parentElement: null,
+    lookupNamespaceURI: () => null,
+    isDefaultNamespace: (namespace: string | null) => namespace == null || namespace === "",
+    isSameNode(other: unknown) {
+      return other === doctype;
+    },
+    isEqualNode(other: unknown) {
+      if (!other || typeof other !== "object") {
+        return false;
+      }
+      const candidate = other as { name?: string; publicId?: string; systemId?: string; nodeType?: number };
+      return candidate.nodeType === Node.DOCUMENT_TYPE_NODE &&
+        candidate.name === doctype.name &&
+        candidate.publicId === doctype.publicId &&
+        candidate.systemId === doctype.systemId;
+    },
+    cloneNode() {
+      return createSyntheticDocumentType(document, doctype.name, doctype.publicId, doctype.systemId, null);
+    }
+  };
+
+  return doctype as unknown as DocumentType;
+}
+
 export class Document extends Node {
   #documentElementCache: Element | null = null;
   #headCache: Element | null = null;
   #bodyCache: Element | null = null;
+  #doctypeCache: DocumentType | null = null;
 
   constructor(window: Window, handle: number, nodeType = Node.DOCUMENT_NODE) {
     super(window, handle, nodeType);
@@ -21,6 +137,20 @@ export class Document extends Node {
 
   get defaultView(): Window {
     return this._window;
+  }
+
+  override get childNodes(): NodeList {
+    const baseNodes = super.childNodes.toArray();
+    const doctype = this.doctype as unknown as Node | null;
+    if (!doctype) {
+      return super.childNodes;
+    }
+
+    if (baseNodes.some((node) => node.nodeType === Node.DOCUMENT_TYPE_NODE)) {
+      return super.childNodes;
+    }
+
+    return new NodeList(() => [doctype, ...baseNodes]);
   }
 
   get documentElement(): Element {
@@ -62,6 +192,16 @@ export class Document extends Node {
     return this.#bodyCache;
   }
 
+  get doctype(): DocumentType | null {
+    this._window.assertOpen();
+    if (this.#doctypeCache) {
+      return this.#doctypeCache;
+    }
+
+    this.#doctypeCache = createSyntheticDocumentType(this, "html", "", "", this);
+    return this.#doctypeCache;
+  }
+
   get scrollingElement(): Element {
     return this.documentElement;
   }
@@ -91,7 +231,7 @@ export class Document extends Node {
     createHTMLDocument: (title?: string) => Document;
     createDocumentType: (qualifiedName: string, publicId?: string, systemId?: string) => DocumentType;
   } {
-    const createDocument = (_namespace: string | null, qualifiedName?: string | null, _doctype?: DocumentType | null): Document => {
+    const createDocument = (_namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null): Document => {
       const WindowCtor = this._window.constructor as {
         new (options?: { url?: string }): {
           document: Document;
@@ -100,6 +240,17 @@ export class Document extends Node {
 
       const nextWindow = new WindowCtor({ url: this.URL });
       const nextDocument = nextWindow.document;
+
+      if (doctype) {
+        const source = doctype as unknown as { name?: string; publicId?: string; systemId?: string };
+        nextDocument.#doctypeCache = createSyntheticDocumentType(
+          nextDocument,
+          source.name ?? "html",
+          source.publicId ?? "",
+          source.systemId ?? "",
+          nextDocument
+        );
+      }
 
       const originalAppendChild = nextDocument.appendChild.bind(nextDocument);
       nextDocument.appendChild = (<TNode extends Node>(child: TNode): TNode => {
@@ -128,11 +279,7 @@ export class Document extends Node {
     };
 
     const createDocumentType = (qualifiedName: string, publicId = "", systemId = ""): DocumentType => {
-      return {
-        name: qualifiedName,
-        publicId,
-        systemId
-      } as unknown as DocumentType;
+      return createSyntheticDocumentType(this, qualifiedName, publicId, systemId, null);
     };
 
     return {
@@ -191,31 +338,40 @@ export class Document extends Node {
       tagName: normalizedTagName,
       skipInitialStyleSync: true
     }) as Element;
+    const mutable = element as unknown as {
+      __namespaceURI?: string | null;
+      __prefix?: string | null;
+      __localName?: string;
+    };
+    mutable.__namespaceURI = "http://www.w3.org/1999/xhtml";
+    mutable.__prefix = null;
+    mutable.__localName = normalizedTagName;
     this._window.upgradeElementInstance(element, normalizedTagName);
     return element;
   }
 
-  createElementNS(_namespace: string | null, qualifiedName: string): Element {
-    return this.createElement(qualifiedName);
+  createElementNS(namespace: string | null, qualifiedName: string): Element {
+    const separator = qualifiedName.indexOf(":");
+    const prefix = separator >= 0 ? qualifiedName.slice(0, separator) : null;
+    const localName = separator >= 0 ? qualifiedName.slice(separator + 1) : qualifiedName;
+    const element = this.createElement(localName);
+    const mutable = element as unknown as {
+      __namespaceURI?: string | null;
+      __prefix?: string | null;
+      __localName?: string;
+    };
+    mutable.__namespaceURI = namespace;
+    mutable.__prefix = prefix;
+    mutable.__localName = localName;
+    return element;
   }
 
   createAttribute(name: string): Attr {
-    const attr = {
-      name,
-      value: "",
-      namespaceURI: null,
-      ownerElement: null
-    };
-
-    return attr as unknown as Attr;
+    return createSyntheticAttr(name, null);
   }
 
   createAttributeNS(namespace: string | null, qualifiedName: string): Attr {
-    const attr = this.createAttribute(qualifiedName) as unknown as {
-      namespaceURI: string | null;
-    };
-    attr.namespaceURI = namespace;
-    return attr as unknown as Attr;
+    return createSyntheticAttr(qualifiedName, namespace);
   }
 
   createTextNode(data: string): Text {
@@ -230,9 +386,13 @@ export class Document extends Node {
     return this._window.createKnownNode(handle, Node.COMMENT_NODE) as Comment;
   }
 
-  createProcessingInstruction(_target: string, data: string): ProcessingInstruction {
-    // Processing instructions are approximated as comment nodes for compatibility.
-    return this.createComment(data) as unknown as ProcessingInstruction;
+  createProcessingInstruction(target: string, data: string): ProcessingInstruction {
+    // Processing instructions are approximated with a comment-backed node plus target metadata.
+    const instruction = this.createComment(data) as unknown as {
+      target?: string;
+    };
+    instruction.target = target;
+    return instruction as unknown as ProcessingInstruction;
   }
 
   createCDATASection(data: string): Text {
@@ -333,6 +493,7 @@ export class Document extends Node {
     this.#documentElementCache = null;
     this.#headCache = null;
     this.#bodyCache = null;
+    this.#doctypeCache = null;
     this._window.setActiveElement(null);
   }
 }

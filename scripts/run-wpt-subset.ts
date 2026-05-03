@@ -279,7 +279,8 @@ function assignNamedElementGlobals(context: Record<string, unknown>, window: Win
 async function runHtmlEntry(file: string, wptRootPath: string, variant?: string): Promise<SubtestResult[]> {
   const html = readText(file);
   const assert = createAssert();
-  const queuedTests: HarnessTest[] = [];
+  const pendingTests: Promise<void>[] = [];
+  const results: SubtestResult[] = [];
   const fileId = entryId(file, variant);
 
   const window = new Window({ url: testUrl(file, variant) });
@@ -287,12 +288,35 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   window.document.head.innerHTML = initialMarkup.head;
   window.document.body.innerHTML = initialMarkup.body;
 
+  const registerHarnessTest = (name: string, run: () => void | Promise<void>) => {
+    pendingTests.push((async () => {
+      const start = performance.now();
+      try {
+        await run();
+        results.push({
+          file: fileId,
+          name,
+          status: "pass",
+          durationMs: performance.now() - start
+        });
+      } catch (error) {
+        results.push({
+          file: fileId,
+          name,
+          status: "fail",
+          message: error instanceof Error ? error.message : String(error),
+          durationMs: performance.now() - start
+        });
+      }
+    })());
+  };
+
   const test = (fn: () => void | Promise<void>, name = "test") => {
-    queuedTests.push({ name, run: fn });
+    registerHarnessTest(name, fn);
   };
 
   const promise_test = (fn: () => Promise<void>, name = "promise_test") => {
-    queuedTests.push({ name, run: fn });
+    registerHarnessTest(name, fn);
   };
 
   const createDeferredAsyncTest = (name: string, callback?: (testObj: {
@@ -340,36 +364,32 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       }
     };
 
-    const entry: HarnessTest = {
-      name,
-      async run() {
-        if (callback) {
-          try {
-            callback(testObj);
-          } catch (error) {
-            failError = error;
-            resolveDone();
-          }
-        }
-
-        const timeout = new Promise<never>((_resolve, reject) => {
-          setTimeout(() => {
-            reject(new Error(`async_test timeout: ${name}`));
-          }, 2000);
-        });
-
-        await Promise.race([completion, timeout]);
-
-        if (failError) {
-          throw failError;
-        }
-        if (!complete) {
-          throw new Error(`async_test did not call done(): ${name}`);
-        }
+    if (callback) {
+      try {
+        callback(testObj);
+      } catch (error) {
+        failError = error;
+        resolveDone();
       }
-    };
+    }
 
-    queuedTests.push(entry);
+    registerHarnessTest(name, async () => {
+      const timeout = new Promise<never>((_resolve, reject) => {
+        setTimeout(() => {
+          reject(new Error(`async_test timeout: ${name}`));
+        }, 2000);
+      });
+
+      await Promise.race([completion, timeout]);
+
+      if (failError) {
+        throw failError;
+      }
+      if (!complete) {
+        throw new Error(`async_test did not call done(): ${name}`);
+      }
+    });
+
     return testObj;
   };
 
@@ -407,17 +427,53 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     }
   };
 
+  const asArray = (value: unknown): unknown[] | null => {
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (value == null) {
+      return null;
+    }
+
+    const candidate = value as {
+      length?: unknown;
+      [index: number]: unknown;
+      [Symbol.iterator]?: () => Iterator<unknown>;
+    };
+
+    if (typeof candidate[Symbol.iterator] === "function") {
+      return Array.from(candidate as Iterable<unknown>);
+    }
+
+    if (typeof candidate.length === "number") {
+      const length = Number(candidate.length);
+      if (Number.isFinite(length) && length >= 0) {
+        const out: unknown[] = [];
+        for (let index = 0; index < length; index += 1) {
+          out.push(candidate[index]);
+        }
+        return out;
+      }
+    }
+
+    return null;
+  };
+
   const assert_array_equals = (actual: unknown, expected: unknown, message = "Expected arrays to be equal") => {
-    if (!Array.isArray(actual) || !Array.isArray(expected)) {
+    const actualArray = asArray(actual);
+    const expectedArray = asArray(expected);
+
+    if (!actualArray || !expectedArray) {
       throw new Error(`${message}: both values must be arrays`);
     }
 
-    if (actual.length !== expected.length) {
-      throw new Error(`${message}: length ${actual.length} !== ${expected.length}`);
+    if (actualArray.length !== expectedArray.length) {
+      throw new Error(`${message}: length ${actualArray.length} !== ${expectedArray.length}`);
     }
 
-    for (let index = 0; index < actual.length; index += 1) {
-      if (actual[index] !== expected[index]) {
+    for (let index = 0; index < actualArray.length; index += 1) {
+      if (actualArray[index] !== expectedArray[index]) {
         throw new Error(`${message}: index ${index} differs`);
       }
     }
@@ -453,18 +509,34 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     }
 
     const name = (thrown as { name?: string }).name ?? "";
+    const code = (thrown as { code?: number }).code;
     const detail = thrown instanceof Error ? thrown.message : String(thrown);
 
+    const normalize = (value: string) => value.toLowerCase().replaceAll("_", "");
+    const normalizedName = normalize(name);
+    const normalizedDetail = normalize(detail);
+
+    const expectedCodeByName: Record<string, number> = {
+      hierarchyrequesterror: 3,
+      hierarchyrequesterr: 3,
+      notfounderror: 8,
+      notfounderr: 8,
+      invalidstateerror: 11
+    };
+
     if (typeof expected === "string") {
-      const normalized = expected.toLowerCase();
-      const matches = name.toLowerCase() === normalized || detail.toLowerCase().includes(normalized);
-      if (!matches) {
+      const normalizedExpected = normalize(expected);
+      const expectedCode = expectedCodeByName[normalizedExpected];
+      const matchesByName = normalizedName === normalizedExpected || normalizedDetail.includes(normalizedExpected);
+      const matchesByCode = expectedCode != null && code === expectedCode;
+
+      if (!matchesByName && !matchesByCode) {
         throw new Error(`${message}: expected ${expected}, got ${name || detail}`);
       }
       return;
     }
 
-    if (!detail.includes(String(expected))) {
+    if (code !== expected && !detail.includes(String(expected))) {
       throw new Error(`${message}: expected code ${expected}, got ${name || detail}`);
     }
   };
@@ -533,7 +605,11 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   };
   context.Document = class {
     constructor() {
-      return new WindowCtor({ url: testUrl(file, variant) }).document;
+      const doc = new WindowCtor({ url: testUrl(file, variant) }).document as unknown as {
+        __forceNoDocumentElement?: boolean;
+      };
+      doc.__forceNoDocumentElement = true;
+      return doc;
     }
   };
   context.XMLDocument = context.Document;
@@ -566,27 +642,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   try {
     executeScript(allScripts.join("\n;\n"));
 
-    const results: SubtestResult[] = [];
-    for (const harnessTest of queuedTests) {
-      const start = performance.now();
-      try {
-        await harnessTest.run();
-        results.push({
-          file: fileId,
-          name: harnessTest.name,
-          status: "pass",
-          durationMs: performance.now() - start
-        });
-      } catch (error) {
-        results.push({
-          file: fileId,
-          name: harnessTest.name,
-          status: "fail",
-          message: error instanceof Error ? error.message : String(error),
-          durationMs: performance.now() - start
-        });
-      }
-    }
+    await Promise.all(pendingTests);
 
     return results;
   } catch (error) {

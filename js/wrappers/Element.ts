@@ -83,6 +83,19 @@ export class Element extends Node {
     return this.nodeName.toUpperCase();
   }
 
+  get namespaceURI(): string | null {
+    const value = (this as unknown as { __namespaceURI?: string | null }).__namespaceURI;
+    return value ?? "http://www.w3.org/1999/xhtml";
+  }
+
+  get prefix(): string | null {
+    return (this as unknown as { __prefix?: string | null }).__prefix ?? null;
+  }
+
+  get localName(): string {
+    return (this as unknown as { __localName?: string }).__localName ?? this.tagName.toLowerCase();
+  }
+
   get id(): string {
     return this.getAttribute("id") ?? "";
   }

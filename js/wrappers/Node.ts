@@ -1,5 +1,6 @@
 import { native } from "../ffi.ts";
 import type { Document } from "./Document.ts";
+import type { Element } from "./Element.ts";
 import { Event, EventTargetBase } from "./Event.ts";
 import { NodeList } from "./NodeList.ts";
 import type { Window } from "./Window.ts";
@@ -8,11 +9,15 @@ export class Node extends EventTargetBase {
   static readonly ELEMENT_NODE = 1;
   static readonly ATTRIBUTE_NODE = 2;
   static readonly TEXT_NODE = 3;
+  static readonly CDATA_SECTION_NODE = 4;
+  static readonly ENTITY_REFERENCE_NODE = 5;
+  static readonly ENTITY_NODE = 6;
   static readonly PROCESSING_INSTRUCTION_NODE = 7;
   static readonly COMMENT_NODE = 8;
   static readonly DOCUMENT_NODE = 9;
   static readonly DOCUMENT_TYPE_NODE = 10;
   static readonly DOCUMENT_FRAGMENT_NODE = 11;
+  static readonly NOTATION_NODE = 12;
 
   static readonly DOCUMENT_POSITION_DISCONNECTED = 0x01;
   static readonly DOCUMENT_POSITION_PRECEDING = 0x02;
@@ -28,11 +33,15 @@ export class Node extends EventTargetBase {
   readonly ELEMENT_NODE = Node.ELEMENT_NODE;
   readonly ATTRIBUTE_NODE = Node.ATTRIBUTE_NODE;
   readonly TEXT_NODE = Node.TEXT_NODE;
+  readonly CDATA_SECTION_NODE = Node.CDATA_SECTION_NODE;
+  readonly ENTITY_REFERENCE_NODE = Node.ENTITY_REFERENCE_NODE;
+  readonly ENTITY_NODE = Node.ENTITY_NODE;
   readonly PROCESSING_INSTRUCTION_NODE = Node.PROCESSING_INSTRUCTION_NODE;
   readonly COMMENT_NODE = Node.COMMENT_NODE;
   readonly DOCUMENT_NODE = Node.DOCUMENT_NODE;
   readonly DOCUMENT_TYPE_NODE = Node.DOCUMENT_TYPE_NODE;
   readonly DOCUMENT_FRAGMENT_NODE = Node.DOCUMENT_FRAGMENT_NODE;
+  readonly NOTATION_NODE = Node.NOTATION_NODE;
 
   readonly DOCUMENT_POSITION_DISCONNECTED = Node.DOCUMENT_POSITION_DISCONNECTED;
   readonly DOCUMENT_POSITION_PRECEDING = Node.DOCUMENT_POSITION_PRECEDING;
@@ -61,6 +70,14 @@ export class Node extends EventTargetBase {
   get parentNode(): Node | null {
     this._window.assertOpen();
     return this._window.getNode(native.nodeParent(this._handle));
+  }
+
+  get parentElement(): Element | null {
+    const parent = this.parentNode;
+    if (!parent || parent.nodeType !== Node.ELEMENT_NODE) {
+      return null;
+    }
+    return parent as unknown as Element;
   }
 
   get firstChild(): Node | null {
@@ -104,7 +121,13 @@ export class Node extends EventTargetBase {
       return null as unknown as string;
     }
 
-    return native.nodeTextContent(this._handle);
+    const value = native.nodeTextContent(this._handle);
+    // Native returns a NUL sentinel for empty character data.
+    if (value === "\u0000") {
+      return "";
+    }
+
+    return value;
   }
 
   set textContent(value: string | null) {
@@ -114,10 +137,32 @@ export class Node extends EventTargetBase {
       return;
     }
 
+    if (this.#nodeType === Node.ELEMENT_NODE || this.#nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      const document = this.nodeType === Node.DOCUMENT_NODE
+        ? (this as unknown as Document)
+        : this.ownerDocument;
+
+      if (!document) {
+        return;
+      }
+
+      while (this.firstChild) {
+        this.removeChild(this.firstChild);
+      }
+
+      const rawValue = value as unknown;
+      const shouldClearOnly = rawValue == null || rawValue === "";
+      if (!shouldClearOnly) {
+        this.appendChild(document.createTextNode(String(rawValue)));
+      }
+      return;
+    }
+
     const trackCharacterData = this._window.hasMutationObservers() &&
       (this.#nodeType === Node.TEXT_NODE || this.#nodeType === Node.COMMENT_NODE);
     const previousValue = trackCharacterData ? this.textContent : "";
-    const nextValue = value === null ? "" : String(value);
+    const rawValue = value as unknown;
+    const nextValue = rawValue == null ? "" : String(rawValue);
     native.setNodeTextContent(this._handle, nextValue);
     if (trackCharacterData) {
       this._window.notifyCharacterDataChanged(this, previousValue);
@@ -126,7 +171,7 @@ export class Node extends EventTargetBase {
 
   get nodeValue(): string | null {
     const type = this.nodeType;
-    if (type === Node.TEXT_NODE || type === Node.COMMENT_NODE) {
+    if (type === Node.TEXT_NODE || type === Node.COMMENT_NODE || type === Node.PROCESSING_INSTRUCTION_NODE) {
       return this.textContent;
     }
     return null;
@@ -134,7 +179,7 @@ export class Node extends EventTargetBase {
 
   set nodeValue(value: string | null) {
     const type = this.nodeType;
-    if (type === Node.TEXT_NODE || type === Node.COMMENT_NODE) {
+    if (type === Node.TEXT_NODE || type === Node.COMMENT_NODE || type === Node.PROCESSING_INSTRUCTION_NODE) {
       this.textContent = value ?? "";
     }
   }
@@ -358,46 +403,86 @@ export class Node extends EventTargetBase {
   lookupNamespaceURI(prefix: string | null): string | null {
     this._window.assertOpen();
 
-    if (prefix === "xml") {
-      return "http://www.w3.org/XML/1998/namespace";
-    }
-    if (prefix === "xmlns") {
-      return "http://www.w3.org/2000/xmlns/";
-    }
+    if (this.nodeType === Node.DOCUMENT_NODE) {
+      const document = this as unknown as {
+        documentElement?: Node | null;
+        __forceNoDocumentElement?: boolean;
+      };
 
-    const asElement = this as unknown as {
-      nodeType: number;
-      namespaceURI?: string | null;
-      getAttribute?: (name: string) => string | null;
-      prefix?: string | null;
-      parentNode?: Node | null;
-    };
+      if (document.__forceNoDocumentElement) {
+        return null;
+      }
 
-    if (asElement.nodeType === Node.ELEMENT_NODE) {
+      const root = document.documentElement;
+      if (!root) {
+        return null;
+      }
+
       if (prefix == null || prefix === "") {
-        const declared = asElement.getAttribute?.("xmlns");
-        if (declared != null) {
-          return declared;
-        }
-        return asElement.namespaceURI ?? null;
+        const rootNamespace = (root as unknown as { namespaceURI?: string | null }).namespaceURI;
+        return rootNamespace ?? null;
       }
 
-      const declared = asElement.getAttribute?.(`xmlns:${prefix}`);
-      if (declared != null) {
-        return declared;
-      }
-
-      if (asElement.prefix === prefix) {
-        return asElement.namespaceURI ?? null;
-      }
+      return root.lookupNamespaceURI(prefix);
     }
 
-    return this.parentNode?.lookupNamespaceURI(prefix) ?? null;
+    if (this.nodeType === Node.DOCUMENT_TYPE_NODE || this.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      return null;
+    }
+
+    if (this.nodeType === Node.ELEMENT_NODE) {
+      const element = this as unknown as {
+        namespaceURI?: string | null;
+        prefix?: string | null;
+        getAttribute?: (name: string) => string | null;
+      };
+
+      if (prefix === "xml") {
+        return "http://www.w3.org/XML/1998/namespace";
+      }
+      if (prefix === "xmlns") {
+        return "http://www.w3.org/2000/xmlns/";
+      }
+
+      if (prefix == null || prefix === "") {
+        const declaredDefault = element.getAttribute?.("xmlns");
+        if (declaredDefault != null) {
+          return declaredDefault;
+        }
+
+        if (element.prefix == null) {
+          return element.namespaceURI ?? null;
+        }
+
+        return this.parentElement?.lookupNamespaceURI(null) ?? null;
+      }
+
+      const declaredPrefixed = element.getAttribute?.(`xmlns:${prefix}`);
+      if (declaredPrefixed != null) {
+        return declaredPrefixed;
+      }
+
+      if (element.prefix === prefix && element.namespaceURI != null) {
+        return element.namespaceURI;
+      }
+
+      return this.parentElement?.lookupNamespaceURI(prefix) ?? null;
+    }
+
+    const asAttr = this as unknown as { ownerElement?: Node | null };
+    if (this.nodeType === Node.ATTRIBUTE_NODE) {
+      return asAttr.ownerElement?.lookupNamespaceURI(prefix) ?? null;
+    }
+
+    return this.parentElement?.lookupNamespaceURI(prefix) ?? null;
   }
 
   isDefaultNamespace(namespace: string | null): boolean {
     this._window.assertOpen();
-    return this.lookupNamespaceURI(null) === namespace;
+    const current = this.lookupNamespaceURI(null);
+    const normalizedCurrent = current == null ? "" : current;
+    const normalizedInput = namespace == null ? "" : namespace;
+    return normalizedCurrent === normalizedInput;
   }
 
   isSameNode(other: Node | null): boolean {
@@ -598,5 +683,37 @@ export class Node extends EventTargetBase {
   get isConnected(): boolean {
     this._window.assertOpen();
     return this._window.isConnectedNode(this);
+  }
+}
+
+const NODE_PROTOTYPE_CONSTANTS: Record<string, number> = {
+  ELEMENT_NODE: Node.ELEMENT_NODE,
+  ATTRIBUTE_NODE: Node.ATTRIBUTE_NODE,
+  TEXT_NODE: Node.TEXT_NODE,
+  CDATA_SECTION_NODE: Node.CDATA_SECTION_NODE,
+  ENTITY_REFERENCE_NODE: Node.ENTITY_REFERENCE_NODE,
+  ENTITY_NODE: Node.ENTITY_NODE,
+  PROCESSING_INSTRUCTION_NODE: Node.PROCESSING_INSTRUCTION_NODE,
+  COMMENT_NODE: Node.COMMENT_NODE,
+  DOCUMENT_NODE: Node.DOCUMENT_NODE,
+  DOCUMENT_TYPE_NODE: Node.DOCUMENT_TYPE_NODE,
+  DOCUMENT_FRAGMENT_NODE: Node.DOCUMENT_FRAGMENT_NODE,
+  NOTATION_NODE: Node.NOTATION_NODE,
+  DOCUMENT_POSITION_DISCONNECTED: Node.DOCUMENT_POSITION_DISCONNECTED,
+  DOCUMENT_POSITION_PRECEDING: Node.DOCUMENT_POSITION_PRECEDING,
+  DOCUMENT_POSITION_FOLLOWING: Node.DOCUMENT_POSITION_FOLLOWING,
+  DOCUMENT_POSITION_CONTAINS: Node.DOCUMENT_POSITION_CONTAINS,
+  DOCUMENT_POSITION_CONTAINED_BY: Node.DOCUMENT_POSITION_CONTAINED_BY,
+  DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC
+};
+
+for (const [key, value] of Object.entries(NODE_PROTOTYPE_CONSTANTS)) {
+  if (!(key in Node.prototype)) {
+    Object.defineProperty(Node.prototype, key, {
+      value,
+      configurable: true,
+      enumerable: false,
+      writable: false
+    });
   }
 }
