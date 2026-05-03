@@ -5,7 +5,7 @@ import { Document } from "./wrappers/Document.js";
 import { DocumentFragment } from "./wrappers/DocumentFragment.js";
 import { Element } from "./wrappers/Element.js";
 import { Event, CustomEvent, MouseEvent } from "./wrappers/Event.js";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLInputElement } from "./wrappers/HTMLElement.js";
+import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.js";
 import { HTMLCollection } from "./wrappers/HTMLCollection.js";
 import { Node } from "./wrappers/Node.js";
 import { NodeList } from "./wrappers/NodeList.js";
@@ -103,6 +103,7 @@ export {
   HTMLCollection,
   HTMLElement,
   HTMLFormElement,
+  HTMLIFrameElement,
   HTMLInputElement,
   MouseEvent,
   Node,

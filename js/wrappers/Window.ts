@@ -5,7 +5,7 @@ import { Document } from "./Document.js";
 import { DocumentFragment } from "./DocumentFragment.js";
 import { Element } from "./Element.js";
 import { Event, CustomEvent, MouseEvent } from "./Event.js";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLInputElement } from "./HTMLElement.js";
+import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./HTMLElement.js";
 import { Node } from "./Node.js";
 import { Text } from "./Text.js";
 
@@ -27,6 +27,7 @@ export class Window {
   readonly Element = Element;
   readonly HTMLElement = HTMLElement;
   readonly HTMLButtonElement = HTMLButtonElement;
+  readonly HTMLIFrameElement = HTMLIFrameElement;
   readonly HTMLInputElement = HTMLInputElement;
   readonly HTMLFormElement = HTMLFormElement;
   readonly Text = Text;
@@ -112,6 +113,8 @@ export class Window {
           wrapped = new HTMLButtonElement(this, handle);
         } else if (tagName === "form") {
           wrapped = new HTMLFormElement(this, handle);
+        } else if (tagName === "iframe") {
+          wrapped = new HTMLIFrameElement(this, handle);
         } else {
           wrapped = new HTMLElement(this, handle);
         }

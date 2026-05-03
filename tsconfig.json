@@ -4,7 +4,8 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": [
-      "ES2022"
+      "ES2022",
+      "DOM"
     ],
     "strict": true,
     "declaration": true,
@@ -13,7 +14,8 @@
     "outDir": "dist",
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "types": ["bun-types", "node"]
   },
   "include": [
     "js/**/*.ts"

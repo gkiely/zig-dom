@@ -1,11 +1,14 @@
 import { afterEach, expect } from "bun:test";
-import { cleanup } from "@testing-library/react";
-import * as matchers from "@testing-library/jest-dom/matchers";
 
-expect.extend(matchers);
+if (process.env.ZIG_DOM_SKIP_TESTING_LIBRARY !== "1") {
+  const { cleanup } = await import("@testing-library/react");
+  const matchers = await import("@testing-library/jest-dom/matchers");
 
-afterEach(() => {
-  cleanup();
-  const maybeWindow = globalThis.window as unknown as { happyDOM?: { reset: () => void } } | undefined;
-  maybeWindow?.happyDOM?.reset?.();
-});
+  expect.extend(matchers);
+
+  afterEach(() => {
+    cleanup();
+    const maybeWindow = globalThis.window as unknown as { happyDOM?: { reset: () => void } } | undefined;
+    maybeWindow?.happyDOM?.reset?.();
+  });
+}

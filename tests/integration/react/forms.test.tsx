@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { useState } from "react";
 
 function FormHarness(): JSX.Element {
@@ -26,13 +26,13 @@ function FormHarness(): JSX.Element {
 }
 
 test("input and submit behavior", () => {
-  render(<FormHarness />);
-  const input = screen.getByLabelText("name") as HTMLInputElement;
+  const { getByLabelText, getByText } = render(<FormHarness />);
+  const input = getByLabelText("name") as HTMLInputElement;
 
   fireEvent.input(input, { target: { value: "Ada" } });
   fireEvent.change(input, { target: { value: "Ada" } });
-  fireEvent.click(screen.getByText("Submit"));
+  fireEvent.click(getByText("Submit"));
 
   expect((input as unknown as { value: string }).value).toBe("Ada");
-  expect(screen.getByText("submitted:Ada")).toBeDefined();
+  expect(getByText("submitted:Ada")).toBeDefined();
 });

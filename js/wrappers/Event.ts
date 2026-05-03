@@ -1,5 +1,17 @@
 export type EventListenerCallback = (event: Event) => void;
 
+export interface EventListenerObjectLike {
+  handleEvent(event: Event): void;
+}
+
+export interface EventListenerOptionsLike {
+  capture?: boolean;
+}
+
+export interface AddEventListenerOptionsLike extends EventListenerOptionsLike {
+  once?: boolean;
+}
+
 type ListenerEntry = {
   callback: EventListenerCallback;
   capture: boolean;
@@ -79,7 +91,7 @@ export class MouseEvent extends Event {
 export class EventTargetBase {
   #listeners = new Map<string, ListenerEntry[]>();
 
-  addEventListener(type: string, callback: EventListenerCallback | EventListenerObject | null, options?: boolean | AddEventListenerOptions): void {
+  addEventListener(type: string, callback: EventListenerCallback | EventListenerObjectLike | null, options?: boolean | AddEventListenerOptionsLike): void {
     if (!callback) return;
 
     const listenerCallback: EventListenerCallback = typeof callback === "function" ? callback : (event) => callback.handleEvent(event);
@@ -95,7 +107,7 @@ export class EventTargetBase {
     this.#listeners.set(type, existing);
   }
 
-  removeEventListener(type: string, callback: EventListenerCallback | EventListenerObject | null, options?: boolean | EventListenerOptions): void {
+  removeEventListener(type: string, callback: EventListenerCallback | EventListenerObjectLike | null, options?: boolean | EventListenerOptionsLike): void {
     if (!callback) return;
 
     const listenerCallback: EventListenerCallback = typeof callback === "function" ? callback : (event) => callback.handleEvent(event);
@@ -128,7 +140,7 @@ export class EventTargetBase {
     this.#invoke(event, capturePhase);
   }
 
-  private #invoke(event: Event, capturePhase: boolean): void {
+  #invoke(event: Event, capturePhase: boolean): void {
     const listeners = this.#listeners.get(event.type);
     if (!listeners || listeners.length === 0) {
       return;

@@ -3,7 +3,7 @@ import { Document } from "./wrappers/Document.js";
 import { DocumentFragment } from "./wrappers/DocumentFragment.js";
 import { Element } from "./wrappers/Element.js";
 import { CustomEvent, Event, MouseEvent } from "./wrappers/Event.js";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLInputElement } from "./wrappers/HTMLElement.js";
+import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.js";
 import { Node } from "./wrappers/Node.js";
 import { Text } from "./wrappers/Text.js";
 import { Window, type WindowOptions } from "./wrappers/Window.js";
@@ -14,10 +14,6 @@ export class GlobalRegistrator {
   static register(options?: WindowOptions & { forceNewWindow?: boolean }): Window {
     if (!options?.forceNewWindow && GlobalRegistrator.#registeredWindow && !GlobalRegistrator.#registeredWindow.closed) {
       return GlobalRegistrator.#registeredWindow;
-    }
-
-    if (GlobalRegistrator.#registeredWindow && !GlobalRegistrator.#registeredWindow.closed) {
-      GlobalRegistrator.#registeredWindow.close();
     }
 
     const window = new Window(options);
@@ -31,6 +27,7 @@ export class GlobalRegistrator {
       Element,
       HTMLElement,
       HTMLButtonElement,
+      HTMLIFrameElement,
       HTMLInputElement,
       HTMLFormElement,
       Text,

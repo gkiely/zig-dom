@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { dlopen, ptr, suffix, toArrayBuffer } from "bun:ffi";
+import { dlopen, ptr, suffix, toArrayBuffer, type Pointer } from "bun:ffi";
 
 export const enum NativeStatus {
   Ok = 0,
@@ -107,7 +107,11 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 function encode(input: string): Uint8Array {
-  return encoder.encode(input);
+  const bytes = encoder.encode(input);
+  if (bytes.length > 0) {
+    return bytes;
+  }
+  return new Uint8Array(1);
 }
 
 function readStringFromOutParams(addressRef: BigUint64Array, lengthRef: BigUint64Array): string {
@@ -117,9 +121,9 @@ function readStringFromOutParams(addressRef: BigUint64Array, lengthRef: BigUint6
     return "";
   }
 
-  const view = new Uint8Array(toArrayBuffer(address, 0, length));
+  const view = new Uint8Array(toArrayBuffer(address as unknown as Pointer, 0, length));
   const copy = Uint8Array.from(view);
-  nativeLibrary.symbols.zig_dom_free_string(address, length);
+  nativeLibrary.symbols.zig_dom_free_string(address as unknown as Pointer, length);
   return decoder.decode(copy);
 }
 
@@ -138,9 +142,9 @@ function readHandleArrayFromOutParams(addressRef: BigUint64Array, lengthRef: Big
     return [];
   }
 
-  const bytes = new Uint8Array(toArrayBuffer(address, 0, length * 8));
+  const bytes = new Uint8Array(toArrayBuffer(address as unknown as Pointer, 0, length * 8));
   const copy = bytes.slice().buffer;
-  nativeLibrary.symbols.zig_dom_free_handle_array(address, length);
+  nativeLibrary.symbols.zig_dom_free_handle_array(address as unknown as Pointer, length);
   const values = new BigUint64Array(copy);
   return Array.from(values, (value) => Number(value));
 }
@@ -148,7 +152,7 @@ function readHandleArrayFromOutParams(addressRef: BigUint64Array, lengthRef: Big
 export const native = {
   libraryPath,
   version(): string {
-    return nativeLibrary.symbols.zig_dom_version();
+    return String(nativeLibrary.symbols.zig_dom_version());
   },
   canReturnStructs(): boolean {
     return nativeLibrary.symbols.zig_dom_can_return_structs() === 1;
@@ -207,19 +211,19 @@ export const native = {
     return readHandle(out);
   },
   nodeParent(handle: number): number {
-    return nativeLibrary.symbols.zig_dom_node_parent(handle);
+    return Number(nativeLibrary.symbols.zig_dom_node_parent(handle));
   },
   nodeFirstChild(handle: number): number {
-    return nativeLibrary.symbols.zig_dom_node_first_child(handle);
+    return Number(nativeLibrary.symbols.zig_dom_node_first_child(handle));
   },
   nodeLastChild(handle: number): number {
-    return nativeLibrary.symbols.zig_dom_node_last_child(handle);
+    return Number(nativeLibrary.symbols.zig_dom_node_last_child(handle));
   },
   nodeNextSibling(handle: number): number {
-    return nativeLibrary.symbols.zig_dom_node_next_sibling(handle);
+    return Number(nativeLibrary.symbols.zig_dom_node_next_sibling(handle));
   },
   nodePreviousSibling(handle: number): number {
-    return nativeLibrary.symbols.zig_dom_node_previous_sibling(handle);
+    return Number(nativeLibrary.symbols.zig_dom_node_previous_sibling(handle));
   },
   nodeName(handle: number): string {
     const outPtr = new BigUint64Array(1);

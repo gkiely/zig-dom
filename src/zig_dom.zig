@@ -41,7 +41,6 @@ const Window = struct {
     body_handle: u64,
 };
 
-var global_mutex = std.Thread.Mutex{};
 var global_windows = std.AutoHashMapUnmanaged(u64, *Window){};
 var global_node_to_window = std.AutoHashMapUnmanaged(u64, u64){};
 var next_window_handle: u64 = 1;
@@ -62,7 +61,7 @@ fn makeOwned(bytes: []const u8) ![]u8 {
 }
 
 fn makeOwnedLower(bytes: []const u8) ![]u8 {
-    var copy = try c_allocator.dupe(u8, bytes);
+    const copy = try c_allocator.dupe(u8, bytes);
     for (copy) |*item| {
         item.* = std.ascii.toLower(item.*);
     }
@@ -96,7 +95,7 @@ fn createNode(window: *Window, kind: api.NodeKind, name: []const u8, data: []con
         .last_child = 0,
         .prev_sibling = 0,
         .next_sibling = 0,
-        .attributes = .{},
+        .attributes = .empty,
     };
 
     try window.nodes.put(c_allocator, handle, node);
@@ -283,14 +282,14 @@ fn getAttribute(node: *Node, name: []const u8) ?[]const u8 {
     return node.attributes.items[idx].value;
 }
 
-fn appendTextContent(window: *Window, node_handle: u64, output: *std.ArrayList(u8)) !void {
+fn appendTextContent(window: *Window, node_handle: u64, output: *std.ArrayListUnmanaged(u8)) !void {
     const node = resolveNode(window, node_handle) orelse return;
 
     switch (node.kind) {
-        .text => try output.appendSlice(node.data),
+        .text => try output.appendSlice(c_allocator, node.data),
         .comment => {
             if (node_handle == node.owner_document) {
-                try output.appendSlice(node.data);
+                try output.appendSlice(c_allocator, node.data);
             }
         },
         else => {
@@ -320,14 +319,14 @@ fn clearChildren(window: *Window, node_handle: u64) api.Status {
     return .ok;
 }
 
-fn escapeHtml(output: *std.ArrayList(u8), input: []const u8) !void {
+fn escapeHtml(output: *std.ArrayListUnmanaged(u8), input: []const u8) !void {
     for (input) |ch| {
         switch (ch) {
-            '&' => try output.appendSlice("&amp;"),
-            '<' => try output.appendSlice("&lt;"),
-            '>' => try output.appendSlice("&gt;"),
-            '"' => try output.appendSlice("&quot;"),
-            else => try output.append(ch),
+            '&' => try output.appendSlice(c_allocator, "&amp;"),
+            '<' => try output.appendSlice(c_allocator, "&lt;"),
+            '>' => try output.appendSlice(c_allocator, "&gt;"),
+            '"' => try output.appendSlice(c_allocator, "&quot;"),
+            else => try output.append(c_allocator, ch),
         }
     }
 }
@@ -349,7 +348,7 @@ fn isVoidElement(tag: []const u8) bool {
         std.mem.eql(u8, tag, "wbr");
 }
 
-fn serializeNode(window: *Window, node_handle: u64, output: *std.ArrayList(u8)) !void {
+fn serializeNode(window: *Window, node_handle: u64, output: *std.ArrayListUnmanaged(u8)) !void {
     const node = resolveNode(window, node_handle) orelse return;
 
     switch (node.kind) {
@@ -363,21 +362,21 @@ fn serializeNode(window: *Window, node_handle: u64, output: *std.ArrayList(u8)) 
         },
         .text => try escapeHtml(output, node.data),
         .comment => {
-            try output.appendSlice("<!--");
-            try output.appendSlice(node.data);
-            try output.appendSlice("-->");
+            try output.appendSlice(c_allocator, "<!--");
+            try output.appendSlice(c_allocator, node.data);
+            try output.appendSlice(c_allocator, "-->");
         },
         .element => {
-            try output.append('<');
-            try output.appendSlice(node.name);
+            try output.append(c_allocator, '<');
+            try output.appendSlice(c_allocator, node.name);
             for (node.attributes.items) |attr| {
-                try output.append(' ');
-                try output.appendSlice(attr.name);
-                try output.appendSlice("=\"");
+                try output.append(c_allocator, ' ');
+                try output.appendSlice(c_allocator, attr.name);
+                try output.appendSlice(c_allocator, "=\"");
                 try escapeHtml(output, attr.value);
-                try output.appendSlice("\"");
+                try output.appendSlice(c_allocator, "\"");
             }
-            try output.append('>');
+            try output.append(c_allocator, '>');
 
             if (!isVoidElement(node.name)) {
                 var cursor = node.first_child;
@@ -386,9 +385,9 @@ fn serializeNode(window: *Window, node_handle: u64, output: *std.ArrayList(u8)) 
                     const child = resolveNode(window, cursor) orelse break;
                     cursor = child.next_sibling;
                 }
-                try output.appendSlice("</");
-                try output.appendSlice(node.name);
-                try output.append('>');
+                try output.appendSlice(c_allocator, "</");
+                try output.appendSlice(c_allocator, node.name);
+                try output.append(c_allocator, '>');
             }
         },
         else => {},
@@ -450,7 +449,7 @@ fn parseSimpleSelector(input: []const u8) SimpleSelector {
                     while (i < trimmed.len and trimmed[i] != ']') {
                         i += 1;
                     }
-                    var value = std.mem.trim(u8, trimmed[value_start..i], " \t\n\r\"");
+                    const value = std.mem.trim(u8, trimmed[value_start..i], " \t\n\r\"");
                     selector.attr_value = value;
                 }
                 while (i < trimmed.len and trimmed[i] != ']') {
@@ -536,11 +535,11 @@ fn matchesSelectorChain(window: *Window, node_handle: u64, selectors: []const Si
     return true;
 }
 
-fn collectElements(window: *Window, root_handle: u64, selectors: []const SimpleSelector, output: *std.ArrayList(u64)) !void {
+fn collectElements(window: *Window, root_handle: u64, selectors: []const SimpleSelector, output: *std.ArrayListUnmanaged(u64)) !void {
     const node = resolveNode(window, root_handle) orelse return;
 
     if (node.kind == .element and matchesSelectorChain(window, root_handle, selectors)) {
-        try output.append(root_handle);
+        try output.append(c_allocator, root_handle);
     }
 
     var cursor = node.first_child;
@@ -551,10 +550,10 @@ fn collectElements(window: *Window, root_handle: u64, selectors: []const SimpleS
     }
 }
 
-fn parseSelectorList(query: []const u8, output: *std.ArrayList(SimpleSelector)) !void {
+fn parseSelectorList(query: []const u8, output: *std.ArrayListUnmanaged(SimpleSelector)) !void {
     var token_iter = std.mem.tokenizeAny(u8, query, " \t\n\r");
     while (token_iter.next()) |token| {
-        try output.append(parseSimpleSelector(token));
+        try output.append(c_allocator, parseSimpleSelector(token));
     }
 }
 
@@ -664,28 +663,20 @@ pub export fn zig_dom_can_return_structs() u32 {
 }
 
 pub export fn zig_dom_echo_utf8(data_ptr: [*]const u8, data_len: usize, out_ptr: *[*c]u8, out_len: *usize) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const input = data_ptr[0..data_len];
     return outputString(input, out_ptr, out_len);
 }
 
 pub export fn zig_dom_create_window(out_window: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
     return createWindowInternal(out_window);
 }
 
 pub export fn zig_dom_destroy_window(window: u64) void {
-    global_mutex.lock();
-    defer global_mutex.unlock();
     destroyWindowInternal(window);
 }
 
 pub export fn zig_dom_window_document(window: u64, out_document: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
     out_document.* = win.document_handle;
@@ -693,8 +684,6 @@ pub export fn zig_dom_window_document(window: u64, out_document: *u64) u32 {
 }
 
 pub export fn zig_dom_window_document_element(window: u64, out_element: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
     out_element.* = win.html_handle;
@@ -702,8 +691,6 @@ pub export fn zig_dom_window_document_element(window: u64, out_element: *u64) u3
 }
 
 pub export fn zig_dom_window_head(window: u64, out_head: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
     out_head.* = win.head_handle;
@@ -711,8 +698,6 @@ pub export fn zig_dom_window_head(window: u64, out_head: *u64) u32 {
 }
 
 pub export fn zig_dom_window_body(window: u64, out_body: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
     out_body.* = win.body_handle;
@@ -720,8 +705,6 @@ pub export fn zig_dom_window_body(window: u64, out_body: *u64) u32 {
 }
 
 pub export fn zig_dom_node_kind(node: u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
@@ -729,8 +712,6 @@ pub export fn zig_dom_node_kind(node: u64) u32 {
 }
 
 pub export fn zig_dom_node_type(node: u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
@@ -738,8 +719,6 @@ pub export fn zig_dom_node_type(node: u64) u32 {
 }
 
 pub export fn zig_dom_node_owner_document(node: u64, out_document: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
@@ -748,8 +727,6 @@ pub export fn zig_dom_node_owner_document(node: u64, out_document: *u64) u32 {
 }
 
 pub export fn zig_dom_node_parent(node: u64) u64 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
@@ -757,8 +734,6 @@ pub export fn zig_dom_node_parent(node: u64) u64 {
 }
 
 pub export fn zig_dom_node_first_child(node: u64) u64 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
@@ -766,8 +741,6 @@ pub export fn zig_dom_node_first_child(node: u64) u64 {
 }
 
 pub export fn zig_dom_node_last_child(node: u64) u64 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
@@ -775,8 +748,6 @@ pub export fn zig_dom_node_last_child(node: u64) u64 {
 }
 
 pub export fn zig_dom_node_next_sibling(node: u64) u64 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
@@ -784,8 +755,6 @@ pub export fn zig_dom_node_next_sibling(node: u64) u64 {
 }
 
 pub export fn zig_dom_node_previous_sibling(node: u64) u64 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
@@ -793,8 +762,6 @@ pub export fn zig_dom_node_previous_sibling(node: u64) u64 {
 }
 
 pub export fn zig_dom_node_name(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
@@ -803,8 +770,6 @@ pub export fn zig_dom_node_name(node: u64, out_ptr: *[*c]u8, out_len: *usize) u3
 }
 
 pub export fn zig_dom_node_append_child(parent: u64, child: u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
     const window_for_child = resolveNodeWindow(child) orelse return STATUS_INVALID_HANDLE;
@@ -814,8 +779,6 @@ pub export fn zig_dom_node_append_child(parent: u64, child: u64) u32 {
 }
 
 pub export fn zig_dom_node_insert_before(parent: u64, child: u64, reference_child: u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
     const child_window = resolveNodeWindow(child) orelse return STATUS_INVALID_HANDLE;
@@ -829,16 +792,12 @@ pub export fn zig_dom_node_insert_before(parent: u64, child: u64, reference_chil
 }
 
 pub export fn zig_dom_node_remove_child(parent: u64, child: u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
     return @intFromEnum(removeChild(window, parent, child));
 }
 
 pub export fn zig_dom_node_replace_child(parent: u64, new_child: u64, old_child: u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
     const new_window = resolveNodeWindow(new_child) orelse return STATUS_INVALID_HANDLE;
@@ -849,8 +808,6 @@ pub export fn zig_dom_node_replace_child(parent: u64, new_child: u64, old_child:
 }
 
 pub export fn zig_dom_document_create_element(document: u64, name_ptr: [*]const u8, name_len: usize, out_handle: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
@@ -865,8 +822,6 @@ pub export fn zig_dom_document_create_element(document: u64, name_ptr: [*]const 
 }
 
 pub export fn zig_dom_document_create_text_node(document: u64, data_ptr: [*]const u8, data_len: usize, out_handle: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
@@ -877,8 +832,6 @@ pub export fn zig_dom_document_create_text_node(document: u64, data_ptr: [*]cons
 }
 
 pub export fn zig_dom_document_create_comment(document: u64, data_ptr: [*]const u8, data_len: usize, out_handle: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
@@ -889,8 +842,6 @@ pub export fn zig_dom_document_create_comment(document: u64, data_ptr: [*]const 
 }
 
 pub export fn zig_dom_document_create_document_fragment(document: u64, out_handle: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
@@ -901,8 +852,6 @@ pub export fn zig_dom_document_create_document_fragment(document: u64, out_handl
 }
 
 pub export fn zig_dom_element_get_attribute(element: u64, name_ptr: [*]const u8, name_len: usize, out_ptr: *[*c]u8, out_len: *usize, out_exists: *u8) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
     const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
@@ -922,8 +871,6 @@ pub export fn zig_dom_element_get_attribute(element: u64, name_ptr: [*]const u8,
 }
 
 pub export fn zig_dom_element_set_attribute(element: u64, name_ptr: [*]const u8, name_len: usize, value_ptr: [*]const u8, value_len: usize) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
     const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
@@ -934,8 +881,6 @@ pub export fn zig_dom_element_set_attribute(element: u64, name_ptr: [*]const u8,
 }
 
 pub export fn zig_dom_element_remove_attribute(element: u64, name_ptr: [*]const u8, name_len: usize) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
     const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
@@ -946,8 +891,6 @@ pub export fn zig_dom_element_remove_attribute(element: u64, name_ptr: [*]const 
 }
 
 pub export fn zig_dom_element_has_attribute(element: u64, name_ptr: [*]const u8, name_len: usize) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(element) orelse return 0;
     const node = resolveNode(window, element) orelse return 0;
@@ -957,8 +900,6 @@ pub export fn zig_dom_element_has_attribute(element: u64, name_ptr: [*]const u8,
 }
 
 pub export fn zig_dom_node_text_content(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
@@ -967,8 +908,8 @@ pub export fn zig_dom_node_text_content(node: u64, out_ptr: *[*c]u8, out_len: *u
         return outputString(record.data, out_ptr, out_len);
     }
 
-    var buffer = std.ArrayList(u8).init(c_allocator);
-    defer buffer.deinit();
+    var buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer buffer.deinit(c_allocator);
 
     var cursor = record.first_child;
     while (cursor != 0) {
@@ -981,8 +922,6 @@ pub export fn zig_dom_node_text_content(node: u64, out_ptr: *[*c]u8, out_len: *u
 }
 
 pub export fn zig_dom_node_set_text_content(node: u64, data_ptr: [*]const u8, data_len: usize) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
@@ -1010,34 +949,30 @@ pub export fn zig_dom_node_set_text_content(node: u64, data_ptr: [*]const u8, da
 }
 
 pub export fn zig_dom_node_outer_html(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     _ = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
 
-    var buffer = std.ArrayList(u8).init(c_allocator);
-    defer buffer.deinit();
+    var buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer buffer.deinit(c_allocator);
 
     serializeNode(window, node, &buffer) catch return STATUS_OOM;
     return outputString(buffer.items, out_ptr, out_len);
 }
 
 pub export fn zig_dom_document_get_element_by_id(document: u64, id_ptr: [*]const u8, id_len: usize, out_handle: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
 
     const expected = id_ptr[0..id_len];
-    var stack = std.ArrayList(u64).init(c_allocator);
-    defer stack.deinit();
+    var stack: std.ArrayListUnmanaged(u64) = .empty;
+    defer stack.deinit(c_allocator);
 
     var cursor = doc_node.first_child;
     while (cursor != 0) {
-        stack.append(cursor) catch return STATUS_OOM;
+        stack.append(c_allocator, cursor) catch return STATUS_OOM;
         const child = resolveNode(window, cursor) orelse break;
         cursor = child.next_sibling;
     }
@@ -1056,7 +991,7 @@ pub export fn zig_dom_document_get_element_by_id(document: u64, id_ptr: [*]const
 
         var child_cursor = node.first_child;
         while (child_cursor != 0) {
-            stack.append(child_cursor) catch return STATUS_OOM;
+            stack.append(c_allocator, child_cursor) catch return STATUS_OOM;
             const child = resolveNode(window, child_cursor) orelse break;
             child_cursor = child.next_sibling;
         }
@@ -1067,15 +1002,13 @@ pub export fn zig_dom_document_get_element_by_id(document: u64, id_ptr: [*]const
 }
 
 pub export fn zig_dom_document_query_selector(document: u64, selector_ptr: [*]const u8, selector_len: usize, out_handle: *u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
 
-    var selectors = std.ArrayList(SimpleSelector).init(c_allocator);
-    defer selectors.deinit();
+    var selectors: std.ArrayListUnmanaged(SimpleSelector) = .empty;
+    defer selectors.deinit(c_allocator);
 
     parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
     if (selectors.items.len == 0) {
@@ -1083,8 +1016,8 @@ pub export fn zig_dom_document_query_selector(document: u64, selector_ptr: [*]co
         return STATUS_OK;
     }
 
-    var matches = std.ArrayList(u64).init(c_allocator);
-    defer matches.deinit();
+    var matches: std.ArrayListUnmanaged(u64) = .empty;
+    defer matches.deinit(c_allocator);
 
     var cursor = doc_node.first_child;
     while (cursor != 0) {
@@ -1098,15 +1031,13 @@ pub export fn zig_dom_document_query_selector(document: u64, selector_ptr: [*]co
 }
 
 pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [*]const u8, selector_len: usize, out_ptr: *[*c]u64, out_len: *usize) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
 
-    var selectors = std.ArrayList(SimpleSelector).init(c_allocator);
-    defer selectors.deinit();
+    var selectors: std.ArrayListUnmanaged(SimpleSelector) = .empty;
+    defer selectors.deinit(c_allocator);
 
     parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
     if (selectors.items.len == 0) {
@@ -1115,8 +1046,8 @@ pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [
         return STATUS_OK;
     }
 
-    var matches = std.ArrayList(u64).init(c_allocator);
-    defer matches.deinit();
+    var matches: std.ArrayListUnmanaged(u64) = .empty;
+    defer matches.deinit(c_allocator);
 
     var cursor = doc_node.first_child;
     while (cursor != 0) {
@@ -1129,8 +1060,6 @@ pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [
 }
 
 pub export fn zig_dom_document_reset(document: u64) u32 {
-    global_mutex.lock();
-    defer global_mutex.unlock();
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     if (window.document_handle != document) return STATUS_INVALID_ARGUMENT;

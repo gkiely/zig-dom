@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const run = (command: string[]) => Bun.spawnSync(command, { cwd: rootDir, stderr: "inherit", stdout: "inherit" });
 
-const build = run(["zig", "build", "native"]);
+const build = run(["zig", "build"]);
 if (build.exitCode !== 0) {
   process.exit(build.exitCode);
 }
