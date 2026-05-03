@@ -20,20 +20,38 @@ function asciiLowercase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
+function isValidXmlName(value: string): boolean {
+  return value.length > 0;
+}
+
 function createSyntheticAttr(document: Document, name: string, namespaceURI: string | null): Attr {
   const AttrCtor = ((document._window as unknown as {
     Attr?: new () => Record<string, unknown>;
   }).Attr) ?? class {};
 
+  const qualifiedName = String(name);
+  const separator = namespaceURI != null ? qualifiedName.indexOf(":") : -1;
+  const prefix = separator >= 0 ? qualifiedName.slice(0, separator) : null;
+  const localName = separator >= 0 ? qualifiedName.slice(separator + 1) : qualifiedName;
   const attr = Object.assign(new AttrCtor(), {
     nodeType: Node.ATTRIBUTE_NODE,
-    nodeName: name,
-    name,
+    nodeName: qualifiedName,
+    name: qualifiedName,
     value: "",
+    specified: true,
     namespaceURI,
+    prefix,
+    localName,
     ownerElement: null as Element | null,
+    ownerDocument: document,
     parentNode: null,
     parentElement: null,
+    get nodeValue() {
+      return this.value;
+    },
+    set nodeValue(next: string | null) {
+      this.value = next ?? "";
+    },
     get textContent() {
       return this.value;
     },
@@ -372,11 +390,19 @@ export class Document extends Node {
   }
 
   createAttribute(name: string): Attr {
-    return createSyntheticAttr(this, name, null);
+    const qualifiedName = this.contentType === "text/html" ? asciiLowercase(String(name)) : String(name);
+    if (!isValidXmlName(qualifiedName)) {
+      throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+    }
+    return createSyntheticAttr(this, qualifiedName, null);
   }
 
   createAttributeNS(namespace: string | null, qualifiedName: string): Attr {
-    return createSyntheticAttr(this, qualifiedName, namespace);
+    const name = String(qualifiedName);
+    if (!isValidXmlName(name) || name.endsWith(":")) {
+      throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+    }
+    return createSyntheticAttr(this, name, namespace === "" ? null : namespace);
   }
 
   createTextNode(data: string): Text {

@@ -729,6 +729,8 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       hierarchyrequesterr: 3,
       wrongdocumenterror: 4,
       wrongdocumenterr: 4,
+      invalidcharactererror: 5,
+      invalidcharactererr: 5,
       notfounderror: 8,
       notfounderr: 8,
       invalidstateerror: 11,
