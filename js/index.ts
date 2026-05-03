@@ -1,12 +1,12 @@
-import { GlobalRegistrator } from "./global-registrator.js";
 import { PropertySymbol } from "./compatibility/happy-dom-symbols.js";
+import { GlobalRegistrator } from "./global-registrator.js";
 import { Comment } from "./wrappers/Comment.js";
 import { Document } from "./wrappers/Document.js";
 import { DocumentFragment } from "./wrappers/DocumentFragment.js";
 import { Element } from "./wrappers/Element.js";
-import { Event, CustomEvent, MouseEvent } from "./wrappers/Event.js";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.js";
+import { CustomEvent, Event, MouseEvent } from "./wrappers/Event.js";
 import { HTMLCollection } from "./wrappers/HTMLCollection.js";
+import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.js";
 import { Node } from "./wrappers/Node.js";
 import { NodeList } from "./wrappers/NodeList.js";
 import { Text } from "./wrappers/Text.js";

@@ -1,6 +1,6 @@
+import { dlopen, ptr, suffix, toArrayBuffer, type Pointer } from "bun:ffi";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { dlopen, ptr, suffix, toArrayBuffer, type Pointer } from "bun:ffi";
 
 export const enum NativeStatus {
   Ok = 0,

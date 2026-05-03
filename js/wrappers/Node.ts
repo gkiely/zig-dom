@@ -1,7 +1,7 @@
 import { native } from "../ffi.js";
+import type { Document } from "./Document.js";
 import { Event, EventTargetBase } from "./Event.js";
 import { NodeList } from "./NodeList.js";
-import type { Document } from "./Document.js";
 import type { Window } from "./Window.js";
 
 export class Node extends EventTargetBase {

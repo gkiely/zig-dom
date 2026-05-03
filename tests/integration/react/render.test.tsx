@@ -1,6 +1,6 @@
-import "../../setup/register-dom";
-import { expect, test } from "bun:test";
 import { render } from "@testing-library/react";
+import { expect, test } from "bun:test";
+import "../../setup/register-dom";
 import App from "./App";
 
 test("renders app root", () => {

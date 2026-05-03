@@ -15,7 +15,10 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["bun-types", "node"]
+    "types": [
+      "bun-types",
+      "node"
+    ]
   },
   "include": [
     "js/**/*.ts"

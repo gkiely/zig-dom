@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
 import { fireEvent, render } from "@testing-library/react";
+import { expect, test } from "bun:test";
 import { useState } from "react";
 
 function Counter(): JSX.Element {

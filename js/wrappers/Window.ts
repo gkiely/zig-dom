@@ -4,7 +4,7 @@ import { Comment } from "./Comment.js";
 import { Document } from "./Document.js";
 import { DocumentFragment } from "./DocumentFragment.js";
 import { Element } from "./Element.js";
-import { Event, CustomEvent, MouseEvent } from "./Event.js";
+import { CustomEvent, Event, MouseEvent } from "./Event.js";
 import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./HTMLElement.js";
 import { Node } from "./Node.js";
 import { Text } from "./Text.js";

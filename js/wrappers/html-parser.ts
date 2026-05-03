@@ -1,7 +1,7 @@
-import { Node } from "./Node.js";
 import type { Document } from "./Document.js";
-import type { Element } from "./Element.js";
 import type { DocumentFragment } from "./DocumentFragment.js";
+import type { Element } from "./Element.js";
+import { Node } from "./Node.js";
 
 const VOID_ELEMENTS = new Set([
   "area",
