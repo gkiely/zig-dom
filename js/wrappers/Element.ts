@@ -7,6 +7,7 @@ import { parseHtmlInto } from "./html-parser.ts";
 import { elementMatchesSelector, querySelectorAllInElement } from "./selector-engine.ts";
 
 type AttributeEntry = { name: string; value: string };
+type AttributeMetadata = { namespaceURI: string | null; prefix: string | null; localName: string };
 type DatasetShape = Record<string, string>;
 
 const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
@@ -25,9 +26,13 @@ function propertyToDataAttribute(name: string): string {
 class DOMTokenList {
   constructor(private readonly element: Element, private readonly attributeName: string) {}
 
+  get length(): number {
+    return this.#tokens().length;
+  }
+
   #tokens(): string[] {
     const raw = this.element.getAttribute(this.attributeName) ?? "";
-    return raw.split(/\s+/).map((token) => token.trim()).filter(Boolean);
+    return Array.from(new Set(raw.split(/\s+/).map((token) => token.trim()).filter(Boolean)));
   }
 
   #set(tokens: string[]): void {
@@ -49,6 +54,10 @@ class DOMTokenList {
     return this.#tokens().includes(token);
   }
 
+  item(index: number): string | null {
+    return this.#tokens()[index] ?? null;
+  }
+
   toggle(token: string, force?: boolean): boolean {
     const has = this.contains(token);
     if (force === true || (!has && force !== false)) {
@@ -62,7 +71,39 @@ class DOMTokenList {
   }
 
   toString(): string {
-    return this.#tokens().join(" ");
+    return this.element.getAttribute(this.attributeName) ?? "";
+  }
+
+  values(): ArrayIterator<string> {
+    return this.#tokens().values();
+  }
+
+  keys(): ArrayIterator<number> {
+    return this.#tokens().keys();
+  }
+
+  entries(): ArrayIterator<[number, string]> {
+    return this.#tokens().entries();
+  }
+
+  forEach(callback: (value: string, key: number, parent: DOMTokenList) => void, thisArg?: unknown): void {
+    this.#tokens().forEach((value, key) => callback.call(thisArg, value, key, this));
+  }
+
+  [Symbol.iterator](): ArrayIterator<string> {
+    return this.values();
+  }
+
+  get [Symbol.toStringTag](): string {
+    return "DOMTokenList";
+  }
+
+  get value(): string {
+    return this.element.getAttribute(this.attributeName) ?? "";
+  }
+
+  set value(value: string) {
+    this.element.setAttribute(this.attributeName, String(value));
   }
 }
 
@@ -71,6 +112,7 @@ export class Element extends Node {
   #datasetProxy: DatasetShape | null = null;
   #attributeCache: Map<string, string | null> | null = null;
   #attributeNamespaces: Map<string, string | null> = new Map();
+  #attributeMetadata: Map<string, AttributeMetadata> = new Map();
   #nonHtmlAttributes: Map<string, string> = new Map();
 
   constructor(window: Node["_window"], handle: number, nodeType = Node.ELEMENT_NODE) {
@@ -93,6 +135,22 @@ export class Element extends Node {
       this.#classList = new DOMTokenList(this, "class");
     }
     return this.#classList;
+  }
+
+  get relList(): DOMTokenList {
+    return new DOMTokenList(this, "rel");
+  }
+
+  get htmlFor(): DOMTokenList {
+    return new DOMTokenList(this, "for");
+  }
+
+  get sandbox(): DOMTokenList {
+    return new DOMTokenList(this, "sandbox");
+  }
+
+  get sizes(): DOMTokenList {
+    return new DOMTokenList(this, "sizes");
   }
 
   get tagName(): string {
@@ -154,22 +212,36 @@ export class Element extends Node {
   }
 
   get attributes(): Array<{ name: string; value: string }> {
-    const attrs = this.#isHtmlElement() || this.#nonHtmlAttributes.size === 0
-      ? (native.elementAttributes(this._handle) as AttributeEntry[])
-      : Array.from(this.#nonHtmlAttributes.entries()).map(([name, value]) => ({ name, value }));
+    const nativeAttrs = native.elementAttributes(this._handle) as AttributeEntry[];
+    const attrs = [...nativeAttrs];
+    for (const [name, value] of this.#nonHtmlAttributes) {
+      const existingIndex = attrs.findIndex((attribute) => this.#attributeKey(attribute.name) === this.#attributeKey(name));
+      if (existingIndex === -1) {
+        attrs.push({ name, value });
+      } else {
+        attrs[existingIndex] = { name, value };
+      }
+    }
     const ownerDocument = this.ownerDocument;
     const cache = new Map<string, string | null>();
     for (const attr of attrs) {
       cache.set(this.#attributeKey(attr.name), attr.value);
     }
     this.#attributeCache = cache;
-    return attrs.map((attr) => ({
+    return attrs.map((attr) => {
+      const metadata = this.#attributeMetadata.get(attr.name);
+      const name = this.#isHtmlElement() && !this.#nonHtmlAttributes.has(attr.name) && !metadata
+        ? attr.name.toLowerCase()
+        : attr.name;
+      return {
       ...attr,
+      name,
       ownerDocument,
-      namespaceURI: this.#attributeNamespaces.get(this.#attributeKey(attr.name)) ?? attributeNamespace(attr.name),
-      prefix: attributePrefix(attr.name),
-      localName: attributeLocalName(attr.name)
-    }));
+      namespaceURI: metadata?.namespaceURI ?? this.#attributeNamespaces.get(this.#attributeKey(attr.name)) ?? attributeNamespace(attr.name),
+      prefix: metadata?.prefix ?? attributePrefix(name),
+      localName: metadata?.localName ?? attributeLocalName(name)
+    };
+    });
   }
 
   get dataset(): DatasetShape {
@@ -257,6 +329,9 @@ export class Element extends Node {
 
   getAttribute(name: string): string | null {
     const key = this.#attributeKey(name);
+    if (this.#nonHtmlAttributes.has(name)) {
+      return this.#nonHtmlAttributes.get(name) ?? null;
+    }
     if (!this.#isHtmlElement()) {
       if (this.#nonHtmlAttributes.has(key)) {
         return this.#nonHtmlAttributes.get(key) ?? null;
@@ -284,12 +359,17 @@ export class Element extends Node {
       return null;
     }
 
+    const key = this.#attributeKey(name);
+    const metadata = this.#attributeMetadata.get(name) ?? this.#attributeMetadata.get(key);
+    const reflectedName = this.#nonHtmlAttributes.has(name) ? name : key;
     return {
-      name,
+      name: reflectedName,
       value,
       ownerElement: this,
       ownerDocument: this.ownerDocument,
-      namespaceURI: this.#attributeNamespaces.get(this.#attributeKey(name)) ?? null
+      namespaceURI: metadata?.namespaceURI ?? this.#attributeNamespaces.get(key) ?? null,
+      prefix: metadata?.prefix ?? null,
+      localName: metadata?.localName ?? reflectedName
     } as unknown as Attr;
   }
 
@@ -325,13 +405,16 @@ export class Element extends Node {
   }
 
   setAttributeNS(namespace: string | null, qualifiedName: string, value: string): void {
-    const key = this.#attributeKey(qualifiedName);
-    const previousValue = this.getAttribute(key);
+    const key = qualifiedName;
+    const previousValue = this.getAttributeNS(namespace, attributeLocalName(qualifiedName));
     native.setAttribute(this._handle, key, value);
-    if (!this.#isHtmlElement()) {
-      this.#nonHtmlAttributes.set(key, value);
-    }
+    this.#nonHtmlAttributes.set(key, value);
     this.#attributeNamespaces.set(key, namespace);
+    this.#attributeMetadata.set(key, {
+      namespaceURI: namespace,
+      prefix: attributePrefix(qualifiedName),
+      localName: attributeLocalName(qualifiedName)
+    });
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
@@ -351,10 +434,18 @@ export class Element extends Node {
     }
     this.#attributeCache.set(key, null);
     this.#attributeNamespaces.delete(key);
+    this.#attributeMetadata.delete(key);
+    this.#nonHtmlAttributes.delete(name);
     this._window.notifyAttributeChanged(this, key, previousValue, null);
   }
 
-  removeAttributeNS(_namespace: string | null, localName: string): void {
+  removeAttributeNS(namespace: string | null, localName: string): void {
+    for (const [name, metadata] of this.#attributeMetadata) {
+      if (metadata.namespaceURI === namespace && metadata.localName === localName) {
+        this.removeAttribute(name);
+        return;
+      }
+    }
     this.removeAttribute(localName);
   }
 
@@ -383,12 +474,17 @@ export class Element extends Node {
     return has;
   }
 
-  getAttributeNS(_namespace: string | null, localName: string): string | null {
-    return this.getAttribute(localName);
+  getAttributeNS(namespace: string | null, localName: string): string | null {
+    for (const [name, metadata] of this.#attributeMetadata) {
+      if (metadata.namespaceURI === namespace && metadata.localName === localName) {
+        return this.getAttribute(name);
+      }
+    }
+    return namespace == null ? this.getAttribute(localName) : null;
   }
 
-  hasAttributeNS(_namespace: string | null, localName: string): boolean {
-    return this.hasAttribute(localName);
+  hasAttributeNS(namespace: string | null, localName: string): boolean {
+    return this.getAttributeNS(namespace, localName) != null;
   }
 
   matches(selector: string): boolean {

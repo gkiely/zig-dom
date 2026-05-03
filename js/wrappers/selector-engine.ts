@@ -338,7 +338,7 @@ function parseAttributeSelector(input: string, start: number): { selector: Attri
   let name = nameToken.value;
   index = nameToken.next;
 
-  if (!namespaceAny && input[index] === "|") {
+  if (!namespaceAny && input[index] === "|" && input[index + 1] !== "=") {
     const namespace = name;
     index += 1;
     nameToken = readIdentifier(input, index);

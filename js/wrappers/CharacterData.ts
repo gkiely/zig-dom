@@ -12,7 +12,7 @@ export class CharacterData extends Node {
   }
 
   set data(value: string) {
-    this.textContent = value;
+    this.textContent = value === null ? "" : String(value);
   }
 
   get length(): number {
@@ -29,6 +29,9 @@ export class CharacterData extends Node {
   }
 
   appendData(data: string): void {
+    if (arguments.length < 1) {
+      throw new TypeError("Failed to execute 'appendData': 1 argument required.");
+    }
     this.data = `${this.data}${String(data)}`;
   }
 

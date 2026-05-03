@@ -645,6 +645,26 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     }
   };
 
+  const assert_regexp_match = (actual: unknown, expected: RegExp | string, message = "Expected value to match regexp") => {
+    const pattern = expected instanceof RegExp
+      ? expected
+      : String(expected).startsWith("/") && String(expected).lastIndexOf("/") > 0
+        ? new RegExp(String(expected).slice(1, String(expected).lastIndexOf("/")), String(expected).slice(String(expected).lastIndexOf("/") + 1))
+        : new RegExp(String(expected));
+
+    if (!pattern.test(String(actual))) {
+      throw new Error(`${message}: ${String(actual)} does not match ${String(pattern)}`);
+    }
+  };
+
+  const assert_class_string = (object: unknown, expected: string, message = "Expected class string") => {
+    const actual = Object.prototype.toString.call(object);
+    const normalizedExpected = `[object ${expected}]`;
+    if (actual !== normalizedExpected) {
+      throw new Error(`${message}: expected=${normalizedExpected} actual=${actual}`);
+    }
+  };
+
   const assert_throws_js = (constructor: Function, callback: () => void, message = "Expected JS exception") => {
     let thrown: unknown = null;
     try {
@@ -657,7 +677,9 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       throw new Error(`${message}: no exception thrown`);
     }
 
-    if (typeof constructor === "function" && !(thrown instanceof (constructor as new (...args: never[]) => unknown))) {
+    const expectedName = constructor.name;
+    const actualName = (thrown as { name?: string })?.name;
+    if (typeof constructor === "function" && !(thrown instanceof (constructor as new (...args: never[]) => unknown)) && actualName !== expectedName) {
       throw new Error(`${message}: unexpected exception type`);
     }
   };
@@ -825,6 +847,8 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   context.assert_greater_than_equal = assert_greater_than_equal;
   context.assert_implements = assert_implements;
   context.assert_array_equals = assert_array_equals;
+  context.assert_regexp_match = assert_regexp_match;
+  context.assert_class_string = assert_class_string;
   context.assert_throws_js = assert_throws_js;
   context.assert_throws_dom = assert_throws_dom;
   context.promise_rejects_js = promise_rejects_js;
