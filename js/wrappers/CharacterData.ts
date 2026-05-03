@@ -1,5 +1,5 @@
-import { Node } from "./Node.ts";
 import { ZigDOMException } from "./DOMException.ts";
+import { Node } from "./Node.ts";
 import type { Window } from "./Window.ts";
 
 export class CharacterData extends Node {
