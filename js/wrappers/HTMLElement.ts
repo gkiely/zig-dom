@@ -220,6 +220,36 @@ export class HTMLInputElement extends HTMLElement {
   #value: string | null = null;
   #checked: boolean | null = null;
 
+  #uncheckSameGroupRadios(): void {
+    const name = this.getAttribute("name");
+    if (!name) {
+      return;
+    }
+
+    const document = this.ownerDocument;
+    if (!document) {
+      return;
+    }
+
+    const form = this.closestForm();
+    for (const candidate of document.querySelectorAll("input")) {
+      if (!(candidate instanceof HTMLInputElement)) {
+        continue;
+      }
+      if (candidate === this || candidate.type !== "radio") {
+        continue;
+      }
+      if ((candidate.getAttribute("name") ?? "") !== name) {
+        continue;
+      }
+      if (candidate.closestForm() !== form) {
+        continue;
+      }
+
+      candidate.checked = false;
+    }
+  }
+
   get type(): string {
     return this.getAttribute("type")?.toLowerCase() ?? "text";
   }
@@ -287,6 +317,10 @@ export class HTMLInputElement extends HTMLElement {
         this.#checked = previousChecked;
       }
       return result;
+    }
+
+    if (inputType === "radio" && this.checked) {
+      this.#uncheckSameGroupRadios();
     }
 
     if (togglesChecked) {
@@ -446,6 +480,19 @@ export class HTMLSelectElement extends HTMLElement {
 }
 
 export class HTMLLabelElement extends HTMLElement {
+  override dispatchEvent(event: Event): boolean {
+    const result = super.dispatchEvent(event);
+
+    if (event.type === "click" && !event.defaultPrevented && event.target === this) {
+      const control = this.control;
+      if (control && !control.disabled) {
+        control.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
+      }
+    }
+
+    return result;
+  }
+
   get control(): HTMLElement | null {
     const htmlFor = this.getAttribute("for");
     if (htmlFor) {

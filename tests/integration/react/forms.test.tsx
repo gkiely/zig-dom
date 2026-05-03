@@ -87,3 +87,85 @@ test("form controls support default values and reset", () => {
   expect(select.value).toBe("b");
 });
 
+test("label htmlFor click toggles controlled checkbox", () => {
+  function LabelForCheckboxHarness(): JSX.Element {
+    const [checked, setChecked] = useState(false);
+
+    return (
+      <section>
+        <label htmlFor="opt-in">Opt in</label>
+        <input
+          id="opt-in"
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => setChecked((event.target as HTMLInputElement).checked)}
+        />
+        <output>{checked ? "enabled" : "disabled"}</output>
+      </section>
+    );
+  }
+
+  const { getByRole, getByText } = render(<LabelForCheckboxHarness />);
+  const checkbox = getByRole("checkbox") as HTMLInputElement;
+
+  expect(checkbox.checked).toBe(false);
+  expect(getByText("disabled")).toBeDefined();
+
+  fireEvent.click(getByText("Opt in"));
+
+  expect(checkbox.checked).toBe(true);
+  expect(getByText("enabled")).toBeDefined();
+});
+
+test("wrapping label click toggles nested controlled checkbox", () => {
+  function NestedLabelCheckboxHarness(): JSX.Element {
+    const [checked, setChecked] = useState(false);
+
+    return (
+      <label>
+        Receive updates
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => setChecked((event.target as HTMLInputElement).checked)}
+        />
+        <output>{checked ? "enabled" : "disabled"}</output>
+      </label>
+    );
+  }
+
+  const { getByRole, getByText } = render(<NestedLabelCheckboxHarness />);
+  const checkbox = getByRole("checkbox") as HTMLInputElement;
+
+  expect(checkbox.checked).toBe(false);
+  expect(getByText("disabled")).toBeDefined();
+
+  fireEvent.click(getByText("Receive updates"));
+
+  expect(checkbox.checked).toBe(true);
+  expect(getByText("enabled")).toBeDefined();
+});
+
+test("uncontrolled radios keep single checked value in same group", () => {
+  function UncontrolledRadiosHarness(): JSX.Element {
+    return (
+      <section>
+        <input type="radio" name="pet" value="cat" defaultChecked aria-label="cat" />
+        <input type="radio" name="pet" value="dog" aria-label="dog" />
+      </section>
+    );
+  }
+
+  const { getByLabelText } = render(<UncontrolledRadiosHarness />);
+  const cat = getByLabelText("cat") as HTMLInputElement;
+  const dog = getByLabelText("dog") as HTMLInputElement;
+
+  expect(cat.checked).toBe(true);
+  expect(dog.checked).toBe(false);
+
+  fireEvent.click(dog);
+
+  expect(cat.checked).toBe(false);
+  expect(dog.checked).toBe(true);
+});
+
