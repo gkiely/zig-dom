@@ -1,0 +1,5 @@
+{
+  "tests": [
+    { "file": "tests/fixtures/wpt-runner/passing.any.ts" }
+  ]
+}

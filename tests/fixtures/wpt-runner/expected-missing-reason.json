@@ -1,0 +1,10 @@
+{
+  "expectedFailures": [
+    {
+      "file": "tests/fixtures/wpt-runner/passing.any.ts",
+      "subtest": "passing fixture test",
+      "reason": "",
+      "owner": "zig-dom"
+    }
+  ]
+}

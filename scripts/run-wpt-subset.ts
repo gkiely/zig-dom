@@ -358,7 +358,20 @@ const expectedPath = arg("--expected");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
 const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
 
-const expectedMap = new Map(expected.expectedFailures.map((entry) => [`${entry.file}::${entry.subtest}`, entry]));
+const expectedMap = new Map<string, ExpectedEntry>();
+for (const entry of expected.expectedFailures) {
+  const reason = entry.reason?.trim();
+  const owner = entry.owner?.trim();
+  if (!reason || !owner) {
+    throw new Error(`Invalid expected failure entry for ${entry.file} :: ${entry.subtest}. Both reason and owner are required.`);
+  }
+
+  const key = `${entry.file}::${entry.subtest}`;
+  if (expectedMap.has(key)) {
+    throw new Error(`Duplicate expected failure entry: ${key}`);
+  }
+  expectedMap.set(key, entry);
+}
 
 const allResults: SubtestResult[] = [];
 for (const entry of manifest.tests) {
