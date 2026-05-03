@@ -4,6 +4,7 @@ import { CustomElementRegistry } from "./CustomElementRegistry.ts";
 import { ZigDOMException } from "./DOMException.ts";
 import { Document } from "./Document.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
+import { DocumentType } from "./DocumentType.ts";
 import { Element } from "./Element.ts";
 import { CompositionEvent, CustomEvent, Event, EventTargetBase, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
 import {
@@ -198,6 +199,7 @@ export class Window extends EventTargetBase {
   readonly Text = Text;
   readonly Comment = Comment;
   readonly DocumentFragment = DocumentFragment;
+  readonly DocumentType = DocumentType;
   readonly Event = Event;
   readonly CustomEvent = CustomEvent;
   readonly MouseEvent = MouseEvent;
@@ -209,6 +211,7 @@ export class Window extends EventTargetBase {
   readonly Range = Range;
   readonly Selection = Selection;
   readonly Document = Document;
+  readonly XMLDocument = Document;
 
   readonly location: WindowLocation;
   readonly document: Document;
@@ -359,24 +362,48 @@ export class Window extends EventTargetBase {
       });
     }
 
-    if (!("DocumentType" in selfRecord)) {
-      class DocumentTypeImpl {}
-      Object.defineProperty(this, "DocumentType", {
-        value: DocumentTypeImpl,
-        configurable: true,
-        writable: true
-      });
-    }
-
     const WindowCtor = this.constructor as {
       new (options?: { url?: string }): Window;
     };
+
+    const BaseDocument = Document;
+    class DocumentConstructor {
+      constructor() {
+        const scopedWindow = new WindowCtor({ url: "about:blank" });
+        const scopedDocument = scopedWindow.document;
+        for (const child of scopedDocument.childNodes.toArray()) {
+          scopedDocument.removeChild(child);
+        }
+        (scopedDocument as unknown as { __forceNoDocumentElement?: boolean }).__forceNoDocumentElement = true;
+        Object.setPrototypeOf(scopedDocument, DocumentConstructor.prototype);
+        return scopedDocument;
+      }
+    }
+    Object.setPrototypeOf(DocumentConstructor.prototype, BaseDocument.prototype);
+
+    Object.defineProperty(this, "Document", {
+      value: DocumentConstructor,
+      configurable: true,
+      writable: true
+    });
+
+    Object.defineProperty(this, "XMLDocument", {
+      value: DocumentConstructor,
+      configurable: true,
+      writable: true
+    });
 
     class DOMParserImpl {
       parseFromString(source: string, _type: string): Document {
         const parsedWindow = new WindowCtor({ url: "http://localhost/" });
         const parsedDocument = parsedWindow.document;
-        parsedDocument.body.innerHTML = source;
+        const doctypeMatch = source.match(/<!doctype\s+([A-Za-z0-9:_-]+)/i);
+        if (doctypeMatch && !parsedDocument.doctype) {
+          const doctype = parsedDocument.implementation.createDocumentType(doctypeMatch[1], "", "");
+          parsedDocument.insertBefore(doctype as unknown as Node, parsedDocument.firstChild);
+        }
+        const bodySource = source.replace(/<!doctype[^>]*>/i, "");
+        parsedDocument.body.innerHTML = bodySource;
         return parsedDocument;
       }
     }
@@ -481,6 +508,9 @@ export class Window extends EventTargetBase {
         break;
       case Node.DOCUMENT_FRAGMENT_NODE:
         wrapped = new DocumentFragment(this, handle, kind);
+        break;
+      case Node.DOCUMENT_TYPE_NODE:
+        wrapped = new DocumentType(this, handle);
         break;
       default:
         throw new Error(`Unsupported native node kind: ${kind}`);
@@ -698,6 +728,28 @@ export class Window extends EventTargetBase {
       cursor = native.nodeNextSibling(cursor);
     }
     return result;
+  }
+
+  adoptSubtreeWrappers(root: Node): void {
+    this.assertOpen();
+
+    const stack: Node[] = [root];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) {
+        continue;
+      }
+
+      const mutable = current as unknown as { _window: Window };
+      mutable._window = this;
+
+      const nodeId = current._handle % 0x1_0000_0000;
+      this.#nodeCache[nodeId] = current;
+
+      for (const child of current.childNodes.toArray()) {
+        stack.push(child);
+      }
+    }
   }
 
   close(): void {

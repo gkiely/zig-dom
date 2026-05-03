@@ -288,6 +288,12 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   window.document.head.innerHTML = initialMarkup.head;
   window.document.body.innerHTML = initialMarkup.body;
 
+  const doctypeMatch = html.match(/<!doctype\s+([A-Za-z0-9:_-]+)/i);
+  if (doctypeMatch && !window.document.doctype) {
+    const doctype = window.document.implementation.createDocumentType(doctypeMatch[1], "", "");
+    window.document.insertBefore(doctype as unknown as Node, window.document.firstChild);
+  }
+
   const registerHarnessTest = (name: string, run: () => void | Promise<void>) => {
     pendingTests.push((async () => {
       const start = performance.now();
@@ -621,16 +627,8 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   const WindowCtor = window.constructor as {
     new (options?: { url?: string }): Window;
   };
-  context.Document = class {
-    constructor() {
-      const doc = new WindowCtor({ url: testUrl(file, variant) }).document as unknown as {
-        __forceNoDocumentElement?: boolean;
-      };
-      doc.__forceNoDocumentElement = true;
-      return doc;
-    }
-  };
-  context.XMLDocument = context.Document;
+  context.Document = window.Document;
+  context.XMLDocument = window.XMLDocument;
   context.ProcessingInstruction = context.Comment;
   context.NodeList = window.document.childNodes.constructor;
   try {

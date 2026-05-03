@@ -197,18 +197,22 @@ export class Node extends EventTargetBase {
       return child;
     }
 
-    if (this.#nodeType === Node.DOCUMENT_NODE && child.nodeType === Node.COMMENT_NODE) {
+    if (child._window !== this._window) {
       try {
-        native.appendChild(this._handle, child._handle);
+        native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, child._handle);
       } catch {
-        // Keep setup scripts moving even when native document-child constraints are stricter.
+        child = adoptForeignNodeForParent(this, child) as TNode;
+        native.appendChild(this._handle, child._handle);
       }
+      this._window.adoptSubtreeWrappers(child);
+      refreshDocumentElementFlag(this);
       return child;
     }
 
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.appendChild(this._handle, child._handle);
+      refreshDocumentElementFlag(this);
       return child;
     }
 
@@ -226,6 +230,7 @@ export class Node extends EventTargetBase {
     }
 
     if (!this._window.customElements.hasDefinitions) {
+      refreshDocumentElementFlag(this);
       return child;
     }
 
@@ -239,6 +244,7 @@ export class Node extends EventTargetBase {
       this._window.notifyConnectedSubtree(child);
     }
 
+    refreshDocumentElementFlag(this);
     return child;
   }
 
@@ -274,18 +280,22 @@ export class Node extends EventTargetBase {
       return newChild;
     }
 
-    if (this.#nodeType === Node.DOCUMENT_NODE && newChild.nodeType === Node.COMMENT_NODE) {
+    if (newChild._window !== this._window) {
       try {
-        native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+        native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, newChild._handle);
       } catch {
-        // Keep setup scripts moving even when native document-child constraints are stricter.
+        newChild = adoptForeignNodeForParent(this, newChild) as TNode;
       }
+      native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+      this._window.adoptSubtreeWrappers(newChild);
+      refreshDocumentElementFlag(this);
       return newChild;
     }
 
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+      refreshDocumentElementFlag(this);
       return newChild;
     }
 
@@ -303,6 +313,7 @@ export class Node extends EventTargetBase {
     }
 
     if (!this._window.customElements.hasDefinitions) {
+      refreshDocumentElementFlag(this);
       return newChild;
     }
 
@@ -316,6 +327,7 @@ export class Node extends EventTargetBase {
       this._window.notifyConnectedSubtree(newChild);
     }
 
+    refreshDocumentElementFlag(this);
     return newChild;
   }
 
@@ -338,6 +350,7 @@ export class Node extends EventTargetBase {
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.removeChild(this._handle, child._handle);
+      refreshDocumentElementFlag(this);
       return child;
     }
 
@@ -350,6 +363,7 @@ export class Node extends EventTargetBase {
     }
 
     if (!this._window.customElements.hasDefinitions) {
+      refreshDocumentElementFlag(this);
       return child;
     }
 
@@ -358,6 +372,7 @@ export class Node extends EventTargetBase {
       this._window.notifyDisconnectedSubtree(child);
     }
 
+    refreshDocumentElementFlag(this);
     return child;
   }
 
@@ -414,12 +429,25 @@ export class Node extends EventTargetBase {
       const children = this.childNodes.toArray();
       const existingElements = children.filter((node) => node.nodeType === Node.ELEMENT_NODE);
       const existingDoctypes = children.filter((node) => node.nodeType === Node.DOCUMENT_TYPE_NODE);
+      const oldIndex = children.indexOf(oldChild as unknown as Node);
+      const survivingDoctype = children.find((node) => node.nodeType === Node.DOCUMENT_TYPE_NODE && node !== oldChild) ?? null;
+      const survivingElement = children.find((node) => node.nodeType === Node.ELEMENT_NODE && node !== oldChild) ?? null;
+      const survivingDoctypeIndex = survivingDoctype ? children.indexOf(survivingDoctype) : -1;
+      const survivingElementIndex = survivingElement ? children.indexOf(survivingElement) : -1;
 
       if (newChildLike.nodeType === Node.ELEMENT_NODE && existingElements.some((node) => node !== oldChild)) {
         throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
       }
 
       if (newChildLike.nodeType === Node.DOCUMENT_TYPE_NODE && existingDoctypes.some((node) => node !== oldChild)) {
+        throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+      }
+
+      if (newChildLike.nodeType === Node.ELEMENT_NODE && survivingDoctypeIndex >= 0 && oldIndex < survivingDoctypeIndex) {
+        throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+      }
+
+      if (newChildLike.nodeType === Node.DOCUMENT_TYPE_NODE && survivingElementIndex >= 0 && oldIndex > survivingElementIndex) {
         throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
       }
 
@@ -435,6 +463,10 @@ export class Node extends EventTargetBase {
         if (fragmentElementCount === 1 && existingElements.some((node) => node !== oldChild)) {
           throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
         }
+
+        if (fragmentElementCount === 1 && survivingDoctypeIndex >= 0 && oldIndex < survivingDoctypeIndex) {
+          throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+        }
       }
     }
 
@@ -442,9 +474,33 @@ export class Node extends EventTargetBase {
       return oldChild;
     }
 
+    if (newChildLike.nodeType === Node.DOCUMENT_FRAGMENT_NODE && newChild instanceof Node) {
+      const fragmentChildren = newChild.childNodes.toArray();
+      const reference = oldChild.nextSibling;
+      for (const child of fragmentChildren) {
+        this.insertBefore(child, reference);
+      }
+      this.removeChild(oldChild);
+      refreshDocumentElementFlag(this);
+      return oldChild;
+    }
+
+    if ((newChild as Node)._window !== this._window) {
+      try {
+        native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, newChild._handle);
+      } catch {
+        newChild = adoptForeignNodeForParent(this, newChild as Node);
+      }
+      native.replaceChild(this._handle, newChild._handle, oldChild._handle);
+      this._window.adoptSubtreeWrappers(newChild as Node);
+      refreshDocumentElementFlag(this);
+      return oldChild;
+    }
+
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.replaceChild(this._handle, newChild._handle, oldChild._handle);
+      refreshDocumentElementFlag(this);
       return oldChild;
     }
 
@@ -466,6 +522,7 @@ export class Node extends EventTargetBase {
     }
 
     if (!this._window.customElements.hasDefinitions) {
+      refreshDocumentElementFlag(this);
       return oldChild;
     }
 
@@ -482,6 +539,7 @@ export class Node extends EventTargetBase {
       this._window.notifyConnectedSubtree(newChild);
     }
 
+    refreshDocumentElementFlag(this);
     return oldChild;
   }
 
@@ -620,32 +678,33 @@ export class Node extends EventTargetBase {
         return fragment;
       }
       case Node.ELEMENT_NODE: {
-        const container = document.createElement("div");
-        container.innerHTML = this.outerHTML;
-        const clone = container.firstChild;
-        if (!clone) {
-          throw new Error("cloneNode() failed to produce an element clone");
-        }
-
         const sourceElement = this as unknown as {
           namespaceURI?: string | null;
           prefix?: string | null;
           localName?: string;
+          attributes?: Array<{ name: string; value: string; namespaceURI?: string | null }>;
         };
-        const cloneElement = clone as unknown as {
-          __namespaceURI?: string | null;
-          __prefix?: string | null;
-          __localName?: string;
-        };
-        cloneElement.__namespaceURI = sourceElement.namespaceURI ?? null;
-        cloneElement.__prefix = sourceElement.prefix ?? null;
-        cloneElement.__localName = sourceElement.localName ?? this.nodeName.toLowerCase();
 
-        if (!deep) {
-          while (clone.firstChild) {
-            clone.removeChild(clone.firstChild);
+        const qualifiedName = sourceElement.prefix
+          ? `${sourceElement.prefix}:${sourceElement.localName ?? this.nodeName}`
+          : sourceElement.localName ?? this.nodeName;
+        const namespaceURI = inferCloneNamespace(this, sourceElement.namespaceURI ?? null);
+        const clone = document.createElementNS(namespaceURI, qualifiedName);
+
+        for (const attribute of sourceElement.attributes ?? []) {
+          if (attribute.namespaceURI) {
+            clone.setAttributeNS(attribute.namespaceURI, attribute.name, attribute.value);
+          } else {
+            clone.setAttribute(attribute.name, attribute.value);
           }
         }
+
+        if (deep) {
+          for (const child of this.childNodes.toArray()) {
+            clone.appendChild(child.cloneNode(true));
+          }
+        }
+
         return clone;
       }
       default:
@@ -665,21 +724,49 @@ export class Node extends EventTargetBase {
     }
 
     if (this.nodeType === Node.TEXT_NODE || this.nodeType === Node.COMMENT_NODE) {
+      const leftTarget = (this as unknown as { target?: string }).target;
+      const rightTarget = (other as unknown as { target?: string }).target;
+      if (leftTarget != null || rightTarget != null) {
+        return leftTarget === rightTarget && this.textContent === other.textContent;
+      }
       return this.textContent === other.textContent;
     }
 
+    if (this.nodeType === Node.DOCUMENT_TYPE_NODE) {
+      const left = this as unknown as { name?: string; publicId?: string; systemId?: string };
+      const right = other as unknown as { name?: string; publicId?: string; systemId?: string };
+      return left.name === right.name && left.publicId === right.publicId && left.systemId === right.systemId;
+    }
+
     if (this.nodeType === Node.ELEMENT_NODE) {
-      const leftAttributes = ((this as unknown) as { attributes?: Array<{ name: string; value: string }> }).attributes ?? [];
-      const rightAttributes = ((other as unknown) as { attributes?: Array<{ name: string; value: string }> }).attributes ?? [];
+      const leftElement = this as unknown as { namespaceURI?: string | null; prefix?: string | null; localName?: string };
+      const rightElement = other as unknown as { namespaceURI?: string | null; prefix?: string | null; localName?: string };
+      if (leftElement.namespaceURI !== rightElement.namespaceURI ||
+          leftElement.prefix !== rightElement.prefix ||
+          leftElement.localName !== rightElement.localName) {
+        return false;
+      }
+
+      const leftAttributes = ((this as unknown) as {
+        attributes?: Array<{ name: string; value: string; namespaceURI?: string | null; localName?: string }>;
+      }).attributes ?? [];
+      const rightAttributes = ((other as unknown) as {
+        attributes?: Array<{ name: string; value: string; namespaceURI?: string | null; localName?: string }>;
+      }).attributes ?? [];
       if (leftAttributes.length !== rightAttributes.length) {
         return false;
       }
 
-      const sortByName = (a: { name: string; value: string }, b: { name: string; value: string }) => a.name.localeCompare(b.name);
+      const sortByName = (
+        a: { name: string; value: string; namespaceURI?: string | null; localName?: string },
+        b: { name: string; value: string; namespaceURI?: string | null; localName?: string }
+      ) => `${a.namespaceURI ?? ""}:${a.localName ?? a.name}`.localeCompare(`${b.namespaceURI ?? ""}:${b.localName ?? b.name}`);
       const leftSorted = [...leftAttributes].sort(sortByName);
       const rightSorted = [...rightAttributes].sort(sortByName);
       for (let i = 0; i < leftSorted.length; i += 1) {
-        if (leftSorted[i]?.name !== rightSorted[i]?.name || leftSorted[i]?.value !== rightSorted[i]?.value) {
+        if (leftSorted[i]?.namespaceURI !== rightSorted[i]?.namespaceURI ||
+            (leftSorted[i]?.localName ?? leftSorted[i]?.name) !== (rightSorted[i]?.localName ?? rightSorted[i]?.name) ||
+            leftSorted[i]?.value !== rightSorted[i]?.value) {
           return false;
         }
       }
@@ -705,7 +792,8 @@ export class Node extends EventTargetBase {
 
     let previousText: Node | null = null;
     for (const child of this.childNodes.toArray()) {
-      if (child.nodeType === Node.TEXT_NODE) {
+      const isSyntheticCDATA = (child as unknown as { __isCDATASection?: boolean }).__isCDATASection === true;
+      if (child.nodeType === Node.TEXT_NODE && !isSyntheticCDATA) {
         if (child.textContent.length === 0) {
           this.removeChild(child);
           continue;
@@ -819,6 +907,95 @@ const NODE_PROTOTYPE_CONSTANTS: Record<string, number> = {
   DOCUMENT_POSITION_CONTAINED_BY: Node.DOCUMENT_POSITION_CONTAINED_BY,
   DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC
 };
+
+function adoptForeignNodeForParent(parent: Node, foreignNode: Node): Node {
+  const destinationDocument = parent.nodeType === Node.DOCUMENT_NODE
+    ? (parent as unknown as Document)
+    : parent.ownerDocument;
+
+  if (!destinationDocument) {
+    throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+  }
+
+  if (foreignNode.parentNode) {
+    foreignNode.parentNode.removeChild(foreignNode);
+  }
+
+  const imported = destinationDocument.importNode(foreignNode, true);
+  remapNodeIdentity(foreignNode, imported);
+  return foreignNode;
+}
+
+function remapNodeIdentity(source: Node, replacement: Node): void {
+  const sourceChildren = source.childNodes.toArray();
+  const replacementChildren = replacement.childNodes.toArray();
+
+  const mutableSource = source as unknown as {
+    _window: Window;
+    _handle: number;
+    __namespaceURI?: string | null;
+    __prefix?: string | null;
+    __localName?: string;
+  };
+  const replacementLike = replacement as unknown as {
+    _window: Window;
+    _handle: number;
+    __namespaceURI?: string | null;
+    __prefix?: string | null;
+    __localName?: string;
+  };
+
+  mutableSource._window = replacementLike._window;
+  mutableSource._handle = replacementLike._handle;
+
+  if (source.nodeType === Node.ELEMENT_NODE) {
+    mutableSource.__namespaceURI = replacementLike.__namespaceURI;
+    mutableSource.__prefix = replacementLike.__prefix;
+    mutableSource.__localName = replacementLike.__localName;
+  }
+
+  const count = Math.min(sourceChildren.length, replacementChildren.length);
+  for (let index = 0; index < count; index += 1) {
+    const left = sourceChildren[index];
+    const right = replacementChildren[index];
+    if (left && right) {
+      remapNodeIdentity(left, right);
+    }
+  }
+}
+
+function refreshDocumentElementFlag(node: Node): void {
+  if (node.nodeType !== Node.DOCUMENT_NODE) {
+    return;
+  }
+
+  const hasElementChild = node.childNodes.toArray().some((child) => child.nodeType === Node.ELEMENT_NODE);
+  const mutableDocument = node as unknown as { __forceNoDocumentElement?: boolean };
+  mutableDocument.__forceNoDocumentElement = !hasElementChild;
+}
+
+function inferCloneNamespace(source: Node, fallbackNamespace: string | null): string | null {
+  if (fallbackNamespace && fallbackNamespace !== "http://www.w3.org/1999/xhtml") {
+    return fallbackNamespace;
+  }
+
+  const elementLike = source as unknown as { localName?: string; parentElement?: Node | null };
+  const localName = (elementLike.localName ?? "").toLowerCase();
+  if (localName === "svg") {
+    return "http://www.w3.org/2000/svg";
+  }
+
+  let cursor = elementLike.parentElement;
+  while (cursor) {
+    const candidate = (cursor as unknown as { localName?: string; namespaceURI?: string | null }).localName?.toLowerCase();
+    if (candidate === "svg" || (cursor as unknown as { namespaceURI?: string | null }).namespaceURI === "http://www.w3.org/2000/svg") {
+      return "http://www.w3.org/2000/svg";
+    }
+    cursor = cursor.parentElement;
+  }
+
+  return fallbackNamespace;
+}
 
 for (const [key, value] of Object.entries(NODE_PROTOTYPE_CONSTANTS)) {
   if (!(key in Node.prototype)) {

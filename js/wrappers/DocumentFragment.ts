@@ -1,6 +1,7 @@
 import type { Element } from "./Element.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
+import { NodeList } from "./NodeList.ts";
 import { querySelectorAllInSubtree } from "./selector-engine.ts";
 import type { Window } from "./Window.ts";
 
@@ -18,6 +19,7 @@ export class DocumentFragment extends Node {
   }
 
   querySelectorAll(selector: string): Element[] {
-    return querySelectorAllInSubtree(this, selector);
+    const snapshot = querySelectorAllInSubtree(this, selector);
+    return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
   }
 }

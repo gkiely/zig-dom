@@ -1,7 +1,21 @@
 import type { Node } from "./Node.ts";
 
+const GET_NODES = Symbol("getNodes");
+
 export class NodeList implements Iterable<Node> {
-  constructor(private readonly getNodes: () => Node[]) {
+  declare readonly forEach: (callback: (value: Node, index: number, parent: NodeList) => void, thisArg?: unknown) => void;
+  declare readonly keys: () => IterableIterator<number>;
+  declare readonly values: () => IterableIterator<Node>;
+  declare readonly entries: () => IterableIterator<[number, Node]>;
+  declare readonly [Symbol.iterator]: () => Iterator<Node>;
+
+  constructor(getNodes: () => Node[]) {
+    Object.defineProperty(this, GET_NODES, {
+      value: getNodes,
+      configurable: false,
+      writable: false,
+      enumerable: false
+    });
     const readNodes = getNodes;
     return new Proxy(this, {
       get(target, property, receiver) {
@@ -40,38 +54,44 @@ export class NodeList implements Iterable<Node> {
   }
 
   get length(): number {
-    return this.getNodes().length;
+    return (this as unknown as { [GET_NODES]: () => Node[] })[GET_NODES]().length;
   }
 
   item(index: number): Node | null {
-    return this.getNodes()[index] ?? null;
-  }
-
-  forEach(callback: (value: Node, index: number, parent: NodeList) => void): void {
-    const nodes = this.getNodes();
-    for (let index = 0; index < nodes.length; index += 1) {
-      callback(nodes[index], index, this);
-    }
-  }
-
-  keys(): IterableIterator<number> {
-    const nodes = this.getNodes();
-    return nodes.keys();
-  }
-
-  values(): IterableIterator<Node> {
-    return this.getNodes().values();
-  }
-
-  entries(): IterableIterator<[number, Node]> {
-    return this.getNodes().entries();
-  }
-
-  [Symbol.iterator](): Iterator<Node> {
-    return this.getNodes()[Symbol.iterator]();
+    return (this as unknown as { [GET_NODES]: () => Node[] })[GET_NODES]()[index] ?? null;
   }
 
   toArray(): Node[] {
-    return this.getNodes();
+    return (this as unknown as { [GET_NODES]: () => Node[] })[GET_NODES]();
   }
 }
+
+Object.defineProperty(NodeList.prototype, "forEach", {
+  value: Array.prototype.forEach,
+  configurable: true,
+  writable: true
+});
+
+Object.defineProperty(NodeList.prototype, "keys", {
+  value: Array.prototype.keys,
+  configurable: true,
+  writable: true
+});
+
+Object.defineProperty(NodeList.prototype, "values", {
+  value: Array.prototype.values,
+  configurable: true,
+  writable: true
+});
+
+Object.defineProperty(NodeList.prototype, "entries", {
+  value: Array.prototype.entries,
+  configurable: true,
+  writable: true
+});
+
+Object.defineProperty(NodeList.prototype, Symbol.iterator, {
+  value: Array.prototype[Symbol.iterator],
+  configurable: true,
+  writable: true
+});

@@ -9,6 +9,9 @@ import { elementMatchesSelector, querySelectorAllInElement } from "./selector-en
 type AttributeEntry = { name: string; value: string };
 type DatasetShape = Record<string, string>;
 
+const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
+const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
+
 function dataAttributeToProperty(name: string): string {
   return name
     .slice(5)
@@ -67,6 +70,7 @@ export class Element extends Node {
   #classList: DOMTokenList | null = null;
   #datasetProxy: DatasetShape | null = null;
   #attributeCache: Map<string, string | null> | null = null;
+  #attributeNamespaces: Map<string, string | null> = new Map();
 
   constructor(window: Node["_window"], handle: number, nodeType = Node.ELEMENT_NODE) {
     super(window, handle, nodeType);
@@ -80,7 +84,16 @@ export class Element extends Node {
   }
 
   get tagName(): string {
-    return this.nodeName.toUpperCase();
+    const localName = this.localName;
+    const qualifiedName = this.prefix ? `${this.prefix}:${localName}` : localName;
+    if (this.namespaceURI === "http://www.w3.org/1999/xhtml") {
+      return qualifiedName.toUpperCase();
+    }
+    return qualifiedName;
+  }
+
+  override get nodeName(): string {
+    return this.tagName;
   }
 
   get namespaceURI(): string | null {
@@ -93,7 +106,7 @@ export class Element extends Node {
   }
 
   get localName(): string {
-    return (this as unknown as { __localName?: string }).__localName ?? this.tagName.toLowerCase();
+    return (this as unknown as { __localName?: string }).__localName ?? native.nodeName(this._handle).toLowerCase();
   }
 
   get id(): string {
@@ -116,14 +129,33 @@ export class Element extends Node {
     return new HTMLCollection(() => this.childNodes.toArray().filter((node) => node.nodeType === Node.ELEMENT_NODE) as Element[]);
   }
 
+  get firstElementChild(): Element | null {
+    return this.children.item(0);
+  }
+
+  get lastElementChild(): Element | null {
+    const children = this.children;
+    if (children.length === 0) {
+      return null;
+    }
+    return children.item(children.length - 1);
+  }
+
   get attributes(): Array<{ name: string; value: string }> {
     const attrs = native.elementAttributes(this._handle) as AttributeEntry[];
+    const ownerDocument = this.ownerDocument;
     const cache = new Map<string, string | null>();
     for (const attr of attrs) {
       cache.set(attr.name.toLowerCase(), attr.value);
     }
     this.#attributeCache = cache;
-    return attrs;
+    return attrs.map((attr) => ({
+      ...attr,
+      ownerDocument,
+      namespaceURI: this.#attributeNamespaces.get(attr.name.toLowerCase()) ?? attributeNamespace(attr.name),
+      prefix: attributePrefix(attr.name),
+      localName: attributeLocalName(attr.name)
+    }));
   }
 
   get dataset(): DatasetShape {
@@ -233,7 +265,8 @@ export class Element extends Node {
       name,
       value,
       ownerElement: this,
-      namespaceURI: null
+      ownerDocument: this.ownerDocument,
+      namespaceURI: this.#attributeNamespaces.get(name.toLowerCase()) ?? null
     } as unknown as Attr;
   }
 
@@ -255,6 +288,9 @@ export class Element extends Node {
     const key = name.toLowerCase();
     const previousValue = this.getAttribute(key);
     native.setAttribute(this._handle, key, value);
+    if (!this.#attributeNamespaces.has(key)) {
+      this.#attributeNamespaces.set(key, attributeNamespace(name));
+    }
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
@@ -262,8 +298,16 @@ export class Element extends Node {
     this._window.notifyAttributeChanged(this, key, previousValue, value);
   }
 
-  setAttributeNS(_namespace: string | null, qualifiedName: string, value: string): void {
-    this.setAttribute(qualifiedName, value);
+  setAttributeNS(namespace: string | null, qualifiedName: string, value: string): void {
+    const key = qualifiedName.toLowerCase();
+    const previousValue = this.getAttribute(key);
+    native.setAttribute(this._handle, key, value);
+    this.#attributeNamespaces.set(key, namespace);
+    if (!this.#attributeCache) {
+      this.#attributeCache = new Map();
+    }
+    this.#attributeCache.set(key, value);
+    this._window.notifyAttributeChanged(this, key, previousValue, value);
   }
 
   removeAttribute(name: string): void {
@@ -274,6 +318,7 @@ export class Element extends Node {
       this.#attributeCache = new Map();
     }
     this.#attributeCache.set(key, null);
+    this.#attributeNamespaces.delete(key);
     this._window.notifyAttributeChanged(this, key, previousValue, null);
   }
 
@@ -314,11 +359,40 @@ export class Element extends Node {
   }
 
   querySelectorAll(selector: string): Element[] {
-    return querySelectorAllInElement(this, selector);
+    const snapshot = querySelectorAllInElement(this, selector);
+    return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
   }
 
   getElementsByTagName(tagName: string): Element[] {
     const selector = tagName === "*" ? "*" : tagName.toLowerCase();
     return this.querySelectorAll(selector);
   }
+}
+
+function attributePrefix(name: string): string | null {
+  const separator = name.indexOf(":");
+  if (separator <= 0) {
+    return null;
+  }
+  return name.slice(0, separator);
+}
+
+function attributeLocalName(name: string): string {
+  const separator = name.indexOf(":");
+  if (separator <= 0) {
+    return name;
+  }
+  return name.slice(separator + 1);
+}
+
+function attributeNamespace(name: string): string | null {
+  if (name === "xmlns" || name.startsWith("xmlns:")) {
+    return XMLNS_NAMESPACE;
+  }
+
+  if (name.startsWith("xlink:")) {
+    return XLINK_NAMESPACE;
+  }
+
+  return null;
 }

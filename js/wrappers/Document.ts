@@ -1,6 +1,7 @@
 import { native } from "../ffi.ts";
 import { Comment } from "./Comment.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
+import { DocumentType } from "./DocumentType.ts";
 import { ZigDOMException } from "./DOMException.ts";
 import { Element } from "./Element.ts";
 import { CompositionEvent, CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
@@ -13,19 +14,6 @@ import type { Window } from "./Window.ts";
 
 const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
 const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
-
-type SyntheticNodeLike = {
-  nodeType: number;
-  nodeName: string;
-  textContent: string | null;
-  parentNode: Document | null;
-  parentElement: null;
-  lookupNamespaceURI(prefix: string | null): string | null;
-  isDefaultNamespace(namespace: string | null): boolean;
-  isSameNode(other: unknown): boolean;
-  isEqualNode(other: unknown): boolean;
-  cloneNode(deep?: boolean): unknown;
-};
 
 function createSyntheticAttr(document: Document, name: string, namespaceURI: string | null): Attr {
   const AttrCtor = ((document._window as unknown as {
@@ -79,58 +67,16 @@ function createSyntheticAttr(document: Document, name: string, namespaceURI: str
   return attr as unknown as Attr;
 }
 
-function createSyntheticDocumentType(
-  document: Document,
-  name: string,
-  publicId = "",
-  systemId = "",
-  parentNode: Document | null = null
-): DocumentType {
-  const DocumentTypeCtor = ((document._window as unknown as {
-    DocumentType?: new () => Record<string, unknown>;
-  }).DocumentType) ?? class {};
+function createSyntheticDocumentType(document: Document, name: string, publicId = "", systemId = ""): DocumentType {
+  const handle = native.createComment(document._handle, "");
+  const wrapped = document._window.createKnownNode(handle, Node.DOCUMENT_TYPE_NODE);
+  if (!wrapped || wrapped.nodeType !== Node.DOCUMENT_TYPE_NODE) {
+    throw new Error("Failed to create document type node");
+  }
 
-  const doctype: SyntheticNodeLike & {
-    name: string;
-    publicId: string;
-    systemId: string;
-    ownerDocument: Document;
-  } = Object.assign(new DocumentTypeCtor(), {
-    nodeType: Node.DOCUMENT_TYPE_NODE,
-    nodeName: name,
-    name,
-    publicId,
-    systemId,
-    ownerDocument: document,
-    get textContent() {
-      return null;
-    },
-    set textContent(_value: string | null) {
-      // Intentionally ignored for DocumentType nodes.
-    },
-    parentNode,
-    parentElement: null,
-    lookupNamespaceURI: () => null,
-    isDefaultNamespace: (namespace: string | null) => namespace == null || namespace === "",
-    isSameNode(other: unknown) {
-      return other === doctype;
-    },
-    isEqualNode(other: unknown) {
-      if (!other || typeof other !== "object") {
-        return false;
-      }
-      const candidate = other as { name?: string; publicId?: string; systemId?: string; nodeType?: number };
-      return candidate.nodeType === Node.DOCUMENT_TYPE_NODE &&
-        candidate.name === doctype.name &&
-        candidate.publicId === doctype.publicId &&
-        candidate.systemId === doctype.systemId;
-    },
-    cloneNode() {
-      return createSyntheticDocumentType(document, doctype.name, doctype.publicId, doctype.systemId, null);
-    }
-  });
-
-  return doctype as unknown as DocumentType;
+  const doctype = wrapped as DocumentType;
+  doctype.setDefinition(name, publicId, systemId);
+  return doctype;
 }
 
 export class Document extends Node {
@@ -138,7 +84,6 @@ export class Document extends Node {
   #headCache: Element | null = null;
   #bodyCache: Element | null = null;
   #doctypeCache: DocumentType | null = null;
-  #childNodesViewCache: NodeList | null = null;
 
   constructor(window: Window, handle: number, nodeType = Node.DOCUMENT_NODE) {
     super(window, handle, nodeType);
@@ -146,23 +91,6 @@ export class Document extends Node {
 
   get defaultView(): Window {
     return this._window;
-  }
-
-  override get childNodes(): NodeList {
-    if (this.#childNodesViewCache) {
-      return this.#childNodesViewCache;
-    }
-
-    this.#childNodesViewCache = new NodeList(() => {
-      const baseNodes = super.childNodes.toArray();
-      const doctype = this.doctype as unknown as Node | null;
-      if (!doctype || baseNodes.some((node) => node.nodeType === Node.DOCUMENT_TYPE_NODE)) {
-        return baseNodes;
-      }
-      return [doctype, ...baseNodes];
-    });
-
-    return this.#childNodesViewCache;
   }
 
   get documentElement(): Element {
@@ -206,12 +134,18 @@ export class Document extends Node {
 
   get doctype(): DocumentType | null {
     this._window.assertOpen();
-    if (this.#doctypeCache) {
+    for (const child of super.childNodes.toArray()) {
+      if (child.nodeType === Node.DOCUMENT_TYPE_NODE) {
+        this.#doctypeCache = child as unknown as DocumentType;
+        return this.#doctypeCache;
+      }
+    }
+
+    if (this.#doctypeCache?.parentNode === this) {
       return this.#doctypeCache;
     }
 
-    this.#doctypeCache = createSyntheticDocumentType(this, "html", "", "", this);
-    return this.#doctypeCache;
+    return null;
   }
 
   get scrollingElement(): Element {
@@ -220,6 +154,45 @@ export class Document extends Node {
 
   get URL(): string {
     return this._window.location.href;
+  }
+
+  get charset(): string {
+    return "UTF-8";
+  }
+
+  get characterSet(): string {
+    return "UTF-8";
+  }
+
+  get inputEncoding(): string {
+    return "UTF-8";
+  }
+
+  get contentType(): string {
+    const root = this.childNodes.toArray().find((node) => node.nodeType === Node.ELEMENT_NODE) as Element | undefined;
+    if (root?.localName === "html") {
+      return "text/html";
+    }
+    return "application/xml";
+  }
+
+  get compatMode(): string {
+    return "CSS1Compat";
+  }
+
+  get title(): string {
+    const titleElement = this.querySelector("title");
+    return titleElement?.textContent ?? "";
+  }
+
+  set title(value: string) {
+    let titleElement = this.querySelector("title");
+    if (!titleElement) {
+      titleElement = this.createElement("title");
+      const head = this.head;
+      head.appendChild(titleElement);
+    }
+    titleElement.textContent = value;
   }
 
   get cookie(): string {
@@ -243,15 +216,11 @@ export class Document extends Node {
     createHTMLDocument: (title?: string) => Document;
     createDocumentType: (qualifiedName: string, publicId?: string, systemId?: string) => DocumentType;
   } {
-    const createDocument = (_namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null): Document => {
-      const WindowCtor = this._window.constructor as {
-        new (options?: { url?: string }): {
-          document: Document;
-        };
-      };
-
-      const nextWindow = new WindowCtor({ url: this.URL });
-      const nextDocument = nextWindow.document;
+    const createDocument = (namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null): Document => {
+      const XMLDocumentCtor = (this._window as unknown as {
+        XMLDocument: new () => Document;
+      }).XMLDocument;
+      const nextDocument = new XMLDocumentCtor();
 
       if (doctype) {
         const source = doctype as unknown as { name?: string; publicId?: string; systemId?: string };
@@ -259,31 +228,13 @@ export class Document extends Node {
           nextDocument,
           source.name ?? "html",
           source.publicId ?? "",
-          source.systemId ?? "",
-          nextDocument
+          source.systemId ?? ""
         );
+        nextDocument.appendChild(nextDocument.#doctypeCache);
       }
 
-      const originalAppendChild = nextDocument.appendChild.bind(nextDocument);
-      nextDocument.appendChild = (<TNode extends Node>(child: TNode): TNode => {
-        try {
-          return originalAppendChild(child);
-        } catch {
-          return child;
-        }
-      }) as Document["appendChild"];
-
-      const originalInsertBefore = nextDocument.insertBefore.bind(nextDocument);
-      nextDocument.insertBefore = (<TNode extends Node>(newChild: TNode, referenceChild: Node | null): TNode => {
-        try {
-          return originalInsertBefore(newChild, referenceChild);
-        } catch {
-          return newChild;
-        }
-      }) as Document["insertBefore"];
-
       if (qualifiedName) {
-        const root = nextDocument.createElement(qualifiedName);
+        const root = nextDocument.createElementNS(namespace, qualifiedName);
         nextDocument.appendChild(root);
       }
 
@@ -291,18 +242,35 @@ export class Document extends Node {
     };
 
     const createDocumentType = (qualifiedName: string, publicId = "", systemId = ""): DocumentType => {
-      return createSyntheticDocumentType(this, qualifiedName, publicId, systemId, null);
+      return createSyntheticDocumentType(this, qualifiedName, publicId, systemId);
     };
 
     return {
       createDocument,
       createDocumentType,
       createHTMLDocument: (title?: string): Document => {
-        const nextDocument = createDocument(null, null);
+        const DocumentCtor = (this._window as unknown as {
+          Document: new () => Document;
+        }).Document;
+        const nextDocument = new DocumentCtor();
+        const doctype = createSyntheticDocumentType(nextDocument, "html", "", "");
+        nextDocument.#doctypeCache = doctype;
+        nextDocument.appendChild(doctype);
+
+        const html = nextDocument.createElement("html");
+        const head = nextDocument.createElement("head");
+        const body = nextDocument.createElement("body");
+        html.appendChild(head);
+        html.appendChild(body);
+        nextDocument.appendChild(html);
+        nextDocument.#documentElementCache = html;
+        nextDocument.#headCache = head;
+        nextDocument.#bodyCache = body;
+
         if (title && title.length > 0) {
           const titleElement = nextDocument.createElement("title");
           titleElement.textContent = title;
-          nextDocument.head.appendChild(titleElement);
+          head.appendChild(titleElement);
         }
         return nextDocument;
       }
@@ -409,8 +377,9 @@ export class Document extends Node {
 
   createCDATASection(data: string): Text {
     this._window.assertOpen();
-    // Temporary compatibility behavior for mixed HTML/XML WPT helpers.
-    return this.createTextNode(data);
+    const cdata = this.createTextNode(data) as unknown as Text & { __isCDATASection?: boolean };
+    cdata.__isCDATASection = true;
+    return cdata;
   }
 
   createDocumentFragment(): DocumentFragment {
@@ -437,13 +406,13 @@ export class Document extends Node {
 
   querySelectorAll(selector: string): Element[] {
     this._window.assertOpen();
-    if (canUseNativeSelector(selector)) {
-      return native.documentQuerySelectorAll(this._handle, selector)
+    const snapshot = canUseNativeSelector(selector)
+      ? native.documentQuerySelectorAll(this._handle, selector)
         .map((handle) => this._window.getNode(handle))
-        .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE));
-    }
+        .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE))
+      : querySelectorAllInDocument(this, selector);
 
-    return querySelectorAllInDocument(this, selector);
+    return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
   }
 
   getElementsByTagName(tagName: string): Element[] {
@@ -459,12 +428,12 @@ export class Document extends Node {
       throw new ZigDOMException("A Document node cannot be adopted.", "NotSupportedError", 9);
     }
 
-    if (node._window !== this._window) {
-      throw new ZigDOMException("Cannot adopt nodes across different windows.", "WrongDocumentError", 4);
-    }
-
     if (node.parentNode) {
       node.parentNode.removeChild(node);
+    }
+
+    if (node._window !== this._window) {
+      this._window.adoptSubtreeWrappers(node);
     }
 
     return node;
@@ -483,17 +452,15 @@ export class Document extends Node {
   cloneNode(deep = false): Document {
     this._window.assertOpen();
 
-    const WindowCtor = this._window.constructor as {
-      new (options?: { url?: string }): {
-        document: Document;
-      };
-    };
+    const DocumentCtor = (this as unknown as { constructor: new () => Document }).constructor;
+    const nextDocument = new DocumentCtor();
 
-    const nextWindow = new WindowCtor({ url: this.URL });
-    const nextDocument = nextWindow.document;
+    if (!deep) {
+      return nextDocument;
+    }
 
-    if (deep) {
-      nextDocument.documentElement.innerHTML = this.documentElement.innerHTML;
+    for (const child of this.childNodes.toArray()) {
+      nextDocument.appendChild(cloneNodeIntoDocument(nextDocument, child, true));
     }
 
     return nextDocument;
@@ -511,6 +478,11 @@ export class Document extends Node {
 }
 
 function cloneNodeIntoDocument(document: Document, source: Node, deep: boolean): Node {
+  if (source.nodeType === Node.DOCUMENT_TYPE_NODE) {
+    const doctype = source as unknown as DocumentType;
+    return document.implementation.createDocumentType(doctype.name, doctype.publicId, doctype.systemId) as unknown as Node;
+  }
+
   if (source.nodeType === Node.TEXT_NODE) {
     return document.createTextNode(source.textContent);
   }
@@ -531,9 +503,16 @@ function cloneNodeIntoDocument(document: Document, source: Node, deep: boolean):
 
   if (source.nodeType === Node.ELEMENT_NODE) {
     const sourceElement = source as unknown as Element;
-    const clone = document.createElement(sourceElement.tagName.toLowerCase());
+    const clone = document.createElementNS(sourceElement.namespaceURI, sourceElement.prefix
+      ? `${sourceElement.prefix}:${sourceElement.localName}`
+      : sourceElement.localName);
     for (const attribute of sourceElement.attributes) {
-      clone.setAttribute(attribute.name, attribute.value);
+      const namespaced = attribute as unknown as { namespaceURI?: string | null };
+      if (namespaced.namespaceURI) {
+        clone.setAttributeNS(namespaced.namespaceURI, attribute.name, attribute.value);
+      } else {
+        clone.setAttribute(attribute.name, attribute.value);
+      }
     }
 
     if (deep) {
