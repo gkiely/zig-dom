@@ -216,7 +216,26 @@ export class Element extends Node {
       return null;
     }
 
-    return { name, value } as unknown as Attr;
+    return {
+      name,
+      value,
+      ownerElement: this,
+      namespaceURI: null
+    } as unknown as Attr;
+  }
+
+  setAttributeNode(attribute: Attr): Attr | null {
+    const previous = this.getAttributeNode(attribute.name);
+    this.setAttribute(attribute.name, attribute.value ?? "");
+
+    const mutableAttribute = attribute as unknown as { ownerElement?: Element | null };
+    mutableAttribute.ownerElement = this;
+
+    return previous;
+  }
+
+  setAttributeNodeNS(attribute: Attr): Attr | null {
+    return this.setAttributeNode(attribute);
   }
 
   setAttribute(name: string, value: string): void {

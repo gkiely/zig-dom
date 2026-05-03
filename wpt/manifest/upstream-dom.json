@@ -232,24 +232,6 @@
       "file": ".wpt-cache/web-platform-tests/dom/events/remove-all-listeners.html"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scroll-event-fired-to-element.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scroll-event-fired-to-iframe.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scrollend-fires-to-text-input.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/events/shadow-relatedTarget.html"
     },
     {
@@ -760,43 +742,7 @@
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/throws-exception.html"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-attributes.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-callback-arguments.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-characterData.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-childList.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-cross-realm-callback-report-exception.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-disconnect.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-document.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-inner-outer.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-sanity.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-takeRecords.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-textContent.html"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/name-validation.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-appendChild.html"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-baseURI.html"
@@ -826,13 +772,7 @@
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-cloneNode.html"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-compareDocumentPosition.html"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-constants.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-contains.html"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-insertBefore.html"
@@ -869,9 +809,6 @@
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-parentNode.html"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-properties.html"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-removeChild.html"

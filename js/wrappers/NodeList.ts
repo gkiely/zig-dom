@@ -47,6 +47,13 @@ export class NodeList implements Iterable<Node> {
     return this.getNodes()[index] ?? null;
   }
 
+  forEach(callback: (value: Node, index: number, parent: NodeList) => void): void {
+    const nodes = this.getNodes();
+    for (let index = 0; index < nodes.length; index += 1) {
+      callback(nodes[index], index, this);
+    }
+  }
+
   [Symbol.iterator](): Iterator<Node> {
     return this.getNodes()[Symbol.iterator]();
   }

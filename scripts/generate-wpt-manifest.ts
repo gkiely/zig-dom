@@ -23,6 +23,7 @@ function parseArgs() {
   let maxCount: number | null = null;
   let requireHarness = true;
   const dirs: string[] = [];
+  const excludes: string[] = [];
 
   for (let index = 2; index < process.argv.length; index += 1) {
     const token = process.argv[index];
@@ -88,6 +89,17 @@ function parseArgs() {
       continue;
     }
 
+    if (token === "--exclude") {
+      const value = process.argv[index + 1];
+      if (!value) {
+        throw new Error("Missing value for --exclude");
+      }
+
+      excludes.push(...value.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0));
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${token}`);
   }
 
@@ -105,7 +117,8 @@ function parseArgs() {
     outManifest,
     outExpected,
     maxCount,
-    requireHarness
+    requireHarness,
+    excludes
   };
 }
 
@@ -152,7 +165,7 @@ function hasUnsupportedHarnessScript(html: string): boolean {
   return /\/resources\/testdriver(?:-actions|-vendor)?\.js/i.test(html);
 }
 
-const { wptRoot, dirs, outManifest, outExpected, maxCount, requireHarness } = parseArgs();
+const { wptRoot, dirs, outManifest, outExpected, maxCount, requireHarness, excludes } = parseArgs();
 
 const resolvedWptRoot = resolve(wptRoot);
 if (!existsSync(resolvedWptRoot)) {
@@ -171,6 +184,11 @@ for (const dir of dirs) {
 
 const uniqueSorted = Array.from(new Set(allFiles)).sort((a, b) => a.localeCompare(b));
 const filtered = uniqueSorted.filter((filePath) => {
+  const relativePath = toPosix(relative(resolvedWptRoot, filePath));
+  if (excludes.some((entry) => relativePath.includes(entry))) {
+    return false;
+  }
+
   if (!requireHarness) {
     return true;
   }

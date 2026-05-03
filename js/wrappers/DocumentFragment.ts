@@ -1,6 +1,6 @@
-import { Node } from "./Node.ts";
-import { HTMLCollection } from "./HTMLCollection.ts";
 import type { Element } from "./Element.ts";
+import { HTMLCollection } from "./HTMLCollection.ts";
+import { Node } from "./Node.ts";
 import { querySelectorAllInSubtree } from "./selector-engine.ts";
 import type { Window } from "./Window.ts";
 

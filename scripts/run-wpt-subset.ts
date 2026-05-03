@@ -155,6 +155,11 @@ function resolveScriptPath(entryFile: string, scriptRef: string, wptRootPath: st
   if (scriptRef.startsWith("/")) {
     const relativePath = fileRef.slice(1);
     const runnerPath = resolve("wpt/runner", relativePath);
+
+    if ((relativePath === "resources/testharness.js" || relativePath === "resources/testharnessreport.js") && existsSync(runnerPath)) {
+      return runnerPath;
+    }
+
     const entryAbsolutePath = resolve(entryFile);
     const usesUpstreamFile = entryAbsolutePath.startsWith(`${wptRootPath}/`) || entryAbsolutePath === wptRootPath;
 
@@ -388,8 +393,120 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     assert.ok(value, message);
   };
 
+  const assert_false = (value: unknown, message = "Expected value to be falsy") => {
+    assert.ok(!value, message);
+  };
+
   const assert_equals = (actual: unknown, expected: unknown, message?: string) => {
     assert.equal(actual, expected, message);
+  };
+
+  const assert_not_equals = (actual: unknown, expected: unknown, message = "Expected values to differ") => {
+    if (actual === expected) {
+      throw new Error(message);
+    }
+  };
+
+  const assert_array_equals = (actual: unknown, expected: unknown, message = "Expected arrays to be equal") => {
+    if (!Array.isArray(actual) || !Array.isArray(expected)) {
+      throw new Error(`${message}: both values must be arrays`);
+    }
+
+    if (actual.length !== expected.length) {
+      throw new Error(`${message}: length ${actual.length} !== ${expected.length}`);
+    }
+
+    for (let index = 0; index < actual.length; index += 1) {
+      if (actual[index] !== expected[index]) {
+        throw new Error(`${message}: index ${index} differs`);
+      }
+    }
+  };
+
+  const assert_throws_js = (constructor: Function, callback: () => void, message = "Expected JS exception") => {
+    let thrown: unknown = null;
+    try {
+      callback();
+    } catch (error) {
+      thrown = error;
+    }
+
+    if (!thrown) {
+      throw new Error(`${message}: no exception thrown`);
+    }
+
+    if (typeof constructor === "function" && !(thrown instanceof (constructor as new (...args: never[]) => unknown))) {
+      throw new Error(`${message}: unexpected exception type`);
+    }
+  };
+
+  const assert_throws_dom = (expected: string | number, callback: () => void, message = "Expected DOM exception") => {
+    let thrown: unknown = null;
+    try {
+      callback();
+    } catch (error) {
+      thrown = error;
+    }
+
+    if (!thrown) {
+      throw new Error(`${message}: no exception thrown`);
+    }
+
+    const name = (thrown as { name?: string }).name ?? "";
+    const detail = thrown instanceof Error ? thrown.message : String(thrown);
+
+    if (typeof expected === "string") {
+      const normalized = expected.toLowerCase();
+      const matches = name.toLowerCase() === normalized || detail.toLowerCase().includes(normalized);
+      if (!matches) {
+        throw new Error(`${message}: expected ${expected}, got ${name || detail}`);
+      }
+      return;
+    }
+
+    if (!detail.includes(String(expected))) {
+      throw new Error(`${message}: expected code ${expected}, got ${name || detail}`);
+    }
+  };
+
+  const format_value = (value: unknown): string => {
+    if (typeof value === "string") {
+      return value;
+    }
+
+    if (value == null) {
+      return String(value);
+    }
+
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
+
+  const setup = (
+    first?: { callback?: () => void } | (() => void),
+    second?: () => void
+  ) => {
+    const callback = typeof first === "function"
+      ? first
+      : typeof second === "function"
+        ? second
+        : typeof first === "object" && first !== null && typeof first.callback === "function"
+          ? first.callback
+          : undefined;
+
+    if (callback) {
+      try {
+        callback();
+      } catch (error) {
+        const detail = error instanceof Error
+          ? error.stack ?? error.message
+          : String(error);
+        throw new Error(`setup callback failed: ${detail}`);
+      }
+    }
   };
 
   const context = window as unknown as Record<string, unknown>;
@@ -400,9 +517,28 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   context.test = test;
   context.promise_test = promise_test;
   context.async_test = async_test;
+  context.setup = setup;
+  context.done = () => undefined;
   context.assert_true = assert_true;
+  context.assert_false = assert_false;
   context.assert_equals = assert_equals;
+  context.assert_not_equals = assert_not_equals;
+  context.assert_array_equals = assert_array_equals;
+  context.assert_throws_js = assert_throws_js;
+  context.assert_throws_dom = assert_throws_dom;
+  context.format_value = format_value;
   context.add_cleanup = () => undefined;
+  const WindowCtor = window.constructor as {
+    new (options?: { url?: string }): Window;
+  };
+  context.Document = class {
+    constructor() {
+      return new WindowCtor({ url: testUrl(file, variant) }).document;
+    }
+  };
+  context.XMLDocument = context.Document;
+  context.ProcessingInstruction = context.Comment;
+  context.NodeList = window.document.childNodes.constructor;
   try {
     Object.defineProperty(context, "globalThis", {
       value: context,

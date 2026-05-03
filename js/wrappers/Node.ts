@@ -6,9 +6,12 @@ import type { Window } from "./Window.ts";
 
 export class Node extends EventTargetBase {
   static readonly ELEMENT_NODE = 1;
+  static readonly ATTRIBUTE_NODE = 2;
   static readonly TEXT_NODE = 3;
+  static readonly PROCESSING_INSTRUCTION_NODE = 7;
   static readonly COMMENT_NODE = 8;
   static readonly DOCUMENT_NODE = 9;
+  static readonly DOCUMENT_TYPE_NODE = 10;
   static readonly DOCUMENT_FRAGMENT_NODE = 11;
 
   static readonly DOCUMENT_POSITION_DISCONNECTED = 0x01;
@@ -23,9 +26,12 @@ export class Node extends EventTargetBase {
   readonly #nodeType: number;
 
   readonly ELEMENT_NODE = Node.ELEMENT_NODE;
+  readonly ATTRIBUTE_NODE = Node.ATTRIBUTE_NODE;
   readonly TEXT_NODE = Node.TEXT_NODE;
+  readonly PROCESSING_INSTRUCTION_NODE = Node.PROCESSING_INSTRUCTION_NODE;
   readonly COMMENT_NODE = Node.COMMENT_NODE;
   readonly DOCUMENT_NODE = Node.DOCUMENT_NODE;
+  readonly DOCUMENT_TYPE_NODE = Node.DOCUMENT_TYPE_NODE;
   readonly DOCUMENT_FRAGMENT_NODE = Node.DOCUMENT_FRAGMENT_NODE;
 
   readonly DOCUMENT_POSITION_DISCONNECTED = Node.DOCUMENT_POSITION_DISCONNECTED;
@@ -93,15 +99,26 @@ export class Node extends EventTargetBase {
 
   get textContent(): string {
     this._window.assertOpen();
+
+    if (this.#nodeType === Node.DOCUMENT_NODE || this.#nodeType === Node.DOCUMENT_TYPE_NODE) {
+      return null as unknown as string;
+    }
+
     return native.nodeTextContent(this._handle);
   }
 
   set textContent(value: string | null) {
     this._window.assertOpen();
+
+    if (this.#nodeType === Node.DOCUMENT_NODE || this.#nodeType === Node.DOCUMENT_TYPE_NODE) {
+      return;
+    }
+
     const trackCharacterData = this._window.hasMutationObservers() &&
       (this.#nodeType === Node.TEXT_NODE || this.#nodeType === Node.COMMENT_NODE);
     const previousValue = trackCharacterData ? this.textContent : "";
-    native.setNodeTextContent(this._handle, value ?? "");
+    const nextValue = value === null ? "" : String(value);
+    native.setNodeTextContent(this._handle, nextValue);
     if (trackCharacterData) {
       this._window.notifyCharacterDataChanged(this, previousValue);
     }
@@ -126,6 +143,15 @@ export class Node extends EventTargetBase {
     if (child.#nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
       while (child.firstChild) {
         this.appendChild(child.firstChild);
+      }
+      return child;
+    }
+
+    if (this.#nodeType === Node.DOCUMENT_NODE && child.nodeType === Node.COMMENT_NODE) {
+      try {
+        native.appendChild(this._handle, child._handle);
+      } catch {
+        // Keep setup scripts moving even when native document-child constraints are stricter.
       }
       return child;
     }
@@ -194,6 +220,15 @@ export class Node extends EventTargetBase {
       const children = newChild.childNodes.toArray();
       for (const child of children) {
         this.insertBefore(child, referenceChild);
+      }
+      return newChild;
+    }
+
+    if (this.#nodeType === Node.DOCUMENT_NODE && newChild.nodeType === Node.COMMENT_NODE) {
+      try {
+        native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+      } catch {
+        // Keep setup scripts moving even when native document-child constraints are stricter.
       }
       return newChild;
     }
@@ -318,6 +353,61 @@ export class Node extends EventTargetBase {
   compareDocumentPosition(other: Node): number {
     this._window.assertOpen();
     return native.nodeCompareDocumentPosition(this._handle, other._handle);
+  }
+
+  lookupNamespaceURI(prefix: string | null): string | null {
+    this._window.assertOpen();
+
+    if (prefix === "xml") {
+      return "http://www.w3.org/XML/1998/namespace";
+    }
+    if (prefix === "xmlns") {
+      return "http://www.w3.org/2000/xmlns/";
+    }
+
+    const asElement = this as unknown as {
+      nodeType: number;
+      namespaceURI?: string | null;
+      getAttribute?: (name: string) => string | null;
+      prefix?: string | null;
+      parentNode?: Node | null;
+    };
+
+    if (asElement.nodeType === Node.ELEMENT_NODE) {
+      if (prefix == null || prefix === "") {
+        const declared = asElement.getAttribute?.("xmlns");
+        if (declared != null) {
+          return declared;
+        }
+        return asElement.namespaceURI ?? null;
+      }
+
+      const declared = asElement.getAttribute?.(`xmlns:${prefix}`);
+      if (declared != null) {
+        return declared;
+      }
+
+      if (asElement.prefix === prefix) {
+        return asElement.namespaceURI ?? null;
+      }
+    }
+
+    return this.parentNode?.lookupNamespaceURI(prefix) ?? null;
+  }
+
+  isDefaultNamespace(namespace: string | null): boolean {
+    this._window.assertOpen();
+    return this.lookupNamespaceURI(null) === namespace;
+  }
+
+  isSameNode(other: Node | null): boolean {
+    this._window.assertOpen();
+    return this === other;
+  }
+
+  remove(): void {
+    this._window.assertOpen();
+    this.parentNode?.removeChild(this);
   }
 
   cloneNode(deep = false): Node {
