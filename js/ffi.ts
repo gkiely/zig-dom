@@ -81,6 +81,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_node_compare_document_position: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_name: { returns: "u32", args: ["u64", "ptr", "ptr"] },
   zig_dom_node_append_child: { returns: "u32", args: ["u64", "u64"] },
+  zig_dom_window_append_child: { returns: "u32", args: ["u64", "u64", "u64"] },
   zig_dom_node_insert_before: { returns: "u32", args: ["u64", "u64", "u64"] },
   zig_dom_node_remove_child: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_replace_child: { returns: "u32", args: ["u64", "u64", "u64"] },
@@ -262,6 +263,10 @@ export const native = {
   appendChild(parent: number, child: number): void {
     const status = nativeLibrary.symbols.zig_dom_node_append_child(parent, child);
     assertStatus(status, "zig_dom_node_append_child");
+  },
+  appendChildInWindow(window: number, parent: number, child: number): void {
+    const status = nativeLibrary.symbols.zig_dom_window_append_child(window, parent, child);
+    assertStatus(status, "zig_dom_window_append_child");
   },
   insertBefore(parent: number, child: number, referenceChild: number): void {
     const status = nativeLibrary.symbols.zig_dom_node_insert_before(parent, child, referenceChild);

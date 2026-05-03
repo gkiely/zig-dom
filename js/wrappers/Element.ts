@@ -65,6 +65,7 @@ class DOMTokenList {
 export class Element extends Node {
   #classList: DOMTokenList | null = null;
   #datasetProxy: DatasetShape | null = null;
+  #attributeCache: Map<string, string | null> | null = null;
 
   constructor(window: Node["_window"], handle: number) {
     super(window, handle);
@@ -102,7 +103,13 @@ export class Element extends Node {
   }
 
   get attributes(): Array<{ name: string; value: string }> {
-    return native.elementAttributes(this._handle) as AttributeEntry[];
+    const attrs = native.elementAttributes(this._handle) as AttributeEntry[];
+    const cache = new Map<string, string | null>();
+    for (const attr of attrs) {
+      cache.set(attr.name.toLowerCase(), attr.value);
+    }
+    this.#attributeCache = cache;
+    return attrs;
   }
 
   get dataset(): DatasetShape {
@@ -189,19 +196,51 @@ export class Element extends Node {
   }
 
   getAttribute(name: string): string | null {
-    return native.getAttribute(this._handle, name);
+    const key = name.toLowerCase();
+    if (this.#attributeCache?.has(key)) {
+      return this.#attributeCache.get(key) ?? null;
+    }
+
+    const value = native.getAttribute(this._handle, key);
+    if (!this.#attributeCache) {
+      this.#attributeCache = new Map();
+    }
+    this.#attributeCache.set(key, value);
+    return value;
   }
 
   setAttribute(name: string, value: string): void {
-    native.setAttribute(this._handle, name, value);
+    const key = name.toLowerCase();
+    native.setAttribute(this._handle, key, value);
+    if (!this.#attributeCache) {
+      this.#attributeCache = new Map();
+    }
+    this.#attributeCache.set(key, value);
   }
 
   removeAttribute(name: string): void {
-    native.removeAttribute(this._handle, name);
+    const key = name.toLowerCase();
+    native.removeAttribute(this._handle, key);
+    if (!this.#attributeCache) {
+      this.#attributeCache = new Map();
+    }
+    this.#attributeCache.set(key, null);
   }
 
   hasAttribute(name: string): boolean {
-    return native.hasAttribute(this._handle, name);
+    const key = name.toLowerCase();
+    if (this.#attributeCache?.has(key)) {
+      return this.#attributeCache.get(key) != null;
+    }
+
+    const has = native.hasAttribute(this._handle, key);
+    if (!this.#attributeCache) {
+      this.#attributeCache = new Map();
+    }
+    if (!has) {
+      this.#attributeCache.set(key, null);
+    }
+    return has;
   }
 
   matches(selector: string): boolean {

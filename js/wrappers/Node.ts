@@ -111,7 +111,7 @@ export class Node extends EventTargetBase {
       return child;
     }
 
-    native.appendChild(this._handle, child._handle);
+    native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, child._handle);
     return child;
   }
 

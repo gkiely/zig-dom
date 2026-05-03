@@ -69,8 +69,17 @@ fn makeOwned(bytes: []const u8) ![]u8 {
 
 fn makeOwnedLower(bytes: []const u8) ![]u8 {
     const copy = try c_allocator.dupe(u8, bytes);
-    for (copy) |*item| {
-        item.* = std.ascii.toLower(item.*);
+    var needs_lower = false;
+    for (copy) |item| {
+        if (std.ascii.isUpper(item)) {
+            needs_lower = true;
+            break;
+        }
+    }
+    if (needs_lower) {
+        for (copy) |*item| {
+            item.* = std.ascii.toLower(item.*);
+        }
     }
     return copy;
 }
@@ -165,11 +174,26 @@ fn detachFromParent(window: *Window, child_handle: u64) api.Status {
     return .ok;
 }
 
-fn appendChild(window: *Window, parent_handle: u64, child_handle: u64) api.Status {
+fn appendChildResolved(window: *Window, parent_handle: u64, parent: *Node, child_handle: u64, child: *Node) api.Status {
     if (parent_handle == child_handle) return .hierarchy_request;
 
-    const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
-    const child = resolveNode(window, child_handle) orelse return .invalid_handle;
+    // Fast path: detached children cannot form cycles and do not require detach bookkeeping.
+    if (child.parent == 0) {
+        child.parent = parent_handle;
+        child.prev_sibling = parent.last_child;
+        child.next_sibling = 0;
+
+        if (parent.last_child == 0) {
+            parent.first_child = child_handle;
+            parent.last_child = child_handle;
+        } else {
+            const last = resolveNode(window, parent.last_child) orelse return .invalid_handle;
+            last.next_sibling = child_handle;
+            parent.last_child = child_handle;
+        }
+
+        return .ok;
+    }
 
     if (isAncestor(window, child_handle, parent_handle)) {
         return .hierarchy_request;
@@ -192,6 +216,12 @@ fn appendChild(window: *Window, parent_handle: u64, child_handle: u64) api.Statu
     }
 
     return .ok;
+}
+
+fn appendChild(window: *Window, parent_handle: u64, child_handle: u64) api.Status {
+    const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
+    const child = resolveNode(window, child_handle) orelse return .invalid_handle;
+    return appendChildResolved(window, parent_handle, parent, child_handle, child);
 }
 
 fn insertBefore(window: *Window, parent_handle: u64, child_handle: u64, reference_handle: u64) api.Status {
@@ -891,6 +921,14 @@ pub export fn zig_dom_node_append_child(parent: u64, child: u64) u32 {
     if (window.handle != window_for_child.handle) return STATUS_HIERARCHY;
 
     return @intFromEnum(appendChild(window, parent, child));
+}
+
+pub export fn zig_dom_window_append_child(window: u64, parent: u64, child: u64) u32 {
+
+    const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
+    const parent_node = resolveNode(win, parent) orelse return STATUS_INVALID_HANDLE;
+    const child_node = resolveNode(win, child) orelse return STATUS_INVALID_HANDLE;
+    return @intFromEnum(appendChildResolved(win, parent, parent_node, child, child_node));
 }
 
 pub export fn zig_dom_node_insert_before(parent: u64, child: u64, reference_child: u64) u32 {

@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const run = (command: string[]) => Bun.spawnSync(command, { cwd: rootDir, stderr: "inherit", stdout: "inherit" });
 
-const build = run(["zig", "build"]);
+const optimizeMode = process.env.ZIG_DOM_OPTIMIZE?.trim() || "ReleaseFast";
+
+const build = run(["zig", "build", "-Doptimize=" + optimizeMode]);
 if (build.exitCode !== 0) {
   process.exit(build.exitCode);
 }
@@ -20,4 +22,4 @@ if (!existsSync(source)) {
 const target = join(rootDir, "dist", "native", `libzig_dom.${extension}`);
 mkdirSync(dirname(target), { recursive: true });
 cpSync(source, target);
-console.log(`Native library copied to ${target}`);
+console.log(`Native library copied to ${target} (optimize=${optimizeMode})`);
