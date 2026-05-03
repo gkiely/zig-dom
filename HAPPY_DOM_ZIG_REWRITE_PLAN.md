@@ -112,6 +112,46 @@ Iteration rule:
 - React smoke failures are allowed before Ticket 5 only if the failing/missing API names are captured in `examples/bun-react-smoke/failures.md`.
 - WPT expected failures must include a reason. A broad WPT failure list with no owner/reason is not useful progress.
 
+## Fast Verification Contract
+
+The repo must make the next correct step obvious after every change. Optimize the test commands for short local runs first; broad coverage can come later.
+
+Required scripts:
+
+- `bun run build:native`: build only the Zig dynamic library.
+- `bun run build:js`: build only the TypeScript package surface.
+- `bun run build`: run native and JS builds.
+- `bun run verify:ffi`: build native and run `tests/unit/ffi.test.ts`.
+- `bun run verify:dom`: run focused unit tests and `tests/integration/dom`.
+- `bun run verify:react`: run `tests/integration/react/render.test.tsx` and update/print the React missing-API summary when it fails.
+- `bun run verify:wpt:tiny`: run only the tiny WPT manifest.
+- `bun run verify:fast`: run `verify:ffi`, `verify:dom`, and the React smoke. This must stay fast enough to run after nearly every ticket.
+- `bun test`: run the current stable local suite. Do not add slow or very flaky tests to the default command until they are useful for ordinary development.
+
+Speed targets:
+
+- `verify:ffi`: under 5 seconds after dependencies are installed.
+- `verify:dom`: under 10 seconds while the DOM surface is small.
+- `verify:react`: under 10 seconds for the first smoke test.
+- `verify:wpt:tiny`: under 10 seconds.
+- `verify:fast`: under 30 seconds through the first seven tickets.
+
+Failure reporting:
+
+- Test failures should print the smallest actionable error. Avoid dumping huge WPT logs in the default output.
+- React smoke failures must list missing API names first, then representative stack traces.
+- WPT output must summarize pass, fail, expected fail, and unexpected pass counts.
+- Each expected failure entry needs a reason and the implementation area that should eventually remove it.
+- If a command exceeds its speed target, document why in `docs/compatibility.md` and add a smaller command for the daily loop.
+
+Agent workflow:
+
+1. Run the narrow command for the area being changed.
+2. Run `bun run verify:fast` before marking any ticket done.
+3. Run `bun run verify:wpt:tiny` when behavior touches DOM semantics covered by the tiny WPT manifest.
+4. Update `docs/compatibility.md` with command results and timing for each ticket.
+5. Never leave the repo in a state where the next agent cannot tell which verification command to run.
+
 ## Repository Shape
 
 Create this structure:
@@ -176,6 +216,7 @@ zig-dom/
     bun-react-smoke/
   scripts/
     build-native.ts
+    verify-fast.ts
     run-wpt-subset.ts
     sync-wpt.ts
     smoke-bun-react.ts
@@ -190,6 +231,11 @@ Detailed steps:
    - `build:native`: compile Zig dynamic library.
    - `build:js`: compile TypeScript to ESM.
    - `build`: run native and JS builds.
+   - `verify:ffi`: build native and run FFI unit tests.
+   - `verify:dom`: run focused unit and DOM integration tests.
+   - `verify:react`: run the React Testing Library smoke and missing-API summary.
+   - `verify:wpt:tiny`: run the tiny WPT DOM subset.
+   - `verify:fast`: run the standard quick feedback loop.
    - `test`: run local Bun tests.
    - `test:wpt:dom`: run curated WPT DOM subset.
    - `test:react`: run Bun React DOM smoke tests with `@testing-library/react`.
@@ -205,6 +251,7 @@ Exit criteria:
 - `bun run build` produces `dist/index.js` and a platform-specific dynamic library.
 - `import { Window } from './dist/index.js'` works in Bun.
 - A native `zig_dom_version()` function can be called through Bun FFI.
+- `bun run verify:fast` exists, runs, and either passes or reports only documented early missing APIs.
 
 ## Phase 1: FFI Contract
 
@@ -719,8 +766,11 @@ Files/modules likely involved:
 - Map errors to DOMException-compatible names.
 - Add local unit tests.
 - Add or update WPT subset entries.
-- Run `bun run build`, `bun test`, and relevant WPT subset.
+- Run the narrow verification command for the changed area.
+- Run `bun run verify:fast` before marking the task done.
+- Run the relevant WPT subset when behavior touches DOM semantics covered by WPT.
 - Run `bun test tests/integration/react/render.test.tsx` if behavior can affect framework tests.
+- Update `docs/compatibility.md` with command results, timings, implemented APIs, and known gaps.
 
 ## Done When
 - Local tests pass.
@@ -760,6 +810,7 @@ Done when:
 
 - `bun run build` succeeds.
 - `bun test tests/unit/ffi.test.ts` passes.
+- `bun run verify:ffi` passes and completes within the speed target after dependencies are installed.
 - `docs/compatibility.md` records Bun version, Bun revision, Zig version, platform, library extension, and FFI ABI decisions.
 
 ### Ticket 2: JavaScript Package Shell And Global Registration
@@ -794,6 +845,7 @@ Done when:
 
 - `new Window().document` returns stable object identity.
 - `bun test tests/integration/dom/global-registrator.test.ts` passes.
+- `bun run verify:dom` passes for the package shell/global registration slice.
 - `import { Window, GlobalRegistrator } from "./dist/index.js"` works in Bun after `bun run build`.
 
 ### Ticket 3: React Testing Library Smoke Harness
@@ -822,6 +874,7 @@ Required behavior:
 Done when:
 
 - `bun test tests/integration/react/render.test.tsx` either passes or fails only with documented missing APIs in `examples/bun-react-smoke/failures.md`.
+- `bun run verify:react` prints the React smoke status and missing-API summary.
 - The smoke output prints the top missing API names from thrown errors.
 - The next implementation target is obvious from the failure list.
 
@@ -858,9 +911,9 @@ Required behavior:
 Done when:
 
 - Basic DOM tree unit and integration tests pass.
+- `bun run verify:fast` completes and the React smoke failure list shrinks or remains unchanged.
 - `new Window().document` still returns stable object identity.
 - Repeated create/append/remove/drop cycles do not leak in a debug allocation counter.
-- React smoke failure list shrinks or remains unchanged.
 
 ### Ticket 5: Make React Smoke Green
 
@@ -889,6 +942,8 @@ Required behavior:
 Done when:
 
 - `bun test tests/integration/react/render.test.tsx` passes.
+- `bun run verify:react` passes.
+- `bun run verify:fast` passes.
 - At least one React Testing Library render/assertion test passes using:
 
 ```tsx
@@ -935,6 +990,7 @@ Required runner capabilities:
 Done when:
 
 - `bun run test:wpt:dom` runs the tiny manifest reliably in under 10 seconds.
+- `bun run verify:wpt:tiny` prints deterministic summary counts and exits nonzero on unexpected failures or unexpected passes.
 - `docs/compatibility.md` records subset size and pass/fail/expected-fail counts.
 - Adding the next WPT file should not require a runner redesign.
 
@@ -985,6 +1041,7 @@ test("click updates UI", () => {
 Done when:
 
 - `bun test tests/integration/react` passes.
+- `bun run verify:fast` passes and remains within the speed target or documents why not.
 - Missing API failures from Testing Library are captured in `examples/bun-react-smoke/failures.md`.
 - Event dispatch, form value reflection, and cleanup/reset behavior have unit or integration coverage.
 - Phase 8/Event requirements are updated if this ticket discovers necessary event APIs.
