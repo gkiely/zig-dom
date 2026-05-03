@@ -3,6 +3,7 @@ import { Comment } from "./Comment.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { ZigDOMException } from "./DOMException.ts";
 import { Element } from "./Element.ts";
+import { CompositionEvent, CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
 import { Node } from "./Node.ts";
 import { Range, Selection } from "./Range.ts";
 import { canUseNativeSelector, querySelectorAllInDocument } from "./selector-engine.ts";
@@ -61,6 +62,10 @@ export class Document extends Node {
     return this.#bodyCache;
   }
 
+  get scrollingElement(): Element {
+    return this.documentElement;
+  }
+
   get URL(): string {
     return this._window.location.href;
   }
@@ -81,8 +86,73 @@ export class Document extends Node {
     return this._window.getSelection();
   }
 
+  get implementation(): {
+    createDocument: (namespace: string | null, qualifiedName?: string | null) => Document;
+    createHTMLDocument: (title?: string) => Document;
+  } {
+    const createDocument = (_namespace: string | null, qualifiedName?: string | null): Document => {
+      const WindowCtor = this._window.constructor as {
+        new (options?: { url?: string }): {
+          document: Document;
+        };
+      };
+
+      const nextWindow = new WindowCtor({ url: this.URL });
+      const nextDocument = nextWindow.document;
+
+      if (qualifiedName) {
+        const root = nextDocument.createElement(qualifiedName);
+        nextDocument.appendChild(root);
+      }
+
+      return nextDocument;
+    };
+
+    return {
+      createDocument,
+      createHTMLDocument: (title?: string): Document => {
+        const nextDocument = createDocument(null, null);
+        if (title && title.length > 0) {
+          const titleElement = nextDocument.createElement("title");
+          titleElement.textContent = title;
+          nextDocument.head.appendChild(titleElement);
+        }
+        return nextDocument;
+      }
+    };
+  }
+
   createRange(): Range {
     return new Range();
+  }
+
+  createEvent(interfaceName: string): Event {
+    const normalized = interfaceName.trim().toLowerCase();
+    if (normalized === "event" || normalized === "events" || normalized === "htmlevents" || normalized === "uievents") {
+      return new Event("");
+    }
+
+    if (normalized === "customevent") {
+      return new CustomEvent("");
+    }
+
+    if (normalized === "mouseevent" || normalized === "mouseevents") {
+      return new MouseEvent("");
+    }
+
+    if (normalized === "keyboardevent" || normalized === "keyevents") {
+      return new KeyboardEvent("");
+    }
+
+    if (normalized === "compositionevent") {
+      return new CompositionEvent("");
+    }
+
+    if (normalized === "inputevent") {
+      return new InputEvent("");
+    }
+
+    throw new ZigDOMException(`The event interface \"${interfaceName}\" is not supported.`, "NotSupportedError", 9);
   }
 
   createElement(tagName: string): Element {
@@ -111,6 +181,10 @@ export class Document extends Node {
     this._window.assertOpen();
     const handle = native.createComment(this._handle, data);
     return this._window.createKnownNode(handle, Node.COMMENT_NODE) as Comment;
+  }
+
+  createCDATASection(_data: string): never {
+    throw new ZigDOMException("CDATA sections are not supported in HTML documents.", "NotSupportedError", 9);
   }
 
   createDocumentFragment(): DocumentFragment {
@@ -144,6 +218,12 @@ export class Document extends Node {
     }
 
     return querySelectorAllInDocument(this, selector);
+  }
+
+  getElementsByTagName(tagName: string): Element[] {
+    this._window.assertOpen();
+    const selector = tagName === "*" ? "*" : tagName.toLowerCase();
+    return this.querySelectorAll(selector);
   }
 
   adoptNode<TNode extends Node>(node: TNode): TNode {

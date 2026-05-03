@@ -166,6 +166,27 @@ export class Node extends EventTargetBase {
     return child;
   }
 
+  append(...nodes: Array<Node | string>): void {
+    this._window.assertOpen();
+
+    const document = this.nodeType === Node.DOCUMENT_NODE
+      ? (this as unknown as Document)
+      : this.ownerDocument;
+
+    if (!document) {
+      throw new Error("append() requires an owner document");
+    }
+
+    for (const node of nodes) {
+      if (typeof node === "string") {
+        this.appendChild(document.createTextNode(node));
+        continue;
+      }
+
+      this.appendChild(node);
+    }
+  }
+
   insertBefore<TNode extends Node>(newChild: TNode, referenceChild: Node | null): TNode {
     this._window.assertOpen();
 

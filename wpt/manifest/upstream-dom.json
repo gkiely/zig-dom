@@ -1,0 +1,1189 @@
+{
+  "tests": [
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/abort/abort-signal-timeout.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/abort/reason-constructor.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/attributes-are-nodes.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/domstringmap-supported-property-names.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-as-prototype.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-delete.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-empty-name.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-iterator.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-own-props.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-supported-property-indices.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/HTMLCollection-supported-property-names.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/collections/namednodemap-supported-property-names.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/eventPathRemoved.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Body-FrameSet-Event-Handlers.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/CustomEvent.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-cancelBubble.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-constants.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-defaultPrevented-after-dispatch.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-defaultPrevented.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-disabled-dynamic.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-bubble-canceled.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-bubbles-false.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-bubbles-true.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-click.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-click.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-detached-click.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-detached-input-and-change.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-handlers-changed.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-multiple-cancelBubble.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-multiple-stopPropagation.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-omitted-capture.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-order-at-target.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-order.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-other-document.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-propagation-stopped.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-reenter.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-single-activation-behavior.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-target-moved.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-target-removed.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-throwing-multiple-globals.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-throwing.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-global-is-still-set-when-reporting-exception-onerror.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-global.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-handler-attribute-replace-preserves-passive.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-init-while-dispatching.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-initEvent.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-propagation.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-returnValue.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-src-element-nullable.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-stopImmediatePropagation.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-stopPropagation-cancel-bubbling.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-subclasses-constructors.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-timestamp-cross-realm-getter.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-timestamp-high-resolution.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-timestamp-high-resolution.https.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-timestamp-safe-resolution.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-type-empty.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-type.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-handleEvent-cross-realm.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-handleEvent.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-incumbent-global-1.sub.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-incumbent-global-2.sub.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListener-invoke-legacy.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventListenerOptions-capture.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventTarget-add-listener-platform-object.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventTarget-dispatchEvent-returnvalue.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventTarget-dispatchEvent.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventTarget-this-of-listener.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/KeyEvent-initKeyEvent.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/label-default-action.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/mouse-event-retarget.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/non-cancelable-when-passive/generic-events-stay-cancelable.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/non-cancelable-when-passive/synthetic-events-cancelable.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/passive-by-default.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/preventDefault-during-activation-behavior.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/remove-all-listeners.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scroll-event-fired-to-element.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scroll-event-fired-to-iframe.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scrollend-fires-to-text-input.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/shadow-relatedTarget.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-end-event.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-iteration-event.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-start-event.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/webkit-transition-end-event.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/window-composed-path.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/historical-mutation-events.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/historical.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/interface-objects.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-coverage-for-attributes.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-Iterable.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-iteration.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-stringifier.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-value.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/append-on-Document.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/attributes-namednodemap.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/attributes.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/case.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-appendChild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-appendData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-data.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-deleteData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-insertData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-remove.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-replaceData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-substringData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-surrogates.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ChildNode-after.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ChildNode-before.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ChildNode-replaceWith.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Comment-constructor.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-adoptNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-characterSet-normalization-1.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-characterSet-normalization-2.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-constructor.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_bmp.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_css.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_datauri_02.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_gif.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_html.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_javascripturi.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_jpg.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_mimeheader_01.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_mimeheader_02.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_png.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_txt.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_xml.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/createDocument.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/createHTMLDocument.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/xhr_responseType_document.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createAttribute.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createCDATASection.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createComment.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createElement-namespace.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createElement.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createElementNS.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createEvent.https.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createProcessingInstruction.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createTextNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createTreeWalker.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-doctype.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementById.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementsByClassName.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementsByTagName.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementsByTagNameNS.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-implementation.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-importNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-URL.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-constructor.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-getElementById.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-querySelectorAll-after-modification.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentType-literal.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentType-remove.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DOMImplementation-createDocument.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DOMImplementation-createDocumentType.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DOMImplementation-createHTMLDocument-with-saved-implementation.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DOMImplementation-createHTMLDocument.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DOMImplementation-hasFeature.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-childElement-null.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-childElementCount-dynamic-add.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-childElementCount-dynamic-remove.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-childElementCount-nochild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-childElementCount.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-children.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-classlist.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-closest.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-firstElementChild-namespace.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-firstElementChild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByClassName.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByTagName.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByTagNameNS.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-hasAttribute.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-hasAttributes.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-insertAdjacentElement.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-insertAdjacentText.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-lastElementChild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches-namespaced-elements.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-nextElementSibling.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-previousElementSibling.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-remove.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-removeAttribute.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-removeAttributeNS.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-setAttribute-crbug-1138487.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-setAttribute.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-siblingElement-null.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-tagName.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-webkitMatchesSelector.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/getElementsByClassName-32.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/getElementsByClassName-empty-set.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/getElementsByClassName-whitespace-class-names.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insert-adjacent.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/later-script-removed-by-earlier-script.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-append-form-and-script-from-fragment.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-button-from-div.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-custom-from-fragment.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-div-from-fragment.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-iframe.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-source-from-fragment.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-style.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-in-script.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-with-mutation-observer-takeRecords.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-text-and-script-in-style.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-text-in-script.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts-from-fragment.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts.tentative.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/child-style-preserve.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-left.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-transform.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left-pseudo.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-animation-commit-styles.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-document.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-shadow.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-to-disconnected-document.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-trigger.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/custom-element-move-reactions.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fieldset-child-blur-event.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fire-focusin-focusout.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-preserve.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-within.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/listed-form-element-reset.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/live-range-updates.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/modal-dialog.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-id-map.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-name-map.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-option-recalc-style.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-selector-matching.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-inside.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-root.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-size-query.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/mutation-observer.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/Node-moveBefore.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/nonce.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/object-crash-regression.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/popover-preserve.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-script.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-style.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/relevant-mutations.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/script-move-before.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/select-option-optgroup.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/slotchange-events.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/style-applies.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/throws-exception.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-attributes.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-callback-arguments.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-characterData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-childList.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-cross-realm-callback-report-exception.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-disconnect.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-document.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-inner-outer.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-sanity.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-takeRecords.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/MutationObserver-textContent.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/name-validation.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-appendChild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-baseURI.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-childNodes-cache-2.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-childNodes-cache.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-childNodes.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-cloneNode-document-with-doctype.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-cloneNode-external-stylesheet-no-bc.sub.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-cloneNode-svg.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-cloneNode-XMLDocument.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-cloneNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-compareDocumentPosition.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-constants.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-contains.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-insertBefore.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-isConnected-shadow-dom.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-isConnected.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-isEqualNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-isSameNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-lookupNamespaceURI.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-mutation-adoptNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-nodeName.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-nodeValue.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-normalize.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-parentElement.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-parentNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-properties.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-removeChild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-replaceChild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-textContent.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-Iterable.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-1.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-2.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-3.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-indexOf-1.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-indexOf-2.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-indexOf-3.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-append.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-children.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-prepend.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-querySelector-All.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-querySelector-case-insensitive.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-querySelector-escapes.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-querySelector-scope.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-querySelectorAll-removed-elements.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-querySelectors-exclusive.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-querySelectors-namespaces.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-querySelectors-space-and-dash-attribute-value.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-replaceChildren.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/prepend-on-Document.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/query-target-in-load-event.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/querySelector-mixed-case.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-and-adopt-thcrash.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-next-sibling-during-replace-with.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/rootNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/svg-template-querySelector.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-constructor.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-splitText.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-wholeText.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/observable/tentative/idlharness.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-adopt-test.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-attributes.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-cloneContents.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-cloneRange.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-collapse.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-commonAncestorContainer-2.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-commonAncestorContainer.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-compareBoundaryPoints.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-comparePoint-2.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-comparePoint.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-constructor.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-deleteContents.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-detach.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-extractContents-dynamic-end.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-extractContents.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-in-shadow-after-the-shadow-removed.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-insertNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode-2.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode-binding.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode-shadow.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-isPointInRange.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendChild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-dataChange.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-deleteData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertBefore.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-removeChild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceChild.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceData.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-splitText.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-selectNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-set.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-stringifier.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-surroundContents.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/StaticRange-constructor.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-auto-disconnect.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-basic.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-disconnect.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-basic.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-complexity-and-visibility.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-multiline-and-mutations.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-highlight.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-highlightsFromPoint.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-offset.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-programmatic-updates.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-range-updates.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-supported-elements.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-unsupported-elements.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-validation.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/svg-insert-crash.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/NodeFilter-constants.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/NodeIterator-removal.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/NodeIterator.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-acceptNode-filter.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-basic.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-currentNode.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-previousNodeLastChildReject.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-previousSiblingLastChildSkip.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-realm.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-traversal-reject.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-traversal-skip-most.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-traversal-skip.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-walking-outside-a-tree.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/window-extends-event-target.html"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/xpath-result-single-node-value-nullable.html"
+    }
+  ]
+}

@@ -230,6 +230,10 @@ export class Element extends Node {
     this._window.notifyAttributeChanged(this, key, previousValue, value);
   }
 
+  setAttributeNS(_namespace: string | null, qualifiedName: string, value: string): void {
+    this.setAttribute(qualifiedName, value);
+  }
+
   removeAttribute(name: string): void {
     const key = name.toLowerCase();
     const previousValue = this.getAttribute(key);
@@ -239,6 +243,10 @@ export class Element extends Node {
     }
     this.#attributeCache.set(key, null);
     this._window.notifyAttributeChanged(this, key, previousValue, null);
+  }
+
+  removeAttributeNS(_namespace: string | null, localName: string): void {
+    this.removeAttribute(localName);
   }
 
   hasAttribute(name: string): boolean {
@@ -257,6 +265,14 @@ export class Element extends Node {
     return has;
   }
 
+  getAttributeNS(_namespace: string | null, localName: string): string | null {
+    return this.getAttribute(localName);
+  }
+
+  hasAttributeNS(_namespace: string | null, localName: string): boolean {
+    return this.hasAttribute(localName);
+  }
+
   matches(selector: string): boolean {
     return elementMatchesSelector(this, selector);
   }
@@ -267,5 +283,10 @@ export class Element extends Node {
 
   querySelectorAll(selector: string): Element[] {
     return querySelectorAllInElement(this, selector);
+  }
+
+  getElementsByTagName(tagName: string): Element[] {
+    const selector = tagName === "*" ? "*" : tagName.toLowerCase();
+    return this.querySelectorAll(selector);
   }
 }

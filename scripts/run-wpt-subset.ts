@@ -1,7 +1,21 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Window } from "../js/wrappers/Window";
+
+const globalAsyncErrors: string[] = [];
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+process.on("uncaughtException", (error) => {
+  globalAsyncErrors.push(toErrorMessage(error));
+});
+
+process.on("unhandledRejection", (error) => {
+  globalAsyncErrors.push(toErrorMessage(error));
+});
 
 type ManifestEntry = {
   file: string;
@@ -54,6 +68,27 @@ function arg(name: string): string {
     throw new Error(`Missing argument ${name}`);
   }
   return process.argv[index + 1];
+}
+
+function optionalArg(name: string): string | undefined {
+  const index = process.argv.indexOf(name);
+  if (index === -1 || index + 1 >= process.argv.length) {
+    return undefined;
+  }
+  return process.argv[index + 1];
+}
+
+function optionalNumberArg(name: string): number | undefined {
+  const raw = optionalArg(name);
+  if (raw == null) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid numeric argument for ${name}: ${raw}`);
+  }
+  return parsed;
 }
 
 function createAssert() {
@@ -111,11 +146,37 @@ function expandEntryVariants(entry: ManifestEntry): Array<string | undefined> {
   return [undefined];
 }
 
-function resolveScriptPath(entryFile: string, scriptRef: string): string {
+function scriptFileRef(scriptRef: string): string {
+  return scriptRef.split(/[?#]/)[0] ?? scriptRef;
+}
+
+function resolveScriptPath(entryFile: string, scriptRef: string, wptRootPath: string): string {
+  const fileRef = scriptFileRef(scriptRef);
   if (scriptRef.startsWith("/")) {
-    return resolve("wpt/runner", scriptRef.slice(1));
+    const relativePath = fileRef.slice(1);
+    const runnerPath = resolve("wpt/runner", relativePath);
+    const entryAbsolutePath = resolve(entryFile);
+    const usesUpstreamFile = entryAbsolutePath.startsWith(`${wptRootPath}/`) || entryAbsolutePath === wptRootPath;
+
+    if (usesUpstreamFile) {
+      const upstreamPath = resolve(wptRootPath, relativePath);
+      if (existsSync(upstreamPath)) {
+        return upstreamPath;
+      }
+    }
+
+    if (existsSync(runnerPath)) {
+      return runnerPath;
+    }
+
+    const upstreamPath = resolve(wptRootPath, relativePath);
+    if (existsSync(upstreamPath)) {
+      return upstreamPath;
+    }
+
+    return runnerPath;
   }
-  return resolve(dirname(entryFile), scriptRef);
+  return resolve(dirname(entryFile), fileRef);
 }
 
 function parseMetaScripts(html: string): string[] {
@@ -131,7 +192,7 @@ function parseMetaScripts(html: string): string[] {
   return metaScripts;
 }
 
-function parseScriptBlocks(entryFile: string, html: string): string[] {
+function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string): string[] {
   const scripts: string[] = [];
   const regex = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
   let match: RegExpExecArray | null = null;
@@ -139,9 +200,10 @@ function parseScriptBlocks(entryFile: string, html: string): string[] {
   while ((match = regex.exec(html)) !== null) {
     const attrs = match[1] ?? "";
     const body = match[2] ?? "";
-    const srcMatch = attrs.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
-    if (srcMatch?.[1]) {
-      const sourcePath = resolveScriptPath(entryFile, srcMatch[1]);
+    const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
+    const srcValue = srcMatch?.[1] ?? srcMatch?.[2] ?? srcMatch?.[3];
+    if (srcValue) {
+      const sourcePath = resolveScriptPath(entryFile, srcValue, wptRootPath);
       scripts.push(readText(sourcePath));
       continue;
     }
@@ -154,13 +216,72 @@ function parseScriptBlocks(entryFile: string, html: string): string[] {
   return scripts;
 }
 
-async function runHtmlEntry(file: string, variant?: string): Promise<SubtestResult[]> {
+function stripScriptTags(html: string): string {
+  return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+}
+
+function extractHeadAndBodyMarkup(html: string): { head: string; body: string } {
+  const staticHtml = stripScriptTags(html);
+  const headMatch = staticHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  const bodyMatch = staticHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+
+  if (bodyMatch) {
+    return {
+      head: headMatch?.[1] ?? "",
+      body: bodyMatch[1] ?? ""
+    };
+  }
+
+  const fallbackBody = staticHtml
+    .replace(/<!doctype[^>]*>/gi, "")
+    .replace(/<html[^>]*>/gi, "")
+    .replace(/<\/html>/gi, "")
+    .replace(/<head[\s\S]*?<\/head>/gi, "")
+    .replace(/<body[^>]*>/gi, "")
+    .replace(/<\/body>/gi, "");
+
+  return {
+    head: headMatch?.[1] ?? "",
+    body: fallbackBody
+  };
+}
+
+function assignNamedElementGlobals(context: Record<string, unknown>, window: Window): void {
+  const elements = window.document.querySelectorAll("[id]");
+  for (const element of elements) {
+    const id = element.getAttribute("id");
+    if (!id || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(id)) {
+      continue;
+    }
+
+    if (id in context) {
+      continue;
+    }
+
+    try {
+      Object.defineProperty(context, id, {
+        value: element,
+        configurable: true,
+        writable: true,
+        enumerable: true
+      });
+    } catch {
+      // Ignore conflicts with non-configurable globals.
+    }
+  }
+}
+
+async function runHtmlEntry(file: string, wptRootPath: string, variant?: string): Promise<SubtestResult[]> {
   const html = readText(file);
   const assert = createAssert();
   const queuedTests: HarnessTest[] = [];
   const fileId = entryId(file, variant);
 
   const window = new Window({ url: testUrl(file, variant) });
+  const initialMarkup = extractHeadAndBodyMarkup(html);
+  window.document.head.innerHTML = initialMarkup.head;
+  window.document.body.innerHTML = initialMarkup.body;
+
   const test = (fn: () => void | Promise<void>, name = "test") => {
     queuedTests.push({ name, run: fn });
   };
@@ -271,36 +392,40 @@ async function runHtmlEntry(file: string, variant?: string): Promise<SubtestResu
     assert.equal(actual, expected, message);
   };
 
-  const context: Record<string, unknown> = {
-    window,
-    self: window,
-    document: window.document,
-    location: window.location,
-    console,
-    setTimeout,
-    clearTimeout,
-    Promise,
-    test,
-    promise_test,
-    async_test,
-    assert_true,
-    assert_equals,
-    add_cleanup: () => undefined
-  };
-  context.globalThis = context;
+  const context = window as unknown as Record<string, unknown>;
+  context.console = console;
+  context.setTimeout = setTimeout;
+  context.clearTimeout = clearTimeout;
+  context.Promise = Promise;
+  context.test = test;
+  context.promise_test = promise_test;
+  context.async_test = async_test;
+  context.assert_true = assert_true;
+  context.assert_equals = assert_equals;
+  context.add_cleanup = () => undefined;
+  try {
+    Object.defineProperty(context, "globalThis", {
+      value: context,
+      configurable: true,
+      writable: true
+    });
+  } catch {
+    // Ignore when globalThis is not configurable on the backing window object.
+  }
+  assignNamedElementGlobals(context, window);
 
   const executeScript = (source: string) => {
-    const keys = Object.keys(context);
-    const values = keys.map((key) => context[key]);
-    const fn = new Function(...keys, source);
-    fn(...values);
+    const fn = new Function("context", `with (context) {\n${source}\n}`);
+    fn(context);
   };
 
   const allScripts: string[] = [];
   for (const metaScript of parseMetaScripts(html)) {
-    allScripts.push(readText(resolveScriptPath(file, metaScript)));
+    allScripts.push(readText(resolveScriptPath(file, metaScript, wptRootPath)));
   }
-  allScripts.push(...parseScriptBlocks(file, html));
+  allScripts.push(...parseScriptBlocks(file, html, wptRootPath));
+
+  const start = performance.now();
 
   try {
     executeScript(allScripts.join("\n;\n"));
@@ -328,16 +453,27 @@ async function runHtmlEntry(file: string, variant?: string): Promise<SubtestResu
     }
 
     return results;
+  } catch (error) {
+    return [
+      {
+        file: fileId,
+        name: "__bootstrap__",
+        status: "fail",
+        message: error instanceof Error ? error.message : String(error),
+        durationMs: performance.now() - start
+      }
+    ];
   } finally {
-    window.close();
+    // Intentionally keep the entry window alive so delayed async callbacks from
+    // the harness do not observe a torn-down DOM and emit spurious global errors.
   }
 }
 
-async function runEntry(file: string, variant?: string): Promise<SubtestResult[]> {
+async function runEntry(file: string, wptRootPath: string, variant?: string): Promise<SubtestResult[]> {
   const fileId = entryId(file, variant);
 
   if (file.toLowerCase().endsWith(".html")) {
-    return runHtmlEntry(file, variant);
+    return runHtmlEntry(file, wptRootPath, variant);
   }
 
   const modulePath = pathToFileURL(resolve(file)).href;
@@ -374,6 +510,11 @@ async function runEntry(file: string, variant?: string): Promise<SubtestResult[]
 
 const manifestPath = arg("--manifest");
 const expectedPath = arg("--expected");
+const wptRootPath = resolve(optionalArg("--wpt-root") ?? ".wpt-cache/web-platform-tests");
+const entryTimeoutMs = optionalNumberArg("--entry-timeout-ms") ?? 3000;
+const progressEvery = optionalNumberArg("--progress-every") ?? 25;
+const startEntry = optionalNumberArg("--start-entry") ?? 0;
+const entryCount = optionalNumberArg("--entry-count");
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
 const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
@@ -393,12 +534,87 @@ for (const entry of expected.expectedFailures) {
   expectedMap.set(key, entry);
 }
 
-const allResults: SubtestResult[] = [];
+const expandedEntries: Array<{ entry: ManifestEntry; variant: string | undefined }> = [];
 for (const entry of manifest.tests) {
   for (const variant of expandEntryVariants(entry)) {
-    const fileResults = await runEntry(entry.file, variant);
-    allResults.push(...fileResults);
+    expandedEntries.push({ entry, variant });
   }
+}
+
+const selectedEntries = entryCount == null
+  ? expandedEntries.slice(startEntry)
+  : expandedEntries.slice(startEntry, startEntry + entryCount);
+
+console.log(`RUN_WINDOW selected=${selectedEntries.length} start=${startEntry} total=${expandedEntries.length}`);
+
+const allResults: SubtestResult[] = [];
+for (let index = 0; index < selectedEntries.length; index += 1) {
+  const { entry, variant } = selectedEntries[index];
+  const fileId = entryId(entry.file, variant);
+  const start = performance.now();
+
+  try {
+    const entryPromise = runEntry(entry.file, wptRootPath, variant).catch((error) => {
+      return [
+        {
+          file: fileId,
+          name: "__entry__",
+          status: "fail",
+          message: error instanceof Error ? error.message : String(error),
+          durationMs: performance.now() - start
+        } satisfies SubtestResult
+      ];
+    });
+
+    const fileResults = entryTimeoutMs > 0
+      ? await Promise.race([
+          entryPromise,
+          new Promise<SubtestResult[]>((resolve) => {
+            setTimeout(() => {
+              resolve([
+                {
+                  file: fileId,
+                  name: "__timeout__",
+                  status: "fail",
+                  message: `Entry timed out after ${entryTimeoutMs}ms`,
+                  durationMs: performance.now() - start
+                }
+              ]);
+            }, entryTimeoutMs);
+          })
+        ])
+      : await entryPromise;
+
+    allResults.push(...fileResults);
+  } catch (error) {
+    allResults.push({
+      file: fileId,
+      name: "__entry__",
+      status: "fail",
+      message: error instanceof Error ? error.message : String(error),
+      durationMs: performance.now() - start
+    });
+  }
+
+  const processed = index + 1;
+  const absolute = startEntry + processed;
+  if (progressEvery > 0 && (processed % progressEvery === 0 || processed === selectedEntries.length)) {
+    console.log(`PROGRESS entries=${processed}/${selectedEntries.length} absolute=${absolute}/${expandedEntries.length} file=${entry.file}`);
+  }
+}
+
+await new Promise((resolve) => {
+  setTimeout(resolve, 10);
+});
+
+for (const message of globalAsyncErrors) {
+  allResults.push({
+    file: "__global__",
+    name: "__async__",
+    status: "fail",
+    message,
+    durationMs: 0
+  });
 }
 
 let passed = 0;

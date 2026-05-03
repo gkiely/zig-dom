@@ -5,7 +5,7 @@ import { ZigDOMException } from "./DOMException.ts";
 import { Document } from "./Document.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
-import { CompositionEvent, CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
+import { CompositionEvent, CustomEvent, Event, EventTargetBase, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
 import {
   HTMLButtonElement,
   HTMLElement,
@@ -173,7 +173,7 @@ class WindowLocationImpl implements WindowLocation {
   }
 }
 
-export class Window {
+export class Window extends EventTargetBase {
   readonly _nativeWindowHandle: number;
   readonly #documentHandle: number;
   readonly #nodeCache: Array<Node | undefined> = [];
@@ -223,6 +223,7 @@ export class Window {
   };
 
   constructor(options?: WindowOptions) {
+    super();
     this._nativeWindowHandle = native.createWindow();
     this.#documentHandle = native.windowDocument(this._nativeWindowHandle);
 
@@ -254,6 +255,100 @@ export class Window {
 
     Object.defineProperty(this, "window", { value: this, configurable: true });
     Object.defineProperty(this, "self", { value: this, configurable: true });
+    Object.defineProperty(this, "parent", { value: this, configurable: true });
+    Object.defineProperty(this, "top", { value: this, configurable: true });
+    const framesLike = {
+      0: this,
+      length: 1,
+      item: (index: number) => (index === 0 ? this : null)
+    };
+    Object.defineProperty(this, "frames", { value: framesLike, configurable: true });
+    Object.defineProperty(this, "opener", {
+      value: null,
+      configurable: true,
+      writable: true
+    });
+
+    const htmlElementAliases = [
+      "HTMLAnchorElement",
+      "HTMLAreaElement",
+      "HTMLBodyElement",
+      "HTMLBRElement",
+      "HTMLDivElement",
+      "HTMLDListElement",
+      "HTMLFieldSetElement",
+      "HTMLFrameElement",
+      "HTMLFrameSetElement",
+      "HTMLHeadElement",
+      "HTMLHeadingElement",
+      "HTMLHRElement",
+      "HTMLHtmlElement",
+      "HTMLImageElement",
+      "HTMLLegendElement",
+      "HTMLLIElement",
+      "HTMLLinkElement",
+      "HTMLMenuElement",
+      "HTMLMetaElement",
+      "HTMLMeterElement",
+      "HTMLOListElement",
+      "HTMLObjectElement",
+      "HTMLOptGroupElement",
+      "HTMLOutputElement",
+      "HTMLParagraphElement",
+      "HTMLParamElement",
+      "HTMLPictureElement",
+      "HTMLPreElement",
+      "HTMLProgressElement",
+      "HTMLQuoteElement",
+      "HTMLScriptElement",
+      "HTMLSlotElement",
+      "HTMLSourceElement",
+      "HTMLSpanElement",
+      "HTMLStyleElement",
+      "HTMLTableCaptionElement",
+      "HTMLTableCellElement",
+      "HTMLTableColElement",
+      "HTMLTableElement",
+      "HTMLTableRowElement",
+      "HTMLTableSectionElement",
+      "HTMLTemplateElement",
+      "HTMLTimeElement",
+      "HTMLTitleElement",
+      "HTMLTrackElement",
+      "HTMLUListElement"
+    ];
+
+    const selfRecord = this as unknown as Record<string, unknown>;
+    for (const constructorName of htmlElementAliases) {
+      if (!(constructorName in selfRecord)) {
+        Object.defineProperty(this, constructorName, {
+          value: HTMLElement,
+          configurable: true,
+          writable: true
+        });
+      }
+    }
+
+    const WindowCtor = this.constructor as {
+      new (options?: { url?: string }): Window;
+    };
+
+    class DOMParserImpl {
+      parseFromString(source: string, _type: string): Document {
+        const parsedWindow = new WindowCtor({ url: "http://localhost/" });
+        const parsedDocument = parsedWindow.document;
+        parsedDocument.body.innerHTML = source;
+        return parsedDocument;
+      }
+    }
+
+    if (!("DOMParser" in selfRecord)) {
+      Object.defineProperty(this, "DOMParser", {
+        value: DOMParserImpl,
+        configurable: true,
+        writable: true
+      });
+    }
 
     this.setTimeout = globalThis.setTimeout.bind(globalThis);
     this.clearTimeout = globalThis.clearTimeout.bind(globalThis);

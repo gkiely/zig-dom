@@ -27,10 +27,10 @@ export class Event {
   static readonly AT_TARGET = 2;
   static readonly BUBBLING_PHASE = 3;
 
-  readonly type: string;
-  readonly bubbles: boolean;
-  readonly cancelable: boolean;
-  readonly composed: boolean;
+  type: string;
+  bubbles: boolean;
+  cancelable: boolean;
+  composed: boolean;
 
   target: EventTargetBase | null = null;
   currentTarget: EventTargetBase | null = null;
@@ -63,6 +63,25 @@ export class Event {
     this.#immediatePropagationStopped = true;
   }
 
+  get cancelBubble(): boolean {
+    return this.#propagationStopped;
+  }
+
+  set cancelBubble(value: boolean) {
+    if (value) {
+      this.stopPropagation();
+    }
+  }
+
+  initEvent(type: string, bubbles = false, cancelable = false): void {
+    this.type = type;
+    this.bubbles = Boolean(bubbles);
+    this.cancelable = Boolean(cancelable);
+    this.defaultPrevented = false;
+    this.#propagationStopped = false;
+    this.#immediatePropagationStopped = false;
+  }
+
   get propagationStopped(): boolean {
     return this.#propagationStopped;
   }
@@ -81,11 +100,16 @@ export class Event {
 }
 
 export class CustomEvent<T = unknown> extends Event {
-  readonly detail: T;
+  detail: T;
 
   constructor(type: string, init?: CustomEventInit<T>) {
     super(type, init);
     this.detail = (init?.detail ?? null) as T;
+  }
+
+  initCustomEvent(type: string, bubbles = false, cancelable = false, detail?: T): void {
+    this.initEvent(type, bubbles, cancelable);
+    this.detail = (detail ?? null) as T;
   }
 }
 

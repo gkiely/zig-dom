@@ -45,14 +45,23 @@ class CSSStyleDeclaration {
   }
 }
 
+type CSSStyleSheetLike = {
+  cssRules: Array<{ cssText: string }>;
+  insertRule(rule: string, index?: number): number;
+};
+
 export class HTMLElement extends Element {
   onclick: ((event: Event) => void) | null = null;
   onchange: ((event: Event) => void) | null = null;
   oninput: ((event: Event) => void) | null = null;
   #style: CSSStyleDeclaration | null = null;
+  #styleSheet: CSSStyleSheetLike | null = null;
   #syncingStyleAttribute = false;
   #shadowRootValue: DocumentFragment | null = null;
   #shadowRootMode: ShadowRootMode | null = null;
+  #templateContent: DocumentFragment | null = null;
+  #scrollLeftValue = 0;
+  #scrollTopValue = 0;
 
   #ensureStyle(): CSSStyleDeclaration {
     if (this.#style) {
@@ -85,6 +94,85 @@ export class HTMLElement extends Element {
 
   get style(): CSSStyleDeclaration {
     return this.#ensureStyle();
+  }
+
+  get sheet(): CSSStyleSheetLike | undefined {
+    if (this.tagName !== "STYLE") {
+      return undefined;
+    }
+
+    if (this.#styleSheet) {
+      return this.#styleSheet;
+    }
+
+    const cssRules: Array<{ cssText: string }> = [];
+    this.#styleSheet = {
+      cssRules,
+      insertRule(rule: string, index?: number): number {
+        const nextIndex = typeof index === "number" ? Math.max(0, Math.min(index, cssRules.length)) : cssRules.length;
+        cssRules.splice(nextIndex, 0, { cssText: rule });
+        return nextIndex;
+      }
+    };
+
+    return this.#styleSheet;
+  }
+
+  get content(): DocumentFragment | undefined {
+    if (this.tagName !== "TEMPLATE") {
+      return undefined;
+    }
+
+    if (this.#templateContent) {
+      return this.#templateContent;
+    }
+
+    const fragment = (this.ownerDocument ?? this._window.document).createDocumentFragment();
+    while (this.firstChild) {
+      fragment.appendChild(this.removeChild(this.firstChild));
+    }
+
+    this.#templateContent = fragment;
+    return this.#templateContent;
+  }
+
+  get scrollLeft(): number {
+    return this.#scrollLeftValue;
+  }
+
+  set scrollLeft(value: number) {
+    this.#scrollLeftValue = Number.isFinite(value) ? Math.max(0, value) : 0;
+  }
+
+  get scrollTop(): number {
+    return this.#scrollTopValue;
+  }
+
+  set scrollTop(value: number) {
+    this.#scrollTopValue = Number.isFinite(value) ? Math.max(0, value) : 0;
+  }
+
+  scrollTo(x: number | { left?: number; top?: number }, y?: number): void {
+    if (typeof x === "object") {
+      if (typeof x.left === "number") {
+        this.scrollLeft = x.left;
+      }
+      if (typeof x.top === "number") {
+        this.scrollTop = x.top;
+      }
+      return;
+    }
+
+    this.scrollLeft = x;
+    this.scrollTop = typeof y === "number" ? y : this.scrollTop;
+  }
+
+  scrollIntoView(_arg?: boolean | ScrollIntoViewOptions): void {
+    // No layout engine yet; this exists for compatibility with callers that expect the API.
+  }
+
+  click(): void {
+    this.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
   }
 
   constructor(window: Element["_window"], handle: number, nodeType = 1, _skipInitialStyleSync = false) {

@@ -62,6 +62,10 @@ export function querySelectorAllInElement(root: Element, selector: string): Elem
   return queryFromRoots([root], selector, root, false);
 }
 
+export function querySelectorAllInSubtree(root: Node, selector: string): Element[] {
+  return queryFromRoots([root], selector, null, false);
+}
+
 export function elementMatchesSelector(element: Element, selector: string): boolean {
   const selectors = parseSelectorList(selector);
   if (selectors.length === 0) {
