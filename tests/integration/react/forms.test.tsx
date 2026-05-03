@@ -16,7 +16,6 @@ function FormHarness(): JSX.Element {
       <input
         aria-label="name"
         value={value}
-        onInput={(event) => setValue((event.target as HTMLInputElement).value)}
         onChange={(event) => setValue((event.target as HTMLInputElement).value)}
       />
       <button type="submit">Submit</button>

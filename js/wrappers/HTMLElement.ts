@@ -274,7 +274,7 @@ export class HTMLInputElement extends HTMLElement {
     const previousChecked = this.checked;
 
     if (togglesChecked) {
-      this.checked = inputType === "checkbox" ? !this.checked : true;
+      this.#checked = inputType === "checkbox" ? !this.checked : true;
     }
 
     const result = super.dispatchEvent(event);
@@ -284,7 +284,7 @@ export class HTMLInputElement extends HTMLElement {
 
     if (event.defaultPrevented) {
       if (togglesChecked) {
-        this.checked = previousChecked;
+        this.#checked = previousChecked;
       }
       return result;
     }

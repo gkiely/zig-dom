@@ -80,8 +80,7 @@ describe("react reconciliation and event interop", () => {
             <input
               type="checkbox"
               checked={checked}
-              onChange={() => {}}
-              onInput={(event) => setChecked((event.target as HTMLInputElement).checked)}
+              onChange={(event) => setChecked((event.target as HTMLInputElement).checked)}
             />
           </label>
           <p>{checked ? "enabled" : "disabled"}</p>
