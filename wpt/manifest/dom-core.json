@@ -1,0 +1,7 @@
+{
+  "tests": [
+    { "file": "wpt/runner/tests/node-append-child.any.js" },
+    { "file": "wpt/runner/tests/document-create-element.any.js" },
+    { "file": "wpt/runner/tests/element-attributes.any.js" }
+  ]
+}

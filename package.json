@@ -1,0 +1,35 @@
+{
+  "name": "zig-dom",
+  "version": "0.1.0",
+  "description": "Bun-only Zig-backed DOM implementation with happy-dom-compatible surface",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./global-registrator": "./dist/global-registrator.js"
+  },
+  "scripts": {
+    "build:native": "bun run scripts/build-native.ts",
+    "build:js": "bunx tsc -p tsconfig.json",
+    "build": "bun run build:native && bun run build:js",
+    "verify:ffi": "bun run build:native && bun test tests/unit/ffi.test.ts",
+    "verify:dom": "bun run build && bun test tests/unit tests/integration/dom",
+    "verify:react": "bun run build && bun run scripts/smoke-bun-react.ts",
+    "verify:wpt:tiny": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json",
+    "verify:fast": "bun run verify:ffi && bun run verify:dom && bun run verify:react",
+    "test": "bun run build && bun test tests/unit tests/integration/dom tests/integration/react",
+    "test:wpt:dom": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json",
+    "test:react": "bun run build && bun test tests/integration/react"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.8.3"
+  }
+}
