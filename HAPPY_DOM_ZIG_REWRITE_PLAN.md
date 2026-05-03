@@ -10,6 +10,10 @@ Build `zig-dom`: a Zig-backed DOM implementation that can be imported from JavaS
 
 The project should optimize for an early usable slice, then grow spec coverage incrementally. Do not try to implement the entire WHATWG DOM and HTML surface before integration testing.
 
+## Remaining Todos
+
+- [] 
+
 ## Current Facts To Preserve
 
 - `happy-dom` is a TypeScript monorepo package under `packages/happy-dom`; the public package exports browser-like APIs such as `Window`, `Browser`, `Document`, `HTMLElement`, and global registration helpers.

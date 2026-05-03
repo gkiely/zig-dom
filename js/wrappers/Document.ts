@@ -17,6 +17,7 @@ export class Document extends Node {
   }
 
   get documentElement(): Element {
+    this._window.assertOpen();
     const handle = native.windowDocumentElement(this._window._nativeWindowHandle);
     const node = this._window.getNode(handle);
     if (!node) throw new Error("documentElement not found");
@@ -24,6 +25,7 @@ export class Document extends Node {
   }
 
   get head(): Element {
+    this._window.assertOpen();
     const handle = native.windowHead(this._window._nativeWindowHandle);
     const node = this._window.getNode(handle);
     if (!node) throw new Error("head not found");
@@ -31,6 +33,7 @@ export class Document extends Node {
   }
 
   get body(): Element {
+    this._window.assertOpen();
     const handle = native.windowBody(this._window._nativeWindowHandle);
     const node = this._window.getNode(handle);
     if (!node) throw new Error("body not found");
@@ -62,6 +65,7 @@ export class Document extends Node {
   }
 
   createElement(tagName: string): Element {
+    this._window.assertOpen();
     const normalizedTagName = tagName.toLowerCase();
     const handle = native.createElement(this._handle, normalizedTagName);
     const element = this._window.createKnownNode(handle, Node.ELEMENT_NODE, {
@@ -77,37 +81,44 @@ export class Document extends Node {
   }
 
   createTextNode(data: string): Text {
+    this._window.assertOpen();
     const handle = native.createTextNode(this._handle, data);
     return this._window.createKnownNode(handle, Node.TEXT_NODE) as Text;
   }
 
   createComment(data: string): Comment {
+    this._window.assertOpen();
     const handle = native.createComment(this._handle, data);
     return this._window.createKnownNode(handle, Node.COMMENT_NODE) as Comment;
   }
 
   createDocumentFragment(): DocumentFragment {
+    this._window.assertOpen();
     const handle = native.createDocumentFragment(this._handle);
     return this._window.createKnownNode(handle, Node.DOCUMENT_FRAGMENT_NODE) as DocumentFragment;
   }
 
   getElementById(id: string): Element | null {
+    this._window.assertOpen();
     const handle = native.documentGetElementById(this._handle, id);
     return this._window.getNode(handle) as Element | null;
   }
 
   querySelector(selector: string): Element | null {
+    this._window.assertOpen();
     const handle = native.documentQuerySelector(this._handle, selector);
     return this._window.getNode(handle) as Element | null;
   }
 
   querySelectorAll(selector: string): Element[] {
+    this._window.assertOpen();
     return native.documentQuerySelectorAll(this._handle, selector)
       .map((handle) => this._window.getNode(handle))
       .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE));
   }
 
   reset(): void {
+    this._window.assertOpen();
     native.documentReset(this._handle);
     this._window.setActiveElement(null);
   }

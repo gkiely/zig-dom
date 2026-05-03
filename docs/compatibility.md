@@ -50,7 +50,7 @@
 - `bun run verify:react`: pass (React smoke)
 - `bun run verify:wpt:tiny`: pass (11/11 subtests pass, 0 expected fail)
 - `bun run verify:fast`: pass
-- `bun test`: pass (30 tests across 14 files, 92 assertions)
+- `bun test`: pass (35 tests across 15 files, 104 assertions)
 - tiny WPT files include TypeScript (`.any.ts`) plus `.html` harness coverage with `META: script=` includes and variants, covering `compareDocumentPosition`, location, dataset, and storage/cookie basics.
 - `bun run benchmark:dom`: pass and writes `docs/benchmarks/latest.json` with zig-dom vs happy-dom vs jsdom metrics.
 
