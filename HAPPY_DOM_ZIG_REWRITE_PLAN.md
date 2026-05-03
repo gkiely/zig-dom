@@ -88,9 +88,29 @@ If Bun later exposes a global-scope-extension API:
 
 - Package name: `zig-dom`.
 - Runtime target: Bun only.
+- Toolchain target: latest stable Bun and Zig. At handoff start, record `bun --version`, `bun --revision`, and `zig version` in `docs/compatibility.md`; current local versions are Bun `1.3.13` and Zig `0.16.0`.
 - Test environment setup: explicit Bun preload via `bunfig.toml`, matching the happy-dom setup style.
 - Compatibility target: a smaller happy-dom-compatible subset is acceptable while the rewrite matures.
 - Script security: untrusted scripts are not expected to run inside this DOM.
+
+## Agent Iteration Strategy
+
+Use the fastest real feedback loop possible. The agent should not disappear into a large native DOM implementation before React, Testing Library, and a few WPT slices are exercising the public surface.
+
+Preferred loop:
+
+1. Prove the Zig/Bun FFI contract with a tiny dynamic library and unit test.
+2. Build the JavaScript package shell, public classes, exports, and `GlobalRegistrator` early, even if some behavior is temporarily JS-owned.
+3. Add a React Testing Library smoke test as soon as globals, constructors, element creation, text nodes, attributes, and basic queries exist.
+4. Keep a missing-API harvest file at `examples/bun-react-smoke/failures.md` so each React smoke failure becomes an explicit implementation target.
+5. Move hot or identity-sensitive DOM tree behavior into Zig incrementally.
+6. Add WPT only as curated micro-slices for behavior already under implementation. Do not run broad WPT before local DOM and React smoke tests give useful signal.
+
+Iteration rule:
+
+- Every early ticket should leave one of these commands more useful than before: `bun test tests/unit`, `bun test tests/integration/dom`, `bun test tests/integration/react`, or `bun run test:wpt:dom`.
+- React smoke failures are allowed before Ticket 5 only if the failing/missing API names are captured in `examples/bun-react-smoke/failures.md`.
+- WPT expected failures must include a reason. A broad WPT failure list with no owner/reason is not useful progress.
 
 ## Repository Shape
 
@@ -711,46 +731,160 @@ Files/modules likely involved:
 
 ## First Seven Tickets
 
-### Ticket 1: Scaffold Build And FFI Version Probe
+### Ticket 1: Scaffold Build And FFI ABI Probe
 
-Implement repo skeleton, Zig dynamic library build, TypeScript `dlopen`, and `zig_dom_version()`.
+Implement repo skeleton, Zig dynamic library build, TypeScript `dlopen`, and a tiny FFI test surface.
+
+Scope:
+
+- `build.zig`
+- `build.zig.zon`
+- `package.json`
+- `tsconfig.json`
+- `src/zig_dom.zig`
+- `src/ffi/api.zig`
+- `js/ffi.ts`
+- `js/memory.ts`
+- `tests/unit/ffi.test.ts`
+- `docs/compatibility.md`
+
+Required probes:
+
+- `zig_dom_version()`.
+- JS string to Zig bytes with explicit length.
+- Zig allocated string copied to JS and freed with `zig_dom_free_string`.
+- Pointer/handle round trip using the intended handle representation.
+- ABI decision test proving whether Bun can safely read the planned result shape. If C/Zig struct returns are not proven, use primitive status codes plus out-pointers.
 
 Done when:
 
 - `bun run build` succeeds.
-- `bun test tests/unit/ffi.test.ts` calls native version.
+- `bun test tests/unit/ffi.test.ts` passes.
+- `docs/compatibility.md` records Bun version, Bun revision, Zig version, platform, library extension, and FFI ABI decisions.
 
-### Ticket 2: Window, Document, Handle Table, Finalization
+### Ticket 2: JavaScript Package Shell And Global Registration
 
-Implement native window/document creation and JS wrappers with finalizers.
+Implement the public package shape before broad native behavior. It is acceptable for this ticket to use a small JS-owned DOM skeleton while the Zig handle table is still thin.
+
+Scope:
+
+- `js/index.ts`
+- `js/global-registrator.ts`
+- `js/wrappers/Window.ts`
+- `js/wrappers/Document.ts`
+- `js/wrappers/Node.ts`
+- `js/wrappers/Element.ts`
+- `js/wrappers/HTMLElement.ts`
+- `js/wrappers/Text.ts`
+- `js/wrappers/Comment.ts`
+- `js/wrappers/DocumentFragment.ts`
+- `js/compatibility/happy-dom-symbols.ts`
+- `tests/setup/register-dom.ts`
+- `tests/integration/dom/global-registrator.test.ts`
+
+Required behavior:
+
+- Package exports for `.` and `./global-registrator`.
+- `new Window({ url })`, `window.document`, `document.defaultView`, `document.documentElement`, `document.head`, and `document.body`.
+- Global registration of `window`, `document`, common constructors, timers delegated to Bun, and `window.happyDOM.reset()/close()/abort()`.
+- Idempotent `GlobalRegistrator.register()`.
+- Basic JS wrapper identity preservation, even if native handles are introduced in the next ticket.
 
 Done when:
 
 - `new Window().document` returns stable object identity.
-- `window.close()` frees native resources.
-- GC finalization test passes in debug mode.
+- `bun test tests/integration/dom/global-registrator.test.ts` passes.
+- `import { Window, GlobalRegistrator } from "./dist/index.js"` works in Bun after `bun run build`.
 
-### Ticket 3: Node Tree Mutation
+### Ticket 3: React Testing Library Smoke Harness
 
-Implement element/text creation and append/insert/remove/replace.
+Add React and Testing Library integration before completing the native DOM. This ticket is allowed to expose missing APIs, but it must make those failures easy to act on.
+
+Scope:
+
+- `bunfig.toml`
+- `tests/setup/register-dom.ts`
+- `tests/setup/testing-library.ts`
+- `tests/integration/react/App.tsx`
+- `tests/integration/react/render.test.tsx`
+- `scripts/smoke-bun-react.ts`
+- `examples/bun-react-smoke/failures.md`
+- Any JS wrapper stubs needed for React feature detection.
+
+Required behavior:
+
+- Install React, React DOM, `@testing-library/react`, `@testing-library/dom`, and `@testing-library/jest-dom`.
+- Preload DOM globals and Testing Library matchers.
+- Provide constructors/prototypes React commonly feature-detects: `Node`, `Element`, `HTMLElement`, `HTMLButtonElement`, `HTMLInputElement`, `HTMLFormElement`, `Text`, `Comment`, `DocumentFragment`, `Event`, `CustomEvent`, `MouseEvent`, and `Document`.
+- Run a smoke test that renders a simple component into `document.body`.
+- Capture missing API names and representative stack traces in `examples/bun-react-smoke/failures.md` when the smoke is not yet green.
 
 Done when:
 
-- Basic DOM tree unit tests pass.
-- First WPT node mutation files run with expected failures recorded.
+- `bun test tests/integration/react/render.test.tsx` either passes or fails only with documented missing APIs in `examples/bun-react-smoke/failures.md`.
+- The smoke output prints the top missing API names from thrown errors.
+- The next implementation target is obvious from the failure list.
 
-### Ticket 4: Attributes And Serialization
+### Ticket 4: Native Window, Document, Handle Table, And Node Tree
 
-Implement attributes, `textContent`, `innerHTML` subset, and `outerHTML`.
+Move the core identity and tree model into Zig now that the JS package surface and React harness exist.
+
+Scope:
+
+- `src/dom/arena.zig`
+- `src/dom/document.zig`
+- `src/dom/node.zig`
+- `src/dom/element.zig`
+- `src/dom/text.zig`
+- `src/ffi/api.zig`
+- `src/ffi/handles.zig`
+- `js/wrappers/Window.ts`
+- `js/wrappers/Document.ts`
+- `js/wrappers/Node.ts`
+- `js/wrappers/Element.ts`
+- `js/wrappers/Text.ts`
+- `tests/unit/handles.test.ts`
+- `tests/integration/dom/tree-mutation.test.ts`
+
+Required behavior:
+
+- Native window/document creation and deterministic `window.close()`.
+- Handle table with generation validation.
+- JS wrapper identity maps per window/document.
+- FinalizationRegistry release path plus explicit close path.
+- `createElement`, `createTextNode`, `appendChild`, `insertBefore`, `removeChild`, and `replaceChild`.
+- Controlled exceptions for stale or invalid handles.
 
 Done when:
 
-- Smoke script can create a button and serialize it.
-- Attribute WPT subset runs.
+- Basic DOM tree unit and integration tests pass.
+- `new Window().document` still returns stable object identity.
+- Repeated create/append/remove/drop cycles do not leak in a debug allocation counter.
+- React smoke failure list shrinks or remains unchanged.
 
-### Ticket 5: Bun React Testing Library Smoke
+### Ticket 5: Make React Smoke Green
 
-Implement `GlobalRegistrator`, constructors, and enough events/query APIs for a simple React test.
+Implement the minimum DOM APIs needed for the simple React Testing Library render test to pass end to end.
+
+Scope:
+
+- `js/wrappers/Document.ts`
+- `js/wrappers/Element.ts`
+- `js/wrappers/HTMLElement.ts`
+- `js/wrappers/Event.ts`
+- `src/dom/attr.zig`
+- `src/dom/selector.zig`
+- `src/dom/serializer.zig`
+- `src/ffi/api.zig`
+- `tests/integration/react/render.test.tsx`
+- `examples/bun-react-smoke/failures.md`
+
+Required behavior:
+
+- Element attributes, `id`, `className`, `classList` minimal, `textContent`, `innerHTML` subset, `children`, `childNodes`, `querySelector`, and `querySelectorAll`.
+- Basic `EventTarget` storage in JS if native dispatch is not needed yet.
+- Enough constructors and prototype relationships for React and Testing Library feature detection.
+- `window.happyDOM.reset()` clears document state cheaply between tests.
 
 Done when:
 
@@ -770,7 +904,41 @@ test("renders", () => {
 });
 ```
 
-### Ticket 6: UI-Oriented Bun React Tests
+### Ticket 6: Tiny WPT Runner And DOM Micro-Slices
+
+Add the WPT runner only after local DOM and React smoke tests provide useful signal. Keep the first WPT scope deliberately small.
+
+Scope:
+
+- `wpt/runner/`
+- `wpt/manifest/dom-core.json`
+- `wpt/expected/dom-core.json`
+- `scripts/sync-wpt.ts`
+- `scripts/run-wpt-subset.ts`
+- `tests/integration/wpt-runner/*.test.ts`
+- `docs/compatibility.md`
+
+Initial WPT subset:
+
+- One `.any.js` test that needs no parser.
+- One focused node mutation test such as append/remove.
+- One focused `Document.createElement` or `createTextNode` test.
+- One focused attribute get/set test.
+
+Required runner capabilities:
+
+- Discover and execute explicit manifest entries.
+- Load enough `testharness.js` support to capture sync and promise tests.
+- Produce deterministic JSON output with file, subtest name, status, message, duration, and expected-failure comparison.
+- Require reason strings for expected failures.
+
+Done when:
+
+- `bun run test:wpt:dom` runs the tiny manifest reliably in under 10 seconds.
+- `docs/compatibility.md` records subset size and pass/fail/expected-fail counts.
+- Adding the next WPT file should not require a runner redesign.
+
+### Ticket 7: UI-Oriented Bun React Tests
 
 Add a broader in-repo UI test suite that exercises the DOM the way component tests actually use it. This should still run under `bun test`; do not introduce Playwright or a browser for this ticket.
 
@@ -820,51 +988,3 @@ Done when:
 - Missing API failures from Testing Library are captured in `examples/bun-react-smoke/failures.md`.
 - Event dispatch, form value reflection, and cleanup/reset behavior have unit or integration coverage.
 - Phase 8/Event requirements are updated if this ticket discovers necessary event APIs.
-
-### Ticket 7: Complete Initial WPT Runner Support
-
-Complete the WPT runner foundation before expanding DOM implementation aggressively. "Complete" here means complete enough for DOM/core `testharness.js` tests, not the entire WPT project.
-
-Scope:
-
-- `wpt/runner/`
-- `wpt/manifest/dom-core.json`
-- `wpt/expected/dom-core.json`
-- `scripts/sync-wpt.ts`
-- `scripts/run-wpt-subset.ts`
-- `tests/integration/wpt-runner/*.test.ts`
-
-Required runner capabilities:
-
-- Discover and execute explicit manifest entries.
-- Support `.any.js` testharness tests.
-- Support `.html` testharness tests by creating a zig-dom-backed `Window` and executing inline scripts.
-- Load `/resources/testharness.js` and `/resources/testharnessreport.js`.
-- Resolve `META: script` includes for local and WPT-root resources.
-- Run declared `META: variant` entries.
-- Capture sync, async, and promise test results.
-- Enforce per-test timeout handling.
-- Produce deterministic JSON output with:
-  - test file
-  - variant
-  - subtest name
-  - status
-  - message
-  - duration
-- Compare actual results against `wpt/expected/*.json`.
-- Fail on unexpected failures and unexpected passes.
-
-Out of scope for this ticket:
-
-- Reftests.
-- Manual tests.
-- Browser automation via `testdriver.js`.
-- Full idlharness coverage, except stubbing enough to skip/report unsupported IDL tests cleanly.
-
-Done when:
-
-- `bun run test:wpt:dom` runs the DOM core manifest reliably.
-- The runner can execute at least one `.any.js`, one `.html`, one `META: script`, and one `META: variant` case.
-- Expected failures require a reason string.
-- `docs/compatibility.md` records the WPT subset size and pass/fail/expected-fail counts.
-- Ticket 8 and later DOM work can add WPT files without changing runner architecture.
