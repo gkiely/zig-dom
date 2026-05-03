@@ -7,7 +7,7 @@ import { Document } from "./Document.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { DocumentType } from "./DocumentType.ts";
 import { Element } from "./Element.ts";
-import { CompositionEvent, CustomEvent, Event, EventTargetBase, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
+import { CompositionEvent, CustomEvent, Event, EventTargetBase, FocusEvent, InputEvent, KeyboardEvent, MouseEvent, UIEvent, WheelEvent } from "./Event.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import {
   HTMLButtonElement,
@@ -204,9 +204,13 @@ export class Window extends EventTargetBase {
   readonly DocumentFragment = DocumentFragment;
   readonly DocumentType = DocumentType;
   readonly HTMLCollection = HTMLCollection;
+  readonly EventTarget = EventTargetBase;
   readonly Event = Event;
+  readonly UIEvent = UIEvent;
+  readonly FocusEvent = FocusEvent;
   readonly CustomEvent = CustomEvent;
   readonly MouseEvent = MouseEvent;
+  readonly WheelEvent = WheelEvent;
   readonly InputEvent = InputEvent;
   readonly CompositionEvent = CompositionEvent;
   readonly KeyboardEvent = KeyboardEvent;
@@ -264,6 +268,11 @@ export class Window extends EventTargetBase {
     Object.defineProperty(this, "self", { value: this, configurable: true });
     Object.defineProperty(this, "parent", { value: this, configurable: true });
     Object.defineProperty(this, "top", { value: this, configurable: true });
+    Object.defineProperty(this, "event", {
+      value: undefined,
+      configurable: true,
+      writable: true
+    });
     const framesLike = new Proxy({
       item: (index: number) => this.collectFrameWindows()[index] ?? null
     }, {
@@ -497,6 +506,22 @@ export class Window extends EventTargetBase {
       writable: true
     });
 
+    if (!("UIEvent" in selfRecord)) {
+      Object.defineProperty(this, "UIEvent", {
+        value: Event,
+        configurable: true,
+        writable: true
+      });
+    }
+
+    if (!("FocusEvent" in selfRecord)) {
+      Object.defineProperty(this, "FocusEvent", {
+        value: Event,
+        configurable: true,
+        writable: true
+      });
+    }
+
     class DOMParserImpl {
       parseFromString(source: string, type: string): Document {
         if (type.toLowerCase().includes("xml")) {
@@ -548,7 +573,34 @@ export class Window extends EventTargetBase {
     this.FormData = globalThis.FormData;
     this.Blob = globalThis.Blob;
     this.File = globalThis.File;
+    this.URL = globalThis.URL;
+    this.AbortSignal = globalThis.AbortSignal;
+    this.AbortController = globalThis.AbortController;
     this.getComputedStyle = this.getComputedStyle.bind(this);
+
+    if (!("performance" in selfRecord)) {
+      Object.defineProperty(this, "performance", {
+        value: globalThis.performance,
+        configurable: true,
+        writable: true
+      });
+    }
+
+    if (!("eval" in selfRecord)) {
+      Object.defineProperty(this, "eval", {
+        value: globalThis.eval,
+        configurable: true,
+        writable: true
+      });
+    }
+
+    if (!("XMLHttpRequest" in selfRecord) && "XMLHttpRequest" in globalThis) {
+      Object.defineProperty(this, "XMLHttpRequest", {
+        value: (globalThis as unknown as Record<string, unknown>).XMLHttpRequest,
+        configurable: true,
+        writable: true
+      });
+    }
   }
 
   assertOpen(): void {
@@ -987,4 +1039,7 @@ export class Window extends EventTargetBase {
   FormData!: typeof globalThis.FormData;
   Blob!: typeof globalThis.Blob;
   File!: typeof globalThis.File;
+  URL!: typeof globalThis.URL;
+  AbortSignal!: typeof globalThis.AbortSignal;
+  AbortController!: typeof globalThis.AbortController;
 }

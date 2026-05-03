@@ -404,9 +404,30 @@ export class Element extends Node {
     return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
   }
 
-  getElementsByTagName(tagName: string): Element[] {
+  getElementsByTagName(tagName: string): HTMLCollection {
     const selector = tagName === "*" ? "*" : tagName.toLowerCase();
-    return this.querySelectorAll(selector);
+    return new HTMLCollection(() => this.querySelectorAll(selector));
+  }
+
+  getElementsByTagNameNS(namespace: string | null, localName: string): HTMLCollection {
+    const expectedLocalName = localName === "*" ? null : localName;
+    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+      const namespaceMatches = namespace === "*" || element.namespaceURI === namespace;
+      const localNameMatches = expectedLocalName == null || element.localName === expectedLocalName;
+      return namespaceMatches && localNameMatches;
+    }));
+  }
+
+  getElementsByClassName(classNames: string): HTMLCollection {
+    const tokens = classNames.trim().split(/\s+/).filter((token) => token.length > 0);
+    if (tokens.length === 0) {
+      return new HTMLCollection(() => []);
+    }
+
+    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+      const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter((token) => token.length > 0);
+      return tokens.every((token) => classes.includes(token));
+    }));
   }
 }
 

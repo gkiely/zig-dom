@@ -211,30 +211,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-constructor.html",
-      "subtest": "__all__",
-      "reason": "Text constructor semantics and prototype wiring are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-constructor.html",
-      "subtest": "__timeout__",
-      "reason": "Text constructor coverage exceeds 1s per-entry budget in isolated loop",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-splitText.html",
-      "subtest": "__all__",
-      "reason": "Text.splitText is not implemented",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Text-wholeText.html",
-      "subtest": "__all__",
-      "reason": "Text.wholeText behavior is incomplete",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/observable/tentative/idlharness.html",
       "subtest": "__all__",
       "reason": "observable idlharness dependencies are not present in local runner resources",
@@ -274,6 +250,312 @@
       "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-compareBoundaryPoints.html",
       "subtest": "__all__",
       "reason": "Range.compareBoundaryPoints is not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-set.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-dataChange.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-surroundContents.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/NodeIterator.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-isPointInRange.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceData.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-deleteData.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendData.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertData.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-selectNode.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-splitText.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertBefore.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendChild.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceChild.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-programmatic-updates.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/NodeIterator-removal.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-removeChild.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-auto-disconnect.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/StaticRange-constructor.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-multiline-and-mutations.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-basic.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-acceptNode-filter.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-offset.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-highlightsFromPoint.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-highlight.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-traversal-skip.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-traversal-reject.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-supported-elements.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-complexity-and-visibility.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-basic.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-disconnect.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-currentNode.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-range-updates.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/window-extends-event-target.html",
+      "subtest": "__all__",
+      "reason": "Window EventTarget inheritance behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-basic.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-traversal-skip-most.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-realm.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-validation.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/xpath-result-single-node-value-nullable.html",
+      "subtest": "__all__",
+      "reason": "XPathResult APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-walking-outside-a-tree.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-previousSiblingLastChildSkip.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-previousNodeLastChildReject.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html",
+      "subtest": "__timeout__",
+      "reason": "cross-realm traversal case exceeds 1s per-entry budget in isolated loop",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/traversal/NodeFilter-constants.html",
+      "subtest": "__all__",
+      "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/svg-insert-crash.html",
+      "subtest": "__all__",
+      "reason": "SVG insertion edge-case semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/svg-insert-crash.html",
+      "subtest": "__timeout__",
+      "reason": "svg insertion crash regression case exceeds 1s per-entry budget in isolated loop",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-unsupported-elements.html",
+      "subtest": "__all__",
+      "reason": "OpaqueRange APIs are not implemented yet",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-stringifier.html",
+      "subtest": "__all__",
+      "reason": "Range mutation and boundary semantics are incomplete",
       "owner": "compat"
     }
   ]

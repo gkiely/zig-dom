@@ -342,41 +342,56 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     })());
   };
 
-  const test = (fn: () => void | Promise<void>, name = "test") => {
-    registerHarnessTest(name, fn);
-  };
-
-  const promise_test = (fn: () => Promise<void>, name = "promise_test") => {
-    registerHarnessTest(name, fn);
-  };
-
-  const createDeferredAsyncTest = (name: string, callback?: (testObj: {
+  type CleanupCallback = () => void | Promise<void>;
+  type HarnessTestObject = {
     done: () => void;
     step: (fn: () => void) => void;
     step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
     step_func_done: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
     step_timeout: (fn: () => void, delay: number) => ReturnType<typeof setTimeout>;
     unreached_func: (message?: string) => () => never;
-  }) => void) => {
-    let complete = false;
-    let failError: unknown = null;
+    add_cleanup: (callback: CleanupCallback) => void;
+  };
 
-    let resolveDone!: () => void;
-    const completion = new Promise<void>((resolve) => {
-      resolveDone = resolve;
-    });
+  let activeCleanupStack: CleanupCallback[] | null = null;
 
+  const runCleanupCallbacks = async (cleanups: CleanupCallback[]) => {
+    let firstError: unknown = null;
+    for (let index = cleanups.length - 1; index >= 0; index -= 1) {
+      try {
+        await cleanups[index]?.();
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+
+    if (firstError) {
+      throw firstError;
+    }
+  };
+
+  const createHarnessTestObject = (
+    cleanups: CleanupCallback[],
+    onDone?: () => void,
+    onStepError?: (error: unknown) => void
+  ): HarnessTestObject => {
     const testObj = {
       done: () => {
-        complete = true;
-        resolveDone();
+        onDone?.();
       },
       step: (fn: () => void) => {
+        const previousCleanups = activeCleanupStack;
+        activeCleanupStack = cleanups;
         try {
           fn.call(testObj);
         } catch (error) {
-          failError = error;
-          resolveDone();
+          if (onStepError) {
+            onStepError(error);
+            return;
+          }
+          throw error;
+        } finally {
+          activeCleanupStack = previousCleanups;
         }
       },
       step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => {
@@ -399,32 +414,101 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
         return () => {
           throw new Error(message ?? "unreached code path invoked");
         };
+      },
+      add_cleanup: (callback: CleanupCallback) => {
+        cleanups.push(callback);
       }
     };
 
+    return testObj;
+  };
+
+  const test = (fn: (testObj: HarnessTestObject) => void | Promise<void>, name = "test") => {
+    registerHarnessTest(name, async () => {
+      const cleanups: CleanupCallback[] = [];
+      const testObj = createHarnessTestObject(cleanups);
+      const previousCleanups = activeCleanupStack;
+      activeCleanupStack = cleanups;
+      try {
+        await fn.call(testObj, testObj);
+      } finally {
+        activeCleanupStack = previousCleanups;
+        await runCleanupCallbacks(cleanups);
+      }
+    });
+  };
+
+  const promise_test = (fn: (testObj: HarnessTestObject) => Promise<void>, name = "promise_test") => {
+    registerHarnessTest(name, async () => {
+      const cleanups: CleanupCallback[] = [];
+      const testObj = createHarnessTestObject(cleanups);
+      const previousCleanups = activeCleanupStack;
+      activeCleanupStack = cleanups;
+      try {
+        await fn.call(testObj, testObj);
+      } finally {
+        activeCleanupStack = previousCleanups;
+        await runCleanupCallbacks(cleanups);
+      }
+    });
+  };
+
+  const createDeferredAsyncTest = (name: string, callback?: (testObj: HarnessTestObject) => void) => {
+    let complete = false;
+    let failError: unknown = null;
+    const cleanups: CleanupCallback[] = [];
+
+    let resolveDone!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+
+    const testObj = createHarnessTestObject(
+      cleanups,
+      () => {
+        complete = true;
+        resolveDone();
+      },
+      (error) => {
+        failError = error;
+        resolveDone();
+      }
+    );
+
     if (callback) {
+      const previousCleanups = activeCleanupStack;
+      activeCleanupStack = cleanups;
       try {
         callback.call(testObj, testObj);
       } catch (error) {
         failError = error;
         resolveDone();
+      } finally {
+        activeCleanupStack = previousCleanups;
       }
     }
 
     registerHarnessTest(name, async () => {
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const timeout = new Promise<never>((_resolve, reject) => {
-        setTimeout(() => {
+        timeoutHandle = setTimeout(() => {
           reject(new Error(`async_test timeout: ${name}`));
         }, 2000);
       });
 
-      await Promise.race([completion, timeout]);
-
-      if (failError) {
-        throw failError;
-      }
-      if (!complete) {
-        throw new Error(`async_test did not call done(): ${name}`);
+      try {
+        await Promise.race([completion, timeout]);
+        if (failError) {
+          throw failError;
+        }
+        if (!complete) {
+          throw new Error(`async_test did not call done(): ${name}`);
+        }
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+        await runCleanupCallbacks(cleanups);
       }
     });
 
@@ -432,14 +516,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   };
 
   const async_test = (
-    first?: string | ((testObj: {
-      done: () => void;
-      step: (fn: () => void) => void;
-      step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
-      step_func_done: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
-      step_timeout: (fn: () => void, delay: number) => ReturnType<typeof setTimeout>;
-      unreached_func: (message?: string) => () => never;
-    }) => void),
+    first?: string | ((testObj: HarnessTestObject) => void),
     second?: string
   ) => {
     const callback = typeof first === "function" ? first : undefined;
@@ -463,6 +540,56 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   const assert_not_equals = (actual: unknown, expected: unknown, message = "Expected values to differ") => {
     if (actual === expected) {
       throw new Error(message);
+    }
+  };
+
+  const assert_own_property = (object: unknown, property: string, message = "Expected own property") => {
+    if (object == null || !Object.prototype.hasOwnProperty.call(object, property)) {
+      throw new Error(message);
+    }
+  };
+
+  const assert_greater_than_equal = (actual: number, expected: number, message = "Expected actual >= expected") => {
+    if (!(actual >= expected)) {
+      throw new Error(message);
+    }
+  };
+
+  const assert_implements = (condition: unknown, message = "Expected feature to be implemented") => {
+    if (!condition) {
+      throw new Error(message);
+    }
+  };
+
+  const promise_rejects_js = async (
+    _testObj: unknown,
+    constructor: new (...args: never[]) => unknown,
+    promise: Promise<unknown>,
+    message = "Expected promise to reject with given constructor"
+  ) => {
+    try {
+      await promise;
+      throw new Error(`${message}: promise resolved`);
+    } catch (error) {
+      if (!(error instanceof constructor)) {
+        throw new Error(`${message}: unexpected rejection type`);
+      }
+    }
+  };
+
+  const promise_rejects_exactly = async (
+    _testObj: unknown,
+    expected: unknown,
+    promise: Promise<unknown>,
+    message = "Expected promise to reject with the exact value"
+  ) => {
+    try {
+      await promise;
+      throw new Error(`${message}: promise resolved`);
+    } catch (error) {
+      if (error !== expected) {
+        throw new Error(message);
+      }
     }
   };
 
@@ -621,6 +748,41 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     }
   };
 
+  const assert_unreached = (message = "Reached unreachable code") => {
+    throw new Error(message);
+  };
+
+  const generate_tests = (
+    callback: (...args: unknown[]) => void | Promise<void>,
+    tests: unknown
+  ) => {
+    const register = (name: unknown, args: unknown[]) => {
+      const title = typeof name === "string" ? name : format_value(name);
+      test(() => callback(...args), title);
+    };
+
+    if (Array.isArray(tests)) {
+      for (const testCase of tests) {
+        if (!Array.isArray(testCase) || testCase.length === 0) {
+          continue;
+        }
+        const [name, ...args] = testCase;
+        register(name, args);
+      }
+      return;
+    }
+
+    if (tests && typeof tests === "object") {
+      for (const [name, value] of Object.entries(tests as Record<string, unknown>)) {
+        if (Array.isArray(value)) {
+          register(name, value);
+        } else {
+          register(name, [value]);
+        }
+      }
+    }
+  };
+
   const setup = (
     first?: { callback?: () => void } | (() => void),
     second?: () => void
@@ -659,11 +821,23 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   context.assert_false = assert_false;
   context.assert_equals = assert_equals;
   context.assert_not_equals = assert_not_equals;
+  context.assert_own_property = assert_own_property;
+  context.assert_greater_than_equal = assert_greater_than_equal;
+  context.assert_implements = assert_implements;
   context.assert_array_equals = assert_array_equals;
   context.assert_throws_js = assert_throws_js;
   context.assert_throws_dom = assert_throws_dom;
+  context.promise_rejects_js = promise_rejects_js;
+  context.promise_rejects_exactly = promise_rejects_exactly;
+  context.assert_unreached = assert_unreached;
   context.format_value = format_value;
-  context.add_cleanup = () => undefined;
+  context.generate_tests = generate_tests;
+  context.performance = globalThis.performance;
+  context.add_cleanup = (callback: CleanupCallback) => {
+    if (typeof callback === "function") {
+      activeCleanupStack?.push(callback);
+    }
+  };
   const WindowCtor = window.constructor as {
     new (options?: { url?: string }): Window;
   };
@@ -883,7 +1057,6 @@ for (const result of allResults) {
       console.log(`UNEXPECTED_PASS ${result.file} :: ${result.name}`);
     } else {
       passed += 1;
-      console.log(`PASS ${result.file} :: ${result.name}`);
     }
     continue;
   }

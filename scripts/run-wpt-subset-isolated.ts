@@ -173,7 +173,7 @@ for (let index = 0; index < selectedEntries.length; index += 1) {
   const timeoutHandle = setTimeout(() => {
     timedOut = true;
     child.kill();
-  }, entryTimeoutMs + 250);
+  }, entryTimeoutMs + 1000);
 
   const exitCode = await child.exited;
   clearTimeout(timeoutHandle);

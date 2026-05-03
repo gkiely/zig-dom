@@ -4,7 +4,8 @@ import { DocumentFragment } from "./DocumentFragment.ts";
 import { DocumentType } from "./DocumentType.ts";
 import { ZigDOMException } from "./DOMException.ts";
 import { Element } from "./Element.ts";
-import { CompositionEvent, CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
+import { CompositionEvent, CustomEvent, Event, FocusEvent, InputEvent, KeyboardEvent, MouseEvent, UIEvent, WheelEvent } from "./Event.ts";
+import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
 import { Range, Selection } from "./Range.ts";
@@ -295,12 +296,24 @@ export class Document extends Node {
       return new Event("");
     }
 
+    if (normalized === "uievent") {
+      return new UIEvent("");
+    }
+
+    if (normalized === "focusevent") {
+      return new FocusEvent("");
+    }
+
     if (normalized === "customevent") {
       return new CustomEvent("");
     }
 
     if (normalized === "mouseevent" || normalized === "mouseevents") {
       return new MouseEvent("");
+    }
+
+    if (normalized === "wheelevent") {
+      return new WheelEvent("");
     }
 
     if (normalized === "keyboardevent" || normalized === "keyevents") {
@@ -431,10 +444,33 @@ export class Document extends Node {
     return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
   }
 
-  getElementsByTagName(tagName: string): Element[] {
+  getElementsByTagName(tagName: string): HTMLCollection {
     this._window.assertOpen();
     const selector = tagName === "*" ? "*" : tagName.toLowerCase();
-    return this.querySelectorAll(selector);
+    return new HTMLCollection(() => this.querySelectorAll(selector));
+  }
+
+  getElementsByTagNameNS(namespace: string | null, localName: string): HTMLCollection {
+    this._window.assertOpen();
+    const expectedLocalName = localName === "*" ? null : localName;
+    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+      const namespaceMatches = namespace === "*" || element.namespaceURI === namespace;
+      const localNameMatches = expectedLocalName == null || element.localName === expectedLocalName;
+      return namespaceMatches && localNameMatches;
+    }));
+  }
+
+  getElementsByClassName(classNames: string): HTMLCollection {
+    this._window.assertOpen();
+    const tokens = classNames.trim().split(/\s+/).filter((token) => token.length > 0);
+    if (tokens.length === 0) {
+      return new HTMLCollection(() => []);
+    }
+
+    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+      const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter((token) => token.length > 0);
+      return tokens.every((token) => classes.includes(token));
+    }));
   }
 
   adoptNode<TNode extends Node>(node: TNode): TNode {

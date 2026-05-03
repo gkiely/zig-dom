@@ -226,6 +226,7 @@ export class Node extends EventTargetBase {
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.appendChild(this._handle, child._handle);
+      scheduleIFrameLoadIfNeeded(child);
       refreshDocumentElementFlag(this);
       return child;
     }
@@ -350,6 +351,7 @@ export class Node extends EventTargetBase {
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+      scheduleIFrameLoadIfNeeded(newChild);
       refreshDocumentElementFlag(this);
       return newChild;
     }
@@ -557,6 +559,7 @@ export class Node extends EventTargetBase {
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.replaceChild(this._handle, newChild._handle, oldChild._handle);
+      scheduleIFrameLoadIfNeeded(newChild as Node);
       refreshDocumentElementFlag(this);
       return oldChild;
     }
@@ -948,50 +951,66 @@ export class Node extends EventTargetBase {
   dispatchEvent(event: Event): boolean {
     this._window.assertOpen();
 
-    if (!event.target) {
-      event.target = this;
+    if (!(event instanceof Event)) {
+      throw new TypeError("Failed to execute 'dispatchEvent': parameter 1 is not of type 'Event'.");
+    }
+    if (event.dispatching) {
+      throw new ZigDOMException("The event is already being dispatched.", "InvalidStateError", 11);
+    }
+    if (event.type === "") {
+      throw new ZigDOMException("The event has no type.", "InvalidStateError", 11);
     }
 
-    const propagationPath: Node[] = [this];
-    let cursor = this.parentNode;
-    while (cursor) {
-      propagationPath.push(cursor);
-      cursor = cursor.parentNode;
-    }
-    event.setPath([...propagationPath]);
+    event.setDispatchFlag(true);
 
-    for (let i = propagationPath.length - 1; i >= 1; i -= 1) {
-      if (event.propagationStopped) break;
-      const current = propagationPath[i];
-      event.currentTarget = current;
-      event.eventPhase = Event.CAPTURING_PHASE;
-      current.invokeListeners(event, true);
-    }
-
-    if (!event.propagationStopped) {
-      event.currentTarget = this;
-      event.eventPhase = Event.AT_TARGET;
-      this.invokeListeners(event, true);
-      if (!event.immediatePropagationStopped) {
-        this.invokeListeners(event, false);
+    try {
+      if (!event.target) {
+        event.target = this;
       }
-      this.invokePropertyHandler(event);
-    }
 
-    if (event.bubbles && !event.propagationStopped) {
-      for (let i = 1; i < propagationPath.length; i += 1) {
+      const propagationPath: Node[] = [this];
+      let cursor = this.parentNode;
+      while (cursor) {
+        propagationPath.push(cursor);
+        cursor = cursor.parentNode;
+      }
+      event.setPath([...propagationPath]);
+
+      for (let i = propagationPath.length - 1; i >= 1; i -= 1) {
         if (event.propagationStopped) break;
         const current = propagationPath[i];
         event.currentTarget = current;
-        event.eventPhase = Event.BUBBLING_PHASE;
-        current.invokeListeners(event, false);
-        current.invokePropertyHandler(event);
+        event.eventPhase = Event.CAPTURING_PHASE;
+        current.invokeListeners(event, true);
       }
-    }
 
-    event.currentTarget = null;
-    event.eventPhase = Event.NONE;
-    return !event.defaultPrevented;
+      if (!event.propagationStopped) {
+        event.currentTarget = this;
+        event.eventPhase = Event.AT_TARGET;
+        this.invokeListeners(event, true);
+        if (!event.immediatePropagationStopped) {
+          this.invokeListeners(event, false);
+        }
+        this.invokePropertyHandler(event);
+      }
+
+      if (event.bubbles && !event.propagationStopped) {
+        for (let i = 1; i < propagationPath.length; i += 1) {
+          if (event.propagationStopped) break;
+          const current = propagationPath[i];
+          event.currentTarget = current;
+          event.eventPhase = Event.BUBBLING_PHASE;
+          current.invokeListeners(event, false);
+          current.invokePropertyHandler(event);
+        }
+      }
+
+      return !event.defaultPrevented;
+    } finally {
+      event.currentTarget = null;
+      event.eventPhase = Event.NONE;
+      event.setDispatchFlag(false);
+    }
   }
 
   protected invokePropertyHandler(event: Event): void {
