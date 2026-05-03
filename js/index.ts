@@ -1,7 +1,7 @@
 import { PropertySymbol } from "./compatibility/happy-dom-symbols.ts";
-import { CustomElementRegistry } from "./wrappers/CustomElementRegistry.ts";
 import { GlobalRegistrator } from "./global-registrator.ts";
 import { Comment } from "./wrappers/Comment.ts";
+import { CustomElementRegistry } from "./wrappers/CustomElementRegistry.ts";
 import { Document } from "./wrappers/Document.ts";
 import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
 import { Element } from "./wrappers/Element.ts";

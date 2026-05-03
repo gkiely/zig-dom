@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Window } from "../js/wrappers/Window";
 
 type ManifestEntry = {
   file: string;
+  variants?: string[];
 };
 
 type Manifest = {
@@ -41,6 +42,11 @@ type TinyTest = {
   }) => void | Promise<void>;
 };
 
+type HarnessTest = {
+  name: string;
+  run: () => void | Promise<void>;
+};
+
 function arg(name: string): string {
   const index = process.argv.indexOf(name);
   if (index === -1 || index + 1 >= process.argv.length) {
@@ -64,7 +70,256 @@ function createAssert() {
   };
 }
 
-async function runEntry(file: string): Promise<SubtestResult[]> {
+function readText(filePath: string): string {
+  return readFileSync(resolve(filePath), "utf8");
+}
+
+function normalizeVariant(variant: string): string {
+  if (variant.startsWith("?") || variant.startsWith("#")) {
+    return variant;
+  }
+  return `?${variant}`;
+}
+
+function entryId(file: string, variant?: string): string {
+  return variant ? `${file}${normalizeVariant(variant)}` : file;
+}
+
+function testUrl(file: string, variant?: string): string {
+  const normalizedFile = file.replaceAll("\\", "/");
+  const base = `http://localhost/${normalizedFile}`;
+  return variant ? `${base}${normalizeVariant(variant)}` : base;
+}
+
+function resolveScriptPath(entryFile: string, scriptRef: string): string {
+  if (scriptRef.startsWith("/")) {
+    return resolve("wpt/runner", scriptRef.slice(1));
+  }
+  return resolve(dirname(entryFile), scriptRef);
+}
+
+function parseMetaScripts(html: string): string[] {
+  const metaScripts: string[] = [];
+  const regex = /META:\s*script=([^\s]+)/g;
+  let match: RegExpExecArray | null = null;
+  while ((match = regex.exec(html)) !== null) {
+    const scriptRef = match[1]?.trim();
+    if (scriptRef) {
+      metaScripts.push(scriptRef);
+    }
+  }
+  return metaScripts;
+}
+
+function parseScriptBlocks(entryFile: string, html: string): string[] {
+  const scripts: string[] = [];
+  const regex = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
+  let match: RegExpExecArray | null = null;
+
+  while ((match = regex.exec(html)) !== null) {
+    const attrs = match[1] ?? "";
+    const body = match[2] ?? "";
+    const srcMatch = attrs.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
+    if (srcMatch?.[1]) {
+      const sourcePath = resolveScriptPath(entryFile, srcMatch[1]);
+      scripts.push(readText(sourcePath));
+      continue;
+    }
+
+    if (body.trim().length > 0) {
+      scripts.push(body);
+    }
+  }
+
+  return scripts;
+}
+
+async function runHtmlEntry(file: string, variant?: string): Promise<SubtestResult[]> {
+  const html = readText(file);
+  const assert = createAssert();
+  const queuedTests: HarnessTest[] = [];
+  const fileId = entryId(file, variant);
+
+  const window = new Window({ url: testUrl(file, variant) });
+  const test = (fn: () => void | Promise<void>, name = "test") => {
+    queuedTests.push({ name, run: fn });
+  };
+
+  const promise_test = (fn: () => Promise<void>, name = "promise_test") => {
+    queuedTests.push({ name, run: fn });
+  };
+
+  const createDeferredAsyncTest = (name: string, callback?: (testObj: {
+    done: () => void;
+    step: (fn: () => void) => void;
+    step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
+    step_timeout: (fn: () => void, delay: number) => ReturnType<typeof setTimeout>;
+    unreached_func: (message?: string) => () => never;
+  }) => void) => {
+    let complete = false;
+    let failError: unknown = null;
+
+    let resolveDone!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+
+    const testObj = {
+      done: () => {
+        complete = true;
+        resolveDone();
+      },
+      step: (fn: () => void) => {
+        try {
+          fn();
+        } catch (error) {
+          failError = error;
+          resolveDone();
+        }
+      },
+      step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => {
+        return (...args: TArgs) => {
+          testObj.step(() => fn(...args));
+        };
+      },
+      step_timeout: (fn: () => void, delay: number) => {
+        return setTimeout(() => {
+          testObj.step(fn);
+        }, delay);
+      },
+      unreached_func: (message?: string) => {
+        return () => {
+          throw new Error(message ?? "unreached code path invoked");
+        };
+      }
+    };
+
+    const entry: HarnessTest = {
+      name,
+      async run() {
+        if (callback) {
+          try {
+            callback(testObj);
+          } catch (error) {
+            failError = error;
+            resolveDone();
+          }
+        }
+
+        const timeout = new Promise<never>((_resolve, reject) => {
+          setTimeout(() => {
+            reject(new Error(`async_test timeout: ${name}`));
+          }, 2000);
+        });
+
+        await Promise.race([completion, timeout]);
+
+        if (failError) {
+          throw failError;
+        }
+        if (!complete) {
+          throw new Error(`async_test did not call done(): ${name}`);
+        }
+      }
+    };
+
+    queuedTests.push(entry);
+    return testObj;
+  };
+
+  const async_test = (
+    first?: string | ((testObj: {
+      done: () => void;
+      step: (fn: () => void) => void;
+      step_func: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void;
+      step_timeout: (fn: () => void, delay: number) => ReturnType<typeof setTimeout>;
+      unreached_func: (message?: string) => () => never;
+    }) => void),
+    second?: string
+  ) => {
+    const callback = typeof first === "function" ? first : undefined;
+    const name = typeof first === "string" ? first : second ?? "async_test";
+
+    return createDeferredAsyncTest(name, callback);
+  };
+
+  const assert_true = (value: unknown, message = "Expected value to be truthy") => {
+    assert.ok(value, message);
+  };
+
+  const assert_equals = (actual: unknown, expected: unknown, message?: string) => {
+    assert.equal(actual, expected, message);
+  };
+
+  const context: Record<string, unknown> = {
+    window,
+    self: window,
+    document: window.document,
+    location: window.location,
+    console,
+    setTimeout,
+    clearTimeout,
+    Promise,
+    test,
+    promise_test,
+    async_test,
+    assert_true,
+    assert_equals,
+    add_cleanup: () => undefined
+  };
+  context.globalThis = context;
+
+  const executeScript = (source: string) => {
+    const keys = Object.keys(context);
+    const values = keys.map((key) => context[key]);
+    const fn = new Function(...keys, source);
+    fn(...values);
+  };
+
+  const allScripts: string[] = [];
+  for (const metaScript of parseMetaScripts(html)) {
+    allScripts.push(readText(resolveScriptPath(file, metaScript)));
+  }
+  allScripts.push(...parseScriptBlocks(file, html));
+
+  try {
+    executeScript(allScripts.join("\n;\n"));
+
+    const results: SubtestResult[] = [];
+    for (const harnessTest of queuedTests) {
+      const start = performance.now();
+      try {
+        await harnessTest.run();
+        results.push({
+          file: fileId,
+          name: harnessTest.name,
+          status: "pass",
+          durationMs: performance.now() - start
+        });
+      } catch (error) {
+        results.push({
+          file: fileId,
+          name: harnessTest.name,
+          status: "fail",
+          message: error instanceof Error ? error.message : String(error),
+          durationMs: performance.now() - start
+        });
+      }
+    }
+
+    return results;
+  } finally {
+    window.close();
+  }
+}
+
+async function runEntry(file: string, variant?: string): Promise<SubtestResult[]> {
+  const fileId = entryId(file, variant);
+
+  if (file.toLowerCase().endsWith(".html")) {
+    return runHtmlEntry(file, variant);
+  }
+
   const modulePath = pathToFileURL(resolve(file)).href;
   const mod = (await import(modulePath)) as { tests: TinyTest[] };
   const tests = mod.tests ?? [];
@@ -75,17 +330,17 @@ async function runEntry(file: string): Promise<SubtestResult[]> {
     try {
       await testCase.run({
         assert: createAssert(),
-        createWindow: () => new Window({ url: "http://localhost/" })
+        createWindow: () => new Window({ url: testUrl(file, variant) })
       });
       results.push({
-        file,
+        file: fileId,
         name: testCase.name,
         status: "pass",
         durationMs: performance.now() - start
       });
     } catch (error) {
       results.push({
-        file,
+        file: fileId,
         name: testCase.name,
         status: "fail",
         message: error instanceof Error ? error.message : String(error),
@@ -107,8 +362,15 @@ const expectedMap = new Map(expected.expectedFailures.map((entry) => [`${entry.f
 
 const allResults: SubtestResult[] = [];
 for (const entry of manifest.tests) {
-  const fileResults = await runEntry(entry.file);
-  allResults.push(...fileResults);
+  if (entry.variants && entry.variants.length > 0) {
+    for (const variant of entry.variants) {
+      const fileResults = await runEntry(entry.file, variant);
+      allResults.push(...fileResults);
+    }
+  } else {
+    const fileResults = await runEntry(entry.file);
+    allResults.push(...fileResults);
+  }
 }
 
 let passed = 0;

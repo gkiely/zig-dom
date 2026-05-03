@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>tiny html harness basic</title>
+<!-- META: script=../resources/meta-helper.js -->
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<script>
+  test(() => {
+    assert_true(!!document.body, "document.body should exist");
+  }, "html harness runs sync test");
+
+  promise_test(async () => {
+    await Promise.resolve();
+    assert_equals(meta_helper_value(), 42, "META script should load helper");
+  }, "html harness loads META script include");
+
+  async_test((t) => {
+    setTimeout(t.step_func(() => {
+      assert_true(true, "async_test step executes");
+      t.done();
+    }), 0);
+  }, "html harness runs async_test");
+</script>
