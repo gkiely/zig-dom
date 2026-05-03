@@ -63,12 +63,18 @@ class DOMTokenList {
 }
 
 export class Element extends Node {
-  readonly classList: DOMTokenList;
+  #classList: DOMTokenList | null = null;
   #datasetProxy: DatasetShape | null = null;
 
   constructor(window: Node["_window"], handle: number) {
     super(window, handle);
-    this.classList = new DOMTokenList(this, "class");
+  }
+
+  get classList(): DOMTokenList {
+    if (!this.#classList) {
+      this.#classList = new DOMTokenList(this, "class");
+    }
+    return this.#classList;
   }
 
   get tagName(): string {

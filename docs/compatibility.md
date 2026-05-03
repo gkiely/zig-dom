@@ -28,6 +28,7 @@
 - Registration: GlobalRegistrator preload setup with idempotent register/reset/unregister.
 - Compatibility exports: PropertySymbol and browser-like Browser/BrowserContext/Page with lifecycle/content/url coverage in integration tests.
 - Test harnesses: Bun unit/integration tests, React smoke integration, tiny WPT-style subset runner with `.any.ts`, `.html` (inline + `META: script=` includes), and manifest-driven variant/variants execution.
+- Performance path optimizations: known-kind node wrapping for creation APIs, lazy `HTMLElement.style` and `Element.classList` allocation, and zero-copy native reads for `getAttribute()`.
 - Source import policy: TypeScript source now uses `.ts` relative import specifiers with compiler rewrite to emitted `.js` paths.
 
 ## Known gaps
@@ -54,17 +55,17 @@
 
 ## Benchmark snapshot (latest)
 
-- `create_10k_elements_ms`: zig-dom 59.59, happy-dom 6.12, jsdom 18.44
-- `append_10k_children_ms`: zig-dom 76.56, happy-dom 16.14, jsdom 27.13
-- `set_get_10k_attributes_ms`: zig-dom 28.98, happy-dom 15.29, jsdom 15.77
-- `query_all_div_10k_ms`: zig-dom 13.06, happy-dom 11.98, jsdom 13.70
-- `query_all_class_10k_ms`: zig-dom 13.67, happy-dom 23.43, jsdom 25.62
-- `query_all_attr_10k_ms`: zig-dom 12.78, happy-dom 7.18, jsdom 18.47
-- `inner_html_parse_ms`: zig-dom 26.55, happy-dom 13.22, jsdom 24.46
-- `outer_html_serialize_ms`: zig-dom 1.49, happy-dom 1.91, jsdom 2.62
-- `import_time_ms`: zig-dom 196.72, happy-dom 62.59, jsdom 357.48
-- `reset_500x_ms`: zig-dom 0.70, happy-dom 0.70, jsdom 4.27
-- `react_render_smoke_ms`: zig-dom 138.82
+- `create_10k_elements_ms`: zig-dom 23.66, happy-dom 8.58, jsdom 13.12
+- `append_10k_children_ms`: zig-dom 37.62, happy-dom 9.37, jsdom 30.59
+- `set_get_10k_attributes_ms`: zig-dom 26.14, happy-dom 13.11, jsdom 16.35
+- `query_all_div_10k_ms`: zig-dom 13.93, happy-dom 8.47, jsdom 13.26
+- `query_all_class_10k_ms`: zig-dom 12.48, happy-dom 18.27, jsdom 25.10
+- `query_all_attr_10k_ms`: zig-dom 11.97, happy-dom 7.52, jsdom 23.59
+- `inner_html_parse_ms`: zig-dom 22.14, happy-dom 13.97, jsdom 26.35
+- `outer_html_serialize_ms`: zig-dom 1.63, happy-dom 3.03, jsdom 2.39
+- `import_time_ms`: zig-dom 191.54, happy-dom 59.83, jsdom 360.81
+- `reset_500x_ms`: zig-dom 0.78, happy-dom 0.71, jsdom 4.16
+- `react_render_smoke_ms`: zig-dom 138.39
 
 ## Warm-run timing (macOS)
 

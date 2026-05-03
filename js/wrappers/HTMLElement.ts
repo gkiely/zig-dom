@@ -48,14 +48,17 @@ export class HTMLElement extends Element {
   onclick: ((event: Event) => void) | null = null;
   onchange: ((event: Event) => void) | null = null;
   oninput: ((event: Event) => void) | null = null;
-  readonly style: CSSStyleDeclaration;
+  #style: CSSStyleDeclaration | null = null;
   #syncingStyleAttribute = false;
   #shadowRootValue: DocumentFragment | null = null;
   #shadowRootMode: ShadowRootMode | null = null;
 
-  constructor(window: Element["_window"], handle: number) {
-    super(window, handle);
-    this.style = new CSSStyleDeclaration((cssText) => {
+  #ensureStyle(): CSSStyleDeclaration {
+    if (this.#style) {
+      return this.#style;
+    }
+
+    this.#style = new CSSStyleDeclaration((cssText) => {
       if (this.#syncingStyleAttribute) {
         return;
       }
@@ -72,25 +75,35 @@ export class HTMLElement extends Element {
     const inlineStyle = this.getAttribute("style");
     if (inlineStyle) {
       this.#syncingStyleAttribute = true;
-      this.style.cssText = inlineStyle;
+      this.#style.cssText = inlineStyle;
       this.#syncingStyleAttribute = false;
     }
+
+    return this.#style;
+  }
+
+  get style(): CSSStyleDeclaration {
+    return this.#ensureStyle();
+  }
+
+  constructor(window: Element["_window"], handle: number, _skipInitialStyleSync = false) {
+    super(window, handle);
   }
 
   override setAttribute(name: string, value: string): void {
     super.setAttribute(name, value);
-    if (name.toLowerCase() === "style" && !this.#syncingStyleAttribute) {
+    if (name.toLowerCase() === "style" && !this.#syncingStyleAttribute && this.#style) {
       this.#syncingStyleAttribute = true;
-      this.style.cssText = value;
+      this.#style.cssText = value;
       this.#syncingStyleAttribute = false;
     }
   }
 
   override removeAttribute(name: string): void {
     super.removeAttribute(name);
-    if (name.toLowerCase() === "style" && !this.#syncingStyleAttribute) {
+    if (name.toLowerCase() === "style" && !this.#syncingStyleAttribute && this.#style) {
       this.#syncingStyleAttribute = true;
-      this.style.cssText = "";
+      this.#style.cssText = "";
       this.#syncingStyleAttribute = false;
     }
   }

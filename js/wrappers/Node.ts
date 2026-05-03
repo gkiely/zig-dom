@@ -104,7 +104,7 @@ export class Node extends EventTargetBase {
   appendChild<TNode extends Node>(child: TNode): TNode {
     this._window.assertOpen();
 
-    if (child.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+    if (child instanceof this._window.DocumentFragment) {
       while (child.firstChild) {
         this.appendChild(child.firstChild);
       }
@@ -118,7 +118,7 @@ export class Node extends EventTargetBase {
   insertBefore<TNode extends Node>(newChild: TNode, referenceChild: Node | null): TNode {
     this._window.assertOpen();
 
-    if (newChild.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+    if (newChild instanceof this._window.DocumentFragment) {
       const children = newChild.childNodes.toArray();
       for (const child of children) {
         this.insertBefore(child, referenceChild);

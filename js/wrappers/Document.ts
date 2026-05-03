@@ -62,9 +62,18 @@ export class Document extends Node {
   }
 
   createElement(tagName: string): Element {
-    const handle = native.createElement(this._handle, tagName);
-    const element = this._window.getNode(handle) as Element;
-    const customConstructor = this._window.customElements.get(tagName.toLowerCase());
+    const normalizedTagName = tagName.toLowerCase();
+    const handle = native.createElement(this._handle, normalizedTagName);
+    const element = this._window.createKnownNode(handle, Node.ELEMENT_NODE, {
+      tagName: normalizedTagName,
+      skipInitialStyleSync: true
+    }) as Element;
+
+    if (!normalizedTagName.includes("-")) {
+      return element;
+    }
+
+    const customConstructor = this._window.customElements.get(normalizedTagName);
     if (customConstructor && Object.getPrototypeOf(element) !== customConstructor.prototype) {
       Object.setPrototypeOf(element, customConstructor.prototype);
     }
@@ -77,17 +86,17 @@ export class Document extends Node {
 
   createTextNode(data: string): Text {
     const handle = native.createTextNode(this._handle, data);
-    return this._window.getNode(handle) as Text;
+    return this._window.createKnownNode(handle, Node.TEXT_NODE) as Text;
   }
 
   createComment(data: string): Comment {
     const handle = native.createComment(this._handle, data);
-    return this._window.getNode(handle) as Comment;
+    return this._window.createKnownNode(handle, Node.COMMENT_NODE) as Comment;
   }
 
   createDocumentFragment(): DocumentFragment {
     const handle = native.createDocumentFragment(this._handle);
-    return this._window.getNode(handle) as DocumentFragment;
+    return this._window.createKnownNode(handle, Node.DOCUMENT_FRAGMENT_NODE) as DocumentFragment;
   }
 
   getElementById(id: string): Element | null {

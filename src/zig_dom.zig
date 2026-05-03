@@ -88,13 +88,18 @@ fn resolveNode(window: *Window, node_handle: u64) ?*Node {
     return window.nodes.getPtr(node_handle);
 }
 
-fn createNode(window: *Window, kind: api.NodeKind, name: []const u8, data: []const u8, owner_document: u64) !u64 {
+fn createNode(window: *Window, kind: api.NodeKind, name: []const u8, data: []const u8, owner_document: u64, lowercase_name: bool) !u64 {
     const handle = next_node_handle;
     next_node_handle += 1;
 
+    const owned_name = if (lowercase_name)
+        try makeOwnedLower(name)
+    else
+        try makeOwned(name);
+
     const node = Node{
         .kind = kind,
-        .name = try makeOwned(name),
+        .name = owned_name,
         .data = try makeOwned(data),
         .owner_document = owner_document,
         .parent = 0,
@@ -700,14 +705,14 @@ fn createWindowInternal(out_window: *u64) u32 {
         return STATUS_OOM;
     };
 
-    const document_handle = createNode(window, .document, "#document", "", 0) catch {
+    const document_handle = createNode(window, .document, "#document", "", 0, false) catch {
         _ = global_windows.remove(window.handle);
         c_allocator.destroy(window);
         return STATUS_OOM;
     };
-    const html_handle = createNode(window, .element, "html", "", document_handle) catch return STATUS_OOM;
-    const head_handle = createNode(window, .element, "head", "", document_handle) catch return STATUS_OOM;
-    const body_handle = createNode(window, .element, "body", "", document_handle) catch return STATUS_OOM;
+    const html_handle = createNode(window, .element, "html", "", document_handle, false) catch return STATUS_OOM;
+    const head_handle = createNode(window, .element, "head", "", document_handle, false) catch return STATUS_OOM;
+    const body_handle = createNode(window, .element, "body", "", document_handle, false) catch return STATUS_OOM;
 
     window.document_handle = document_handle;
     window.html_handle = html_handle;
@@ -923,11 +928,7 @@ pub export fn zig_dom_document_create_element(document: u64, name_ptr: [*]const 
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (record.kind != .document) return STATUS_INVALID_ARGUMENT;
 
-    const tag = name_ptr[0..name_len];
-    const lower_tag = makeOwnedLower(tag) catch return STATUS_OOM;
-    defer c_allocator.free(lower_tag);
-
-    out_handle.* = createNode(window, .element, lower_tag, "", document) catch return STATUS_OOM;
+    out_handle.* = createNode(window, .element, name_ptr[0..name_len], "", document, true) catch return STATUS_OOM;
     return STATUS_OK;
 }
 
@@ -937,7 +938,7 @@ pub export fn zig_dom_document_create_text_node(document: u64, data_ptr: [*]cons
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (record.kind != .document) return STATUS_INVALID_ARGUMENT;
 
-    out_handle.* = createNode(window, .text, "#text", data_ptr[0..data_len], document) catch return STATUS_OOM;
+    out_handle.* = createNode(window, .text, "#text", data_ptr[0..data_len], document, false) catch return STATUS_OOM;
     return STATUS_OK;
 }
 
@@ -947,7 +948,7 @@ pub export fn zig_dom_document_create_comment(document: u64, data_ptr: [*]const 
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (record.kind != .document) return STATUS_INVALID_ARGUMENT;
 
-    out_handle.* = createNode(window, .comment, "#comment", data_ptr[0..data_len], document) catch return STATUS_OOM;
+    out_handle.* = createNode(window, .comment, "#comment", data_ptr[0..data_len], document, false) catch return STATUS_OOM;
     return STATUS_OK;
 }
 
@@ -957,7 +958,7 @@ pub export fn zig_dom_document_create_document_fragment(document: u64, out_handl
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (record.kind != .document) return STATUS_INVALID_ARGUMENT;
 
-    out_handle.* = createNode(window, .document_fragment, "#document-fragment", "", document) catch return STATUS_OOM;
+    out_handle.* = createNode(window, .document_fragment, "#document-fragment", "", document, false) catch return STATUS_OOM;
     return STATUS_OK;
 }
 
@@ -972,6 +973,32 @@ pub export fn zig_dom_element_get_attribute(element: u64, name_ptr: [*]const u8,
     if (value) |existing| {
         out_exists.* = 1;
         return outputString(existing, out_ptr, out_len);
+    }
+
+    out_exists.* = 0;
+    out_ptr.* = null;
+    out_len.* = 0;
+    return STATUS_OK;
+}
+
+pub export fn zig_dom_element_get_attribute_ref(element: u64, name_ptr: [*]const u8, name_len: usize, out_ptr: *[*c]u8, out_len: *usize, out_exists: *u8) u32 {
+
+    const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
+    const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
+    if (node.kind != .element) return STATUS_INVALID_ARGUMENT;
+
+    const name = name_ptr[0..name_len];
+    const value = getAttribute(node, name);
+    if (value) |existing| {
+        out_exists.* = 1;
+        if (existing.len == 0) {
+            out_ptr.* = null;
+            out_len.* = 0;
+            return STATUS_OK;
+        }
+        out_ptr.* = @ptrCast(@constCast(existing.ptr));
+        out_len.* = existing.len;
+        return STATUS_OK;
     }
 
     out_exists.* = 0;
@@ -1073,7 +1100,7 @@ pub export fn zig_dom_node_set_text_content(node: u64, data_ptr: [*]const u8, da
     }
 
     if (data.len > 0) {
-        const text_handle = createNode(window, .text, "#text", data, record.owner_document) catch return STATUS_OOM;
+        const text_handle = createNode(window, .text, "#text", data, record.owner_document, false) catch return STATUS_OOM;
         const append_status = appendChild(window, node, text_handle);
         if (append_status != .ok) {
             return @intFromEnum(append_status);

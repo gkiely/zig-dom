@@ -89,6 +89,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_document_create_comment: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_create_document_fragment: { returns: "u32", args: ["u64", "ptr"] },
   zig_dom_element_get_attribute: { returns: "u32", args: ["u64", "ptr", "usize", "ptr", "ptr", "ptr"] },
+  zig_dom_element_get_attribute_ref: { returns: "u32", args: ["u64", "ptr", "usize", "ptr", "ptr", "ptr"] },
   zig_dom_element_set_attribute: { returns: "u32", args: ["u64", "ptr", "usize", "ptr", "usize"] },
   zig_dom_element_remove_attribute: { returns: "u32", args: ["u64", "ptr", "usize"] },
   zig_dom_element_has_attribute: { returns: "u32", args: ["u64", "ptr", "usize"] },
@@ -108,13 +109,30 @@ const nativeLibrary = dlopen(libraryPath, {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const EMPTY_BYTES = new Uint8Array(1);
+const ENCODE_CACHE_LIMIT = 256;
+const ENCODE_CACHE_MAX_INPUT_LENGTH = 64;
+const encodeCache = new Map<string, Uint8Array>();
 
 function encode(input: string): Uint8Array {
-  const bytes = encoder.encode(input);
-  if (bytes.length > 0) {
-    return bytes;
+  if (input.length === 0) {
+    return EMPTY_BYTES;
   }
-  return new Uint8Array(1);
+
+  const cached = encodeCache.get(input);
+  if (cached) {
+    return cached;
+  }
+
+  const bytes = encoder.encode(input);
+  if (input.length <= ENCODE_CACHE_MAX_INPUT_LENGTH) {
+    if (encodeCache.size >= ENCODE_CACHE_LIMIT) {
+      encodeCache.clear();
+    }
+    encodeCache.set(input, bytes);
+  }
+
+  return bytes;
 }
 
 function readStringFromOutParams(addressRef: BigUint64Array, lengthRef: BigUint64Array): string {
@@ -289,7 +307,7 @@ export const native = {
     const outPtr = new BigUint64Array(1);
     const outLen = new BigUint64Array(1);
     const outExists = new Uint8Array(1);
-    const status = nativeLibrary.symbols.zig_dom_element_get_attribute(
+    const status = nativeLibrary.symbols.zig_dom_element_get_attribute_ref(
       elementHandle,
       ptr(key),
       key.length,
@@ -297,9 +315,17 @@ export const native = {
       ptr(outLen),
       ptr(outExists)
     );
-    assertStatus(status, "zig_dom_element_get_attribute");
+    assertStatus(status, "zig_dom_element_get_attribute_ref");
     if (outExists[0] === 0) return null;
-    return readStringFromOutParams(outPtr, outLen);
+
+    const address = Number(outPtr[0]);
+    const length = Number(outLen[0]);
+    if (address === 0 || length === 0) {
+      return "";
+    }
+
+    const view = new Uint8Array(toArrayBuffer(address as unknown as Pointer, 0, length));
+    return decoder.decode(view);
   },
   setAttribute(elementHandle: number, name: string, value: string): void {
     const key = encode(name);

@@ -1,5 +1,4 @@
 import { native } from "../ffi.ts";
-import { NativeHandleRegistry } from "../memory.ts";
 import { Comment } from "./Comment.ts";
 import { CustomElementRegistry } from "./CustomElementRegistry.ts";
 import { Document } from "./Document.ts";
@@ -144,7 +143,6 @@ export class Window {
   readonly _nativeWindowHandle: number;
   readonly #documentHandle: number;
   readonly #nodeCache = new Map<number, Node>();
-  readonly #handleRegistry = new NativeHandleRegistry(native);
   #activeElementHandle: number | null = null;
   readonly #selection = new Selection();
   readonly #cookies = new Map<string, string>();
@@ -246,23 +244,40 @@ export class Window {
     }
 
     const kind = native.nodeKind(handle);
+    const tagName = kind === Node.ELEMENT_NODE ? native.nodeName(handle).toLowerCase() : undefined;
+    return this.#createNode(handle, kind, tagName, false);
+  }
+
+  createKnownNode(handle: number, kind: number, options?: { tagName?: string; skipInitialStyleSync?: boolean }): Node | null {
+    if (!handle) return null;
+    this.assertOpen();
+
+    const existing = this.#nodeCache.get(handle);
+    if (existing) {
+      return existing;
+    }
+
+    return this.#createNode(handle, kind, options?.tagName, options?.skipInitialStyleSync ?? false);
+  }
+
+  #createNode(handle: number, kind: number, tagNameHint: string | undefined, skipInitialStyleSync: boolean): Node {
     let wrapped: Node;
     switch (kind) {
       case Node.DOCUMENT_NODE:
         wrapped = new Document(this, handle);
         break;
       case Node.ELEMENT_NODE: {
-        const tagName = native.nodeName(handle).toLowerCase();
+        const tagName = tagNameHint ?? native.nodeName(handle).toLowerCase();
         if (tagName === "input") {
-          wrapped = new HTMLInputElement(this, handle);
+          wrapped = new HTMLInputElement(this, handle, skipInitialStyleSync);
         } else if (tagName === "button") {
-          wrapped = new HTMLButtonElement(this, handle);
+          wrapped = new HTMLButtonElement(this, handle, skipInitialStyleSync);
         } else if (tagName === "form") {
-          wrapped = new HTMLFormElement(this, handle);
+          wrapped = new HTMLFormElement(this, handle, skipInitialStyleSync);
         } else if (tagName === "iframe") {
-          wrapped = new HTMLIFrameElement(this, handle);
+          wrapped = new HTMLIFrameElement(this, handle, skipInitialStyleSync);
         } else {
-          wrapped = new HTMLElement(this, handle);
+          wrapped = new HTMLElement(this, handle, skipInitialStyleSync);
         }
         break;
       }
@@ -279,8 +294,6 @@ export class Window {
         throw new Error(`Unsupported native node kind: ${kind}`);
     }
 
-    native.retainHandle(handle);
-    this.#handleRegistry.track(wrapped, handle);
     this.#nodeCache.set(handle, wrapped);
     return wrapped;
   }
