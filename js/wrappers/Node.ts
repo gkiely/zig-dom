@@ -1,8 +1,8 @@
-import { native } from "../ffi.js";
-import type { Document } from "./Document.js";
-import { Event, EventTargetBase } from "./Event.js";
-import { NodeList } from "./NodeList.js";
-import type { Window } from "./Window.js";
+import { native } from "../ffi.ts";
+import type { Document } from "./Document.ts";
+import { Event, EventTargetBase } from "./Event.ts";
+import { NodeList } from "./NodeList.ts";
+import type { Window } from "./Window.ts";
 
 export class Node extends EventTargetBase {
   static readonly ELEMENT_NODE = 1;

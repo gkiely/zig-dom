@@ -1,13 +1,13 @@
-import { native } from "../ffi.js";
-import { NativeHandleRegistry } from "../memory.js";
-import { Comment } from "./Comment.js";
-import { Document } from "./Document.js";
-import { DocumentFragment } from "./DocumentFragment.js";
-import { Element } from "./Element.js";
-import { CustomEvent, Event, MouseEvent } from "./Event.js";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./HTMLElement.js";
-import { Node } from "./Node.js";
-import { Text } from "./Text.js";
+import { native } from "../ffi.ts";
+import { NativeHandleRegistry } from "../memory.ts";
+import { Comment } from "./Comment.ts";
+import { Document } from "./Document.ts";
+import { DocumentFragment } from "./DocumentFragment.ts";
+import { Element } from "./Element.ts";
+import { CustomEvent, Event, MouseEvent } from "./Event.ts";
+import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./HTMLElement.ts";
+import { Node } from "./Node.ts";
+import { Text } from "./Text.ts";
 
 export interface WindowOptions {
   url?: string;

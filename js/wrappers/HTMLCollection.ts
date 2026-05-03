@@ -1,4 +1,4 @@
-import type { Element } from "./Element.js";
+import type { Element } from "./Element.ts";
 
 export class HTMLCollection implements Iterable<Element> {
   constructor(private readonly getElements: () => Element[]) {}

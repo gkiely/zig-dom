@@ -1,4 +1,4 @@
-import type { Node } from "./Node.js";
+import type { Node } from "./Node.ts";
 
 export class NodeList implements Iterable<Node> {
   constructor(private readonly getNodes: () => Node[]) {}

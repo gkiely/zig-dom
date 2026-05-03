@@ -1,9 +1,9 @@
-import { native } from "../ffi.js";
-import type { Document } from "./Document.js";
-import { HTMLCollection } from "./HTMLCollection.js";
-import { Node } from "./Node.js";
-import { NodeList } from "./NodeList.js";
-import { parseHtmlInto } from "./html-parser.js";
+import { native } from "../ffi.ts";
+import type { Document } from "./Document.ts";
+import { HTMLCollection } from "./HTMLCollection.ts";
+import { Node } from "./Node.ts";
+import { NodeList } from "./NodeList.ts";
+import { parseHtmlInto } from "./html-parser.ts";
 
 class DOMTokenList {
   constructor(private readonly element: Element, private readonly attributeName: string) {}

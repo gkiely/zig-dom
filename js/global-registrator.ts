@@ -1,12 +1,12 @@
-import { Comment } from "./wrappers/Comment.js";
-import { Document } from "./wrappers/Document.js";
-import { DocumentFragment } from "./wrappers/DocumentFragment.js";
-import { Element } from "./wrappers/Element.js";
-import { CustomEvent, Event, MouseEvent } from "./wrappers/Event.js";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.js";
-import { Node } from "./wrappers/Node.js";
-import { Text } from "./wrappers/Text.js";
-import { Window, type WindowOptions } from "./wrappers/Window.js";
+import { Comment } from "./wrappers/Comment.ts";
+import { Document } from "./wrappers/Document.ts";
+import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
+import { Element } from "./wrappers/Element.ts";
+import { CustomEvent, Event, MouseEvent } from "./wrappers/Event.ts";
+import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.ts";
+import { Node } from "./wrappers/Node.ts";
+import { Text } from "./wrappers/Text.ts";
+import { Window, type WindowOptions } from "./wrappers/Window.ts";
 
 export class GlobalRegistrator {
   static #registeredWindow: Window | null = null;

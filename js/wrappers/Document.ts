@@ -1,10 +1,10 @@
-import { native } from "../ffi.js";
-import { Comment } from "./Comment.js";
-import { DocumentFragment } from "./DocumentFragment.js";
-import { Element } from "./Element.js";
-import { Node } from "./Node.js";
-import { Text } from "./Text.js";
-import type { Window } from "./Window.js";
+import { native } from "../ffi.ts";
+import { Comment } from "./Comment.ts";
+import { DocumentFragment } from "./DocumentFragment.ts";
+import { Element } from "./Element.ts";
+import { Node } from "./Node.ts";
+import { Text } from "./Text.ts";
+import type { Window } from "./Window.ts";
 
 export class Document extends Node {
   constructor(window: Window, handle: number) {

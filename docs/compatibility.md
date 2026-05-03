@@ -7,6 +7,7 @@
 - Bun version: 1.3.13
 - Bun revision: 1.3.13+bf2e2cecf
 - Zig version: 0.16.0
+- TypeScript version: 6.0.3
 - Native library extension: dylib
 - FFI ABI decision: Bun struct-by-value return is treated as unsupported for stable ABI. Public FFI uses status codes + out pointers.
 
@@ -17,6 +18,7 @@
 - Registration: GlobalRegistrator preload setup with idempotent register/reset/unregister.
 - Compatibility exports: PropertySymbol and browser-like Browser/BrowserContext/Page stubs.
 - Test harnesses: Bun unit/integration tests, React smoke integration, tiny WPT-style subset runner.
+- Source import policy: TypeScript source now uses `.ts` relative import specifiers with compiler rewrite to emitted `.js` paths.
 
 ## Known gaps
 
@@ -34,6 +36,7 @@
 - `bun run verify:wpt:tiny`: pass (3/3 pass, 0 expected fail)
 - `bun run verify:fast`: pass
 - `bun test tests/integration/dom tests/integration/react`: pass (7 tests)
+- tiny WPT files migrated from `.any.js` to `.any.ts` and still passing.
 
 ## Warm-run timing (macOS)
 

@@ -1,5 +1,5 @@
-import { Element } from "./Element.js";
-import { Event } from "./Event.js";
+import { Element } from "./Element.ts";
+import { Event } from "./Event.ts";
 
 class CSSStyleDeclaration {
   #values = new Map<string, string>();

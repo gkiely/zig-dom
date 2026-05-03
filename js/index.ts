@@ -1,16 +1,16 @@
-import { PropertySymbol } from "./compatibility/happy-dom-symbols.js";
-import { GlobalRegistrator } from "./global-registrator.js";
-import { Comment } from "./wrappers/Comment.js";
-import { Document } from "./wrappers/Document.js";
-import { DocumentFragment } from "./wrappers/DocumentFragment.js";
-import { Element } from "./wrappers/Element.js";
-import { CustomEvent, Event, MouseEvent } from "./wrappers/Event.js";
-import { HTMLCollection } from "./wrappers/HTMLCollection.js";
-import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.js";
-import { Node } from "./wrappers/Node.js";
-import { NodeList } from "./wrappers/NodeList.js";
-import { Text } from "./wrappers/Text.js";
-import { Window, type WindowOptions } from "./wrappers/Window.js";
+import { PropertySymbol } from "./compatibility/happy-dom-symbols.ts";
+import { GlobalRegistrator } from "./global-registrator.ts";
+import { Comment } from "./wrappers/Comment.ts";
+import { Document } from "./wrappers/Document.ts";
+import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
+import { Element } from "./wrappers/Element.ts";
+import { CustomEvent, Event, MouseEvent } from "./wrappers/Event.ts";
+import { HTMLCollection } from "./wrappers/HTMLCollection.ts";
+import { HTMLButtonElement, HTMLElement, HTMLFormElement, HTMLIFrameElement, HTMLInputElement } from "./wrappers/HTMLElement.ts";
+import { Node } from "./wrappers/Node.ts";
+import { NodeList } from "./wrappers/NodeList.ts";
+import { Text } from "./wrappers/Text.ts";
+import { Window, type WindowOptions } from "./wrappers/Window.ts";
 
 class Page {
   readonly window: Window;
