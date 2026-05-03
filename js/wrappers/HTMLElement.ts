@@ -480,17 +480,30 @@ export class HTMLSelectElement extends HTMLElement {
 }
 
 export class HTMLLabelElement extends HTMLElement {
-  override dispatchEvent(event: Event): boolean {
-    const result = super.dispatchEvent(event);
+  constructor(window: Element["_window"], handle: number, nodeType = 1, skipInitialStyleSync = false) {
+    super(window, handle, nodeType, skipInitialStyleSync);
 
-    if (event.type === "click" && !event.defaultPrevented && event.target === this) {
-      const control = this.control;
-      if (control && !control.disabled) {
-        control.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
+    this.addEventListener("click", (event) => {
+      if (event.defaultPrevented) {
+        return;
       }
-    }
 
-    return result;
+      const control = this.control;
+      if (!control || control.disabled) {
+        return;
+      }
+
+      const target = event.target;
+      if (target === control) {
+        return;
+      }
+
+      if (target instanceof Element && control.contains(target)) {
+        return;
+      }
+
+      control.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
+    });
   }
 
   get control(): HTMLElement | null {

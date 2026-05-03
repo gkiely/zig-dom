@@ -146,6 +146,61 @@ test("wrapping label click toggles nested controlled checkbox", () => {
   expect(getByText("enabled")).toBeDefined();
 });
 
+test("child element click inside htmlFor label toggles controlled checkbox", () => {
+  function HtmlForLabelChildHarness(): JSX.Element {
+    const [checked, setChecked] = useState(false);
+
+    return (
+      <section>
+        <label htmlFor="alerts-checkbox">
+          <span>Enable alerts</span>
+        </label>
+        <input
+          id="alerts-checkbox"
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => setChecked((event.target as HTMLInputElement).checked)}
+        />
+      </section>
+    );
+  }
+
+  const { getByRole, getByText } = render(<HtmlForLabelChildHarness />);
+  const checkbox = getByRole("checkbox") as HTMLInputElement;
+
+  expect(checkbox.checked).toBe(false);
+
+  fireEvent.click(getByText("Enable alerts"));
+
+  expect(checkbox.checked).toBe(true);
+});
+
+test("child element click inside wrapping label toggles nested checkbox", () => {
+  function NestedLabelChildHarness(): JSX.Element {
+    const [checked, setChecked] = useState(false);
+
+    return (
+      <label>
+        <span>Receive alerts</span>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => setChecked((event.target as HTMLInputElement).checked)}
+        />
+      </label>
+    );
+  }
+
+  const { getByRole, getByText } = render(<NestedLabelChildHarness />);
+  const checkbox = getByRole("checkbox") as HTMLInputElement;
+
+  expect(checkbox.checked).toBe(false);
+
+  fireEvent.click(getByText("Receive alerts"));
+
+  expect(checkbox.checked).toBe(true);
+});
+
 test("uncontrolled radios keep single checked value in same group", () => {
   function UncontrolledRadiosHarness(): JSX.Element {
     return (
