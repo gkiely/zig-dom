@@ -3,7 +3,7 @@ import { ZigDOMException } from "./wrappers/DOMException.ts";
 import { Document } from "./wrappers/Document.ts";
 import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
 import { Element } from "./wrappers/Element.ts";
-import { CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./wrappers/Event.ts";
+import { CompositionEvent, CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./wrappers/Event.ts";
 import {
   HTMLButtonElement,
   HTMLElement,
@@ -54,6 +54,7 @@ export class GlobalRegistrator {
       CustomEvent,
       MouseEvent,
       InputEvent,
+      CompositionEvent,
       KeyboardEvent,
       MutationObserver,
       DOMException: ZigDOMException,

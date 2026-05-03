@@ -166,4 +166,49 @@ describe("react refs and dom interop", () => {
 
     expect(target.title).toBe("");
   });
+
+  test("selection toString reflects selected node contents", () => {
+    function SelectionHarness(): JSX.Element {
+      return <div data-testid="selection-target">hello world</div>;
+    }
+
+    const { getByTestId } = render(<SelectionHarness />);
+    const target = getByTestId("selection-target");
+
+    const range = document.createRange();
+    range.selectNodeContents(target);
+
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    expect(selection?.rangeCount).toBe(1);
+    expect(selection?.toString()).toBe("hello world");
+  });
+
+  test("selection toString serializes ranges across sibling text nodes", () => {
+    function MultiNodeSelectionHarness(): JSX.Element {
+      return (
+        <div data-testid="selection-target">
+          <span>hello </span>
+          <span>world</span>
+        </div>
+      );
+    }
+
+    const { getByTestId } = render(<MultiNodeSelectionHarness />);
+    const target = getByTestId("selection-target");
+    const firstText = target.firstChild?.firstChild as Text;
+    const secondText = target.lastChild?.firstChild as Text;
+
+    const range = document.createRange();
+    range.setStart(firstText, 2);
+    range.setEnd(secondText, 3);
+
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    expect(selection?.toString()).toBe("llo wor");
+  });
 });

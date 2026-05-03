@@ -17,3 +17,36 @@ test("click updates UI", () => {
   fireEvent.click(getByText("Increment"));
   expect(getByText("Count: 1")).toBeDefined();
 });
+
+test("composition handlers receive event data payloads", () => {
+  function CompositionHarness(): JSX.Element {
+    const [log, setLog] = useState<string[]>([]);
+
+    return (
+      <section>
+        <input
+          aria-label="ime-input"
+          onCompositionStart={(event) => {
+            setLog((entries) => [...entries, `start:${event.data ?? ""}`]);
+          }}
+          onCompositionUpdate={(event) => {
+            setLog((entries) => [...entries, `update:${event.data ?? ""}`]);
+          }}
+          onCompositionEnd={(event) => {
+            setLog((entries) => [...entries, `end:${event.data ?? ""}`]);
+          }}
+        />
+        <output>{log.join("|")}</output>
+      </section>
+    );
+  }
+
+  const { getByLabelText, getByText } = render(<CompositionHarness />);
+  const input = getByLabelText("ime-input") as HTMLInputElement;
+
+  fireEvent.compositionStart(input, { data: "" });
+  fireEvent.compositionUpdate(input, { data: "に" });
+  fireEvent.compositionEnd(input, { data: "に" });
+
+  expect(getByText("start:|update:に|end:に")).toBeDefined();
+});

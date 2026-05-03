@@ -115,6 +115,15 @@ export class InputEvent extends Event {
   }
 }
 
+export class CompositionEvent extends Event {
+  readonly data: string;
+
+  constructor(type: string, init?: CompositionEventInit) {
+    super(type, init);
+    this.data = init?.data ?? "";
+  }
+}
+
 export class KeyboardEvent extends Event {
   readonly key: string;
   readonly code: string;

@@ -5,7 +5,7 @@ import { ZigDOMException } from "./DOMException.ts";
 import { Document } from "./Document.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
-import { CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
+import { CompositionEvent, CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./Event.ts";
 import {
   HTMLButtonElement,
   HTMLElement,
@@ -202,6 +202,7 @@ export class Window {
   readonly CustomEvent = CustomEvent;
   readonly MouseEvent = MouseEvent;
   readonly InputEvent = InputEvent;
+  readonly CompositionEvent = CompositionEvent;
   readonly KeyboardEvent = KeyboardEvent;
   readonly DOMException = ZigDOMException;
   readonly MutationObserver = MutationObserver;
