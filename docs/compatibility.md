@@ -13,7 +13,8 @@
 
 ## Implemented API slices
 
-- Native: window/document creation, node tree mutation, attribute get/set/remove, text content, outer HTML, basic selectors, document reset.
+- Native: window/document creation, node tree mutation, attribute get/set/remove, attribute list export, text content, outer HTML, basic selectors, document reset.
+- Native relationship ops: `zig_dom_node_contains()` and `zig_dom_node_compare_document_position()` now back `Node.contains()` and `Node.compareDocumentPosition()` from Zig.
 - JS wrappers: Window, Document, Node, Element, HTMLElement, Text, Comment, DocumentFragment, Event, CustomEvent, MouseEvent, InputEvent, KeyboardEvent.
 - DOM core extras: `getRootNode()`, `compareDocumentPosition()`, `cloneNode()`, `isEqualNode()`, `normalize()`, `dataset`, and reflected style text via `HTMLElement.style`.
 - URL basics: `window.location` supports `href`, `protocol`, `host`, `hostname`, `port`, `pathname`, `search`, `hash`, `origin`, `assign()`, and `replace()`.
@@ -35,17 +36,33 @@
 - Event system supports capture/target/bubble and common event classes, but not full DOM Events and UI Events edge-case parity.
 - WPT runner currently executes tiny in-repo subset files, not full upstream testharness HTML loading.
 - Custom Elements and Shadow DOM advanced lifecycle semantics are not implemented yet.
+- Benchmark caveats: `global_register_ms` and cross-runtime React smoke are not available for happy-dom/jsdom in the current harness.
 
 ## Verification log
 
 - `bun run build`: pass
-- `bun run verify:ffi`: pass (4 tests)
+- `bun run verify:ffi`: pass (4 tests, includes native contains/compare/attributes assertions)
 - `bun run verify:dom`: pass (22 tests)
 - `bun run verify:react`: pass (React smoke)
 - `bun run verify:wpt:tiny`: pass (4/4 pass, 0 expected fail)
 - `bun run verify:fast`: pass
-- `bun test`: pass (26 tests across 13 files, 76 assertions)
+- `bun test`: pass (26 tests across 13 files, 79 assertions)
 - tiny WPT files are TypeScript (`.any.ts`) and include `compareDocumentPosition` coverage.
+- `bun run benchmark:dom`: pass and writes `docs/benchmarks/latest.json` with zig-dom vs happy-dom vs jsdom metrics.
+
+## Benchmark snapshot (latest)
+
+- `create_10k_elements_ms`: zig-dom 58.81, happy-dom 5.99, jsdom 19.14
+- `append_10k_children_ms`: zig-dom 77.12, happy-dom 15.02, jsdom 25.69
+- `set_get_10k_attributes_ms`: zig-dom 28.97, happy-dom 14.63, jsdom 14.94
+- `query_all_div_10k_ms`: zig-dom 12.75, happy-dom 12.34, jsdom 13.89
+- `query_all_class_10k_ms`: zig-dom 14.26, happy-dom 24.31, jsdom 24.17
+- `query_all_attr_10k_ms`: zig-dom 13.34, happy-dom 7.88, jsdom 18.39
+- `inner_html_parse_ms`: zig-dom 28.00, happy-dom 13.40, jsdom 25.25
+- `outer_html_serialize_ms`: zig-dom 1.47, happy-dom 1.85, jsdom 2.22
+- `import_time_ms`: zig-dom 191.97, happy-dom 61.39, jsdom 362.41
+- `reset_500x_ms`: zig-dom 0.67, happy-dom 0.69, jsdom 4.11
+- `react_render_smoke_ms`: zig-dom 137.23
 
 ## Warm-run timing (macOS)
 

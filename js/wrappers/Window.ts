@@ -217,6 +217,13 @@ export class Window {
     this.setInterval = globalThis.setInterval.bind(globalThis);
     this.clearInterval = globalThis.clearInterval.bind(globalThis);
     this.queueMicrotask = globalThis.queueMicrotask.bind(globalThis);
+    this.fetch = globalThis.fetch.bind(globalThis);
+    this.Headers = globalThis.Headers;
+    this.Request = globalThis.Request;
+    this.Response = globalThis.Response;
+    this.FormData = globalThis.FormData;
+    this.Blob = globalThis.Blob;
+    this.File = globalThis.File;
   }
 
   assertOpen(): void {
@@ -352,4 +359,11 @@ export class Window {
   setInterval!: typeof globalThis.setInterval;
   clearInterval!: typeof globalThis.clearInterval;
   queueMicrotask!: typeof globalThis.queueMicrotask;
+  fetch!: typeof globalThis.fetch;
+  Headers!: typeof globalThis.Headers;
+  Request!: typeof globalThis.Request;
+  Response!: typeof globalThis.Response;
+  FormData!: typeof globalThis.FormData;
+  Blob!: typeof globalThis.Blob;
+  File!: typeof globalThis.File;
 }

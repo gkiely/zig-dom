@@ -8,37 +8,6 @@ import { parseHtmlInto } from "./html-parser.ts";
 type AttributeEntry = { name: string; value: string };
 type DatasetShape = Record<string, string>;
 
-function attributeEntriesFromOuterHtml(outerHtml: string): AttributeEntry[] {
-  const firstTag = outerHtml.match(/^<[^>]+>/)?.[0];
-  if (!firstTag) {
-    return [];
-  }
-
-  const innerTag = firstTag.slice(1, -1).replace(/\/$/, "").trim();
-  const firstSpace = innerTag.search(/\s/);
-  if (firstSpace === -1) {
-    return [];
-  }
-
-  const attrSource = innerTag.slice(firstSpace + 1);
-  const attrRegex = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
-  const entries: AttributeEntry[] = [];
-
-  let match: RegExpExecArray | null = null;
-  while ((match = attrRegex.exec(attrSource)) !== null) {
-    const name = match[1];
-    if (name === "/") {
-      continue;
-    }
-    entries.push({
-      name,
-      value: match[2] ?? match[3] ?? match[4] ?? ""
-    });
-  }
-
-  return entries;
-}
-
 function dataAttributeToProperty(name: string): string {
   return name
     .slice(5)
@@ -127,7 +96,7 @@ export class Element extends Node {
   }
 
   get attributes(): Array<{ name: string; value: string }> {
-    return attributeEntriesFromOuterHtml(this.outerHTML);
+    return native.elementAttributes(this._handle) as AttributeEntry[];
   }
 
   get dataset(): DatasetShape {

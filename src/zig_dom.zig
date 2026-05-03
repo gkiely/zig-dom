@@ -54,6 +54,13 @@ const STATUS_OOM: u32 = @intFromEnum(api.Status.out_of_memory);
 const STATUS_INVALID_ARGUMENT: u32 = @intFromEnum(api.Status.invalid_argument);
 const STATUS_INTERNAL: u32 = @intFromEnum(api.Status.internal_error);
 
+const DOC_POS_DISCONNECTED: u32 = 0x01;
+const DOC_POS_PRECEDING: u32 = 0x02;
+const DOC_POS_FOLLOWING: u32 = 0x04;
+const DOC_POS_CONTAINS: u32 = 0x08;
+const DOC_POS_CONTAINED_BY: u32 = 0x10;
+const DOC_POS_IMPLEMENTATION_SPECIFIC: u32 = 0x20;
+
 const VERSION = "0.1.0\x00";
 
 fn makeOwned(bytes: []const u8) ![]u8 {
@@ -111,6 +118,15 @@ fn isAncestor(window: *Window, candidate_ancestor: u64, node_handle: u64) bool {
         cursor = node.parent;
     }
     return false;
+}
+
+fn appendPathToRoot(window: *Window, start: u64, output: *std.ArrayListUnmanaged(u64)) !void {
+    var cursor = start;
+    while (cursor != 0) {
+        try output.append(c_allocator, cursor);
+        const node = resolveNode(window, cursor) orelse break;
+        cursor = node.parent;
+    }
 }
 
 fn detachFromParent(window: *Window, child_handle: u64) api.Status {
@@ -329,6 +345,88 @@ fn escapeHtml(output: *std.ArrayListUnmanaged(u8), input: []const u8) !void {
             else => try output.append(c_allocator, ch),
         }
     }
+}
+
+fn appendJsonEscaped(output: *std.ArrayListUnmanaged(u8), input: []const u8) !void {
+    const hex = "0123456789ABCDEF";
+    for (input) |ch| {
+        switch (ch) {
+            '"' => try output.appendSlice(c_allocator, "\\\""),
+            '\\' => try output.appendSlice(c_allocator, "\\\\"),
+            '\n' => try output.appendSlice(c_allocator, "\\n"),
+            '\r' => try output.appendSlice(c_allocator, "\\r"),
+            '\t' => try output.appendSlice(c_allocator, "\\t"),
+            else => {
+                if (ch < 0x20) {
+                    try output.appendSlice(c_allocator, "\\u00");
+                    try output.append(c_allocator, hex[(ch >> 4) & 0x0F]);
+                    try output.append(c_allocator, hex[ch & 0x0F]);
+                } else {
+                    try output.append(c_allocator, ch);
+                }
+            },
+        }
+    }
+}
+
+fn compareDocumentPositionInternal(left: u64, right: u64) u32 {
+    if (left == right) return 0;
+
+    const left_window = resolveNodeWindow(left) orelse return DOC_POS_DISCONNECTED | DOC_POS_IMPLEMENTATION_SPECIFIC | DOC_POS_PRECEDING;
+    const right_window = resolveNodeWindow(right) orelse return DOC_POS_DISCONNECTED | DOC_POS_IMPLEMENTATION_SPECIFIC | DOC_POS_PRECEDING;
+    if (left_window.handle != right_window.handle) {
+        return DOC_POS_DISCONNECTED | DOC_POS_IMPLEMENTATION_SPECIFIC | DOC_POS_PRECEDING;
+    }
+
+    if (isAncestor(left_window, left, right)) {
+        return DOC_POS_CONTAINS | DOC_POS_PRECEDING;
+    }
+    if (isAncestor(left_window, right, left)) {
+        return DOC_POS_CONTAINED_BY | DOC_POS_FOLLOWING;
+    }
+
+    var left_path: std.ArrayListUnmanaged(u64) = .empty;
+    defer left_path.deinit(c_allocator);
+    appendPathToRoot(left_window, left, &left_path) catch return DOC_POS_IMPLEMENTATION_SPECIFIC;
+
+    var right_path: std.ArrayListUnmanaged(u64) = .empty;
+    defer right_path.deinit(c_allocator);
+    appendPathToRoot(left_window, right, &right_path) catch return DOC_POS_IMPLEMENTATION_SPECIFIC;
+
+    var left_index = left_path.items.len;
+    var right_index = right_path.items.len;
+    while (
+        left_index > 0 and
+        right_index > 0 and
+        left_path.items[left_index - 1] == right_path.items[right_index - 1]
+    ) {
+        left_index -= 1;
+        right_index -= 1;
+    }
+
+    if (left_index == 0 or right_index == 0 or left_index >= left_path.items.len) {
+        return DOC_POS_IMPLEMENTATION_SPECIFIC;
+    }
+
+    const common_parent_handle = left_path.items[left_index];
+    const left_branch = left_path.items[left_index - 1];
+    const right_branch = right_path.items[right_index - 1];
+
+    const common_parent = resolveNode(left_window, common_parent_handle) orelse return DOC_POS_IMPLEMENTATION_SPECIFIC;
+    var cursor = common_parent.first_child;
+    while (cursor != 0) {
+        if (cursor == left_branch) {
+            return DOC_POS_FOLLOWING;
+        }
+        if (cursor == right_branch) {
+            return DOC_POS_PRECEDING;
+        }
+
+        const child = resolveNode(left_window, cursor) orelse break;
+        cursor = child.next_sibling;
+    }
+
+    return DOC_POS_IMPLEMENTATION_SPECIFIC;
 }
 
 fn isVoidElement(tag: []const u8) bool {
@@ -761,6 +859,18 @@ pub export fn zig_dom_node_previous_sibling(node: u64) u64 {
     return record.prev_sibling;
 }
 
+pub export fn zig_dom_node_contains(ancestor: u64, node: u64) u32 {
+
+    const window = resolveNodeWindow(ancestor) orelse return 0;
+    const other_window = resolveNodeWindow(node) orelse return 0;
+    if (window.handle != other_window.handle) return 0;
+    return if (isAncestor(window, ancestor, node)) 1 else 0;
+}
+
+pub export fn zig_dom_node_compare_document_position(left: u64, right: u64) u32 {
+    return compareDocumentPositionInternal(left, right);
+}
+
 pub export fn zig_dom_node_name(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
 
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
@@ -897,6 +1007,31 @@ pub export fn zig_dom_element_has_attribute(element: u64, name_ptr: [*]const u8,
     if (node.kind != .element) return 0;
 
     return if (getAttribute(node, name_ptr[0..name_len]) != null) 1 else 0;
+}
+
+pub export fn zig_dom_element_attributes_json(element: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
+
+    const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
+    const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
+    if (node.kind != .element) return STATUS_INVALID_ARGUMENT;
+
+    var buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer buffer.deinit(c_allocator);
+
+    buffer.append(c_allocator, '[') catch return STATUS_OOM;
+    for (node.attributes.items, 0..) |attr, index| {
+        if (index > 0) {
+            buffer.append(c_allocator, ',') catch return STATUS_OOM;
+        }
+        buffer.appendSlice(c_allocator, "{\"name\":\"") catch return STATUS_OOM;
+        appendJsonEscaped(&buffer, attr.name) catch return STATUS_OOM;
+        buffer.appendSlice(c_allocator, "\",\"value\":\"") catch return STATUS_OOM;
+        appendJsonEscaped(&buffer, attr.value) catch return STATUS_OOM;
+        buffer.appendSlice(c_allocator, "\"}") catch return STATUS_OOM;
+    }
+    buffer.append(c_allocator, ']') catch return STATUS_OOM;
+
+    return outputString(buffer.items, out_ptr, out_len);
 }
 
 pub export fn zig_dom_node_text_content(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {

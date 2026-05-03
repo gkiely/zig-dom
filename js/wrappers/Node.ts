@@ -151,63 +151,8 @@ export class Node extends EventTargetBase {
   }
 
   compareDocumentPosition(other: Node): number {
-    if (other === this) {
-      return 0;
-    }
-
-    const thisRoot = this.getRootNode();
-    const otherRoot = other.getRootNode();
-    if (thisRoot !== otherRoot) {
-      return Node.DOCUMENT_POSITION_DISCONNECTED | Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC | Node.DOCUMENT_POSITION_PRECEDING;
-    }
-
-    if (this.contains(other)) {
-      return Node.DOCUMENT_POSITION_CONTAINS | Node.DOCUMENT_POSITION_PRECEDING;
-    }
-    if (other.contains(this)) {
-      return Node.DOCUMENT_POSITION_CONTAINED_BY | Node.DOCUMENT_POSITION_FOLLOWING;
-    }
-
-    const thisPath: Node[] = [];
-    let thisCursor: Node | null = this;
-    while (thisCursor) {
-      thisPath.unshift(thisCursor);
-      thisCursor = thisCursor.parentNode;
-    }
-
-    const otherPath: Node[] = [];
-    let otherCursor: Node | null = other;
-    while (otherCursor) {
-      otherPath.unshift(otherCursor);
-      otherCursor = otherCursor.parentNode;
-    }
-
-    let splitIndex = 0;
-    while (
-      splitIndex < thisPath.length
-      && splitIndex < otherPath.length
-      && thisPath[splitIndex] === otherPath[splitIndex]
-    ) {
-      splitIndex += 1;
-    }
-
-    const commonParent = thisPath[splitIndex - 1];
-    const thisBranch = thisPath[splitIndex];
-    const otherBranch = otherPath[splitIndex];
-    if (!commonParent || !thisBranch || !otherBranch) {
-      return Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC;
-    }
-
-    for (const child of commonParent.childNodes) {
-      if (child === thisBranch) {
-        return Node.DOCUMENT_POSITION_FOLLOWING;
-      }
-      if (child === otherBranch) {
-        return Node.DOCUMENT_POSITION_PRECEDING;
-      }
-    }
-
-    return Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC;
+    this._window.assertOpen();
+    return native.nodeCompareDocumentPosition(this._handle, other._handle);
   }
 
   cloneNode(deep = false): Node {
@@ -330,12 +275,8 @@ export class Node extends EventTargetBase {
 
   contains(other: Node | null): boolean {
     if (!other) return false;
-    let cursor: Node | null = other;
-    while (cursor) {
-      if (cursor === this) return true;
-      cursor = cursor.parentNode;
-    }
-    return false;
+    this._window.assertOpen();
+    return native.nodeContains(this._handle, other._handle);
   }
 
   dispatchEvent(event: Event): boolean {

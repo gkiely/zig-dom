@@ -39,5 +39,14 @@ describe("ffi", () => {
     const found = native.documentGetElementById(documentHandle, "probe");
     expect(found).toBe(elementHandle);
     expect(native.nodeParent(elementHandle)).toBe(bodyHandle);
+    expect(native.nodeContains(bodyHandle, elementHandle)).toBe(true);
+
+    const siblingHandle = native.createElement(documentHandle, "span");
+    native.appendChild(bodyHandle, siblingHandle);
+    const relation = native.nodeCompareDocumentPosition(elementHandle, siblingHandle);
+    expect((relation & 0x04) !== 0).toBe(true);
+
+    const attrs = native.elementAttributes(elementHandle);
+    expect(attrs).toContainEqual({ name: "id", value: "probe" });
   });
 });

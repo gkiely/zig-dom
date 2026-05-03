@@ -77,6 +77,8 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_node_last_child: { returns: "u64", args: ["u64"] },
   zig_dom_node_next_sibling: { returns: "u64", args: ["u64"] },
   zig_dom_node_previous_sibling: { returns: "u64", args: ["u64"] },
+  zig_dom_node_contains: { returns: "u32", args: ["u64", "u64"] },
+  zig_dom_node_compare_document_position: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_name: { returns: "u32", args: ["u64", "ptr", "ptr"] },
   zig_dom_node_append_child: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_insert_before: { returns: "u32", args: ["u64", "u64", "u64"] },
@@ -90,6 +92,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_element_set_attribute: { returns: "u32", args: ["u64", "ptr", "usize", "ptr", "usize"] },
   zig_dom_element_remove_attribute: { returns: "u32", args: ["u64", "ptr", "usize"] },
   zig_dom_element_has_attribute: { returns: "u32", args: ["u64", "ptr", "usize"] },
+  zig_dom_element_attributes_json: { returns: "u32", args: ["u64", "ptr", "ptr"] },
   zig_dom_node_text_content: { returns: "u32", args: ["u64", "ptr", "ptr"] },
   zig_dom_node_set_text_content: { returns: "u32", args: ["u64", "ptr", "usize"] },
   zig_dom_node_outer_html: { returns: "u32", args: ["u64", "ptr", "ptr"] },
@@ -225,6 +228,12 @@ export const native = {
   nodePreviousSibling(handle: number): number {
     return Number(nativeLibrary.symbols.zig_dom_node_previous_sibling(handle));
   },
+  nodeContains(ancestorHandle: number, nodeHandle: number): boolean {
+    return nativeLibrary.symbols.zig_dom_node_contains(ancestorHandle, nodeHandle) === 1;
+  },
+  nodeCompareDocumentPosition(leftHandle: number, rightHandle: number): number {
+    return nativeLibrary.symbols.zig_dom_node_compare_document_position(leftHandle, rightHandle);
+  },
   nodeName(handle: number): string {
     const outPtr = new BigUint64Array(1);
     const outLen = new BigUint64Array(1);
@@ -306,6 +315,20 @@ export const native = {
   hasAttribute(elementHandle: number, name: string): boolean {
     const key = encode(name);
     return nativeLibrary.symbols.zig_dom_element_has_attribute(elementHandle, ptr(key), key.length) === 1;
+  },
+  elementAttributes(elementHandle: number): Array<{ name: string; value: string }> {
+    const outPtr = new BigUint64Array(1);
+    const outLen = new BigUint64Array(1);
+    const status = nativeLibrary.symbols.zig_dom_element_attributes_json(elementHandle, ptr(outPtr), ptr(outLen));
+    assertStatus(status, "zig_dom_element_attributes_json");
+    const json = readStringFromOutParams(outPtr, outLen);
+    if (json.length === 0) {
+      return [];
+    }
+    const parsed = JSON.parse(json) as Array<{ name?: unknown; value?: unknown }>;
+    return parsed
+      .filter((entry) => typeof entry?.name === "string" && typeof entry?.value === "string")
+      .map((entry) => ({ name: String(entry.name), value: String(entry.value) }));
   },
   nodeTextContent(handle: number): string {
     const outPtr = new BigUint64Array(1);
