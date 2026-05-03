@@ -111,7 +111,25 @@ export class Node extends EventTargetBase {
       return child;
     }
 
+    if (!this._window.customElements.hasDefinitions) {
+      native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, child._handle);
+      return child;
+    }
+
+    const previousParent = child.parentNode;
+    const wasConnected = this._window.isConnectedNode(child);
     native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, child._handle);
+
+    const isConnected = this._window.isConnectedNode(child);
+    if (!wasConnected && isConnected) {
+      this._window.notifyConnectedSubtree(child);
+    } else if (wasConnected && !isConnected) {
+      this._window.notifyDisconnectedSubtree(child);
+    } else if (wasConnected && isConnected && previousParent && previousParent !== this) {
+      this._window.notifyDisconnectedSubtree(child);
+      this._window.notifyConnectedSubtree(child);
+    }
+
     return child;
   }
 
@@ -126,19 +144,72 @@ export class Node extends EventTargetBase {
       return newChild;
     }
 
+    if (!this._window.customElements.hasDefinitions) {
+      native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+      return newChild;
+    }
+
+    const previousParent = newChild.parentNode;
+    const wasConnected = this._window.isConnectedNode(newChild);
     native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+
+    const isConnected = this._window.isConnectedNode(newChild);
+    if (!wasConnected && isConnected) {
+      this._window.notifyConnectedSubtree(newChild);
+    } else if (wasConnected && !isConnected) {
+      this._window.notifyDisconnectedSubtree(newChild);
+    } else if (wasConnected && isConnected && previousParent && previousParent !== this) {
+      this._window.notifyDisconnectedSubtree(newChild);
+      this._window.notifyConnectedSubtree(newChild);
+    }
+
     return newChild;
   }
 
   removeChild<TNode extends Node>(child: TNode): TNode {
     this._window.assertOpen();
+
+    if (!this._window.customElements.hasDefinitions) {
+      native.removeChild(this._handle, child._handle);
+      return child;
+    }
+
+    const wasConnected = this._window.isConnectedNode(child);
     native.removeChild(this._handle, child._handle);
+    const isConnected = this._window.isConnectedNode(child);
+    if (wasConnected && !isConnected) {
+      this._window.notifyDisconnectedSubtree(child);
+    }
+
     return child;
   }
 
   replaceChild<TNode extends Node>(newChild: Node, oldChild: TNode): TNode {
     this._window.assertOpen();
+
+    if (!this._window.customElements.hasDefinitions) {
+      native.replaceChild(this._handle, newChild._handle, oldChild._handle);
+      return oldChild;
+    }
+
+    const oldWasConnected = this._window.isConnectedNode(oldChild);
+    const newWasConnected = this._window.isConnectedNode(newChild);
+    const newPreviousParent = newChild.parentNode;
     native.replaceChild(this._handle, newChild._handle, oldChild._handle);
+
+    const oldIsConnected = this._window.isConnectedNode(oldChild);
+    const newIsConnected = this._window.isConnectedNode(newChild);
+
+    if (oldWasConnected && !oldIsConnected) {
+      this._window.notifyDisconnectedSubtree(oldChild);
+    }
+    if (!newWasConnected && newIsConnected) {
+      this._window.notifyConnectedSubtree(newChild);
+    } else if (newWasConnected && newIsConnected && newPreviousParent && newPreviousParent !== this) {
+      this._window.notifyDisconnectedSubtree(newChild);
+      this._window.notifyConnectedSubtree(newChild);
+    }
+
     return oldChild;
   }
 
@@ -337,5 +408,10 @@ export class Node extends EventTargetBase {
 
   get outerHTML(): string {
     return native.nodeOuterHtml(this._handle);
+  }
+
+  get isConnected(): boolean {
+    this._window.assertOpen();
+    return this._window.isConnectedNode(this);
   }
 }

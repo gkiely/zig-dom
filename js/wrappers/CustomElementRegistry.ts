@@ -6,6 +6,15 @@ type CustomElementConstructor = {
 export class CustomElementRegistry {
   #definitions = new Map<string, CustomElementConstructor>();
   #pending = new Map<string, Array<() => void>>();
+  readonly #onDefine?: (name: string) => void;
+
+  constructor(onDefine?: (name: string) => void) {
+    this.#onDefine = onDefine;
+  }
+
+  get hasDefinitions(): boolean {
+    return this.#definitions.size > 0;
+  }
 
   define(name: string, constructor: CustomElementConstructor): void {
     const normalized = name.toLowerCase();
@@ -17,6 +26,7 @@ export class CustomElementRegistry {
     }
 
     this.#definitions.set(normalized, constructor);
+    this.#onDefine?.(normalized);
     const waiters = this.#pending.get(normalized) ?? [];
     this.#pending.delete(normalized);
     for (const resolve of waiters) {

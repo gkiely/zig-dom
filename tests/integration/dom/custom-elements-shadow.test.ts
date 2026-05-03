@@ -27,4 +27,41 @@ describe("custom elements and shadow dom compatibility", () => {
     closedHost.attachShadow({ mode: "closed" });
     expect(closedHost.shadowRoot).toBeNull();
   });
+
+  test("custom element lifecycle callbacks fire for late upgrade and tree connection changes", () => {
+    const lifecycleEvents: string[] = [];
+
+    const beforeDefine = document.createElement("late-life-box") as HTMLElement;
+    document.body.appendChild(beforeDefine);
+
+    class LateLifecycleElement extends HTMLElement {
+      static observedAttributes = ["data-state"];
+
+      connectedCallback(): void {
+        lifecycleEvents.push("connected");
+      }
+
+      disconnectedCallback(): void {
+        lifecycleEvents.push("disconnected");
+      }
+
+      attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
+        lifecycleEvents.push(`attr:${name}:${oldValue ?? "null"}->${newValue ?? "null"}`);
+      }
+    }
+
+    customElements.define("late-life-box", LateLifecycleElement);
+
+    expect(beforeDefine instanceof LateLifecycleElement).toBe(true);
+    expect(lifecycleEvents).toContain("connected");
+
+    beforeDefine.setAttribute("data-state", "ready");
+    beforeDefine.removeAttribute("data-state");
+
+    expect(lifecycleEvents).toContain("attr:data-state:null->ready");
+    expect(lifecycleEvents).toContain("attr:data-state:ready->null");
+
+    document.body.removeChild(beforeDefine);
+    expect(lifecycleEvents).toContain("disconnected");
+  });
 });

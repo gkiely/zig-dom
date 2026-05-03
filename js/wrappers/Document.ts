@@ -68,15 +68,7 @@ export class Document extends Node {
       tagName: normalizedTagName,
       skipInitialStyleSync: true
     }) as Element;
-
-    if (!normalizedTagName.includes("-")) {
-      return element;
-    }
-
-    const customConstructor = this._window.customElements.get(normalizedTagName);
-    if (customConstructor && Object.getPrototypeOf(element) !== customConstructor.prototype) {
-      Object.setPrototypeOf(element, customConstructor.prototype);
-    }
+    this._window.upgradeElementInstance(element, normalizedTagName);
     return element;
   }
 

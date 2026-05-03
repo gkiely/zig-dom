@@ -12,6 +12,18 @@ import { Range, Selection } from "./Range.ts";
 import { Storage } from "./Storage.ts";
 import { Text } from "./Text.ts";
 
+const CUSTOM_ELEMENT_UPGRADED = Symbol("zig-dom-custom-element-upgraded");
+
+type CustomElementLifecycle = {
+  [CUSTOM_ELEMENT_UPGRADED]?: boolean;
+  connectedCallback?: () => void;
+  disconnectedCallback?: () => void;
+  attributeChangedCallback?: (name: string, oldValue: string | null, newValue: string | null) => void;
+  constructor: {
+    observedAttributes?: string[];
+  };
+};
+
 export interface WindowOptions {
   url?: string;
   width?: number;
@@ -173,7 +185,7 @@ export class Window {
   readonly document: Document;
   readonly localStorage = new Storage();
   readonly sessionStorage = new Storage();
-  readonly customElements = new CustomElementRegistry();
+  readonly customElements: CustomElementRegistry;
 
   readonly happyDOM: {
     reset: () => void;
@@ -184,6 +196,10 @@ export class Window {
   constructor(options?: WindowOptions) {
     this._nativeWindowHandle = native.createWindow();
     this.#documentHandle = native.windowDocument(this._nativeWindowHandle);
+
+    this.customElements = new CustomElementRegistry((name) => {
+      this.upgradeDefinedElements(name);
+    });
 
     this.location = new WindowLocationImpl(options?.url ?? "http://localhost/");
 
@@ -264,12 +280,14 @@ export class Window {
 
   #createNode(handle: number, kind: number, tagNameHint: string | undefined, skipInitialStyleSync: boolean): Node {
     let wrapped: Node;
+    let elementTagName: string | undefined;
     switch (kind) {
       case Node.DOCUMENT_NODE:
         wrapped = new Document(this, handle, kind);
         break;
       case Node.ELEMENT_NODE: {
         const tagName = tagNameHint ?? native.nodeName(handle).toLowerCase();
+        elementTagName = tagName;
         if (tagName === "input") {
           wrapped = new HTMLInputElement(this, handle, kind, skipInitialStyleSync);
         } else if (tagName === "button") {
@@ -296,9 +314,137 @@ export class Window {
         throw new Error(`Unsupported native node kind: ${kind}`);
     }
 
+    if (elementTagName && this.customElements.hasDefinitions) {
+      this.upgradeElementInstance(wrapped as Element, elementTagName);
+    }
+
     const nodeId = handle % 0x1_0000_0000;
     this.#nodeCache[nodeId] = wrapped;
     return wrapped;
+  }
+
+  isConnectedNode(node: Node): boolean {
+    let cursor: Node | null = node;
+    while (cursor) {
+      if (cursor.nodeType === Node.DOCUMENT_NODE) {
+        return true;
+      }
+      cursor = cursor.parentNode;
+    }
+    return false;
+  }
+
+  upgradeElementInstance(element: Element, normalizedTagName?: string): void {
+    if (!this.customElements.hasDefinitions) {
+      return;
+    }
+
+    const tagName = normalizedTagName ?? element.tagName.toLowerCase();
+    if (!tagName.includes("-")) {
+      return;
+    }
+
+    const customConstructor = this.customElements.get(tagName);
+    if (!customConstructor) {
+      return;
+    }
+
+    if (Object.getPrototypeOf(element) !== customConstructor.prototype) {
+      Object.setPrototypeOf(element, customConstructor.prototype);
+    }
+
+    const lifecycle = element as unknown as CustomElementLifecycle;
+    if (lifecycle[CUSTOM_ELEMENT_UPGRADED]) {
+      return;
+    }
+
+    lifecycle[CUSTOM_ELEMENT_UPGRADED] = true;
+
+    const observed = lifecycle.constructor.observedAttributes ?? [];
+    if (typeof lifecycle.attributeChangedCallback === "function" && observed.length > 0) {
+      const observedSet = new Set(observed.map((name) => name.toLowerCase()));
+      for (const attribute of element.attributes) {
+        if (observedSet.has(attribute.name.toLowerCase())) {
+          lifecycle.attributeChangedCallback.call(element, attribute.name, null, attribute.value);
+        }
+      }
+    }
+
+    if (this.isConnectedNode(element)) {
+      lifecycle.connectedCallback?.call(element);
+    }
+  }
+
+  upgradeDefinedElements(tagName: string): void {
+    const existing = this.document.querySelectorAll(tagName);
+    for (const element of existing) {
+      this.upgradeElementInstance(element, tagName);
+    }
+  }
+
+  notifyConnectedSubtree(root: Node): void {
+    if (!this.customElements.hasDefinitions) {
+      return;
+    }
+    this.#walkElementSubtree(root, (element) => {
+      const lifecycle = element as unknown as CustomElementLifecycle;
+      if (lifecycle[CUSTOM_ELEMENT_UPGRADED]) {
+        lifecycle.connectedCallback?.call(element);
+      }
+    });
+  }
+
+  notifyDisconnectedSubtree(root: Node): void {
+    if (!this.customElements.hasDefinitions) {
+      return;
+    }
+    this.#walkElementSubtree(root, (element) => {
+      const lifecycle = element as unknown as CustomElementLifecycle;
+      if (lifecycle[CUSTOM_ELEMENT_UPGRADED]) {
+        lifecycle.disconnectedCallback?.call(element);
+      }
+    });
+  }
+
+  notifyAttributeChanged(element: Element, name: string, oldValue: string | null, newValue: string | null): void {
+    if (!this.customElements.hasDefinitions || oldValue === newValue) {
+      return;
+    }
+
+    const lifecycle = element as unknown as CustomElementLifecycle;
+    if (!lifecycle[CUSTOM_ELEMENT_UPGRADED] || typeof lifecycle.attributeChangedCallback !== "function") {
+      return;
+    }
+
+    const observed = lifecycle.constructor.observedAttributes ?? [];
+    const normalized = name.toLowerCase();
+    if (!observed.some((value) => value.toLowerCase() === normalized)) {
+      return;
+    }
+
+    lifecycle.attributeChangedCallback.call(element, normalized, oldValue, newValue);
+  }
+
+  #walkElementSubtree(root: Node, visit: (element: Element) => void): void {
+    const stack: Node[] = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        visit(node as unknown as Element);
+      }
+
+      const children = node.childNodes.toArray();
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child) {
+          stack.push(child);
+        }
+      }
+    }
   }
 
   collectChildren(parentHandle: number): Node[] {

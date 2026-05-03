@@ -211,20 +211,24 @@ export class Element extends Node {
 
   setAttribute(name: string, value: string): void {
     const key = name.toLowerCase();
+    const previousValue = this.getAttribute(key);
     native.setAttribute(this._handle, key, value);
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
     this.#attributeCache.set(key, value);
+    this._window.notifyAttributeChanged(this, key, previousValue, value);
   }
 
   removeAttribute(name: string): void {
     const key = name.toLowerCase();
+    const previousValue = this.getAttribute(key);
     native.removeAttribute(this._handle, key);
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
     this.#attributeCache.set(key, null);
+    this._window.notifyAttributeChanged(this, key, previousValue, null);
   }
 
   hasAttribute(name: string): boolean {
