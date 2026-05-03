@@ -93,7 +93,16 @@ export class HTMLElement extends Element {
 
   override setAttribute(name: string, value: string): void {
     super.setAttribute(name, value);
-    if (name.toLowerCase() === "style" && !this.#syncingStyleAttribute && this.#style) {
+    const normalizedName = name.toLowerCase();
+
+    if (normalizedName.startsWith("on")) {
+      const currentHandler = (this as unknown as Record<string, unknown>)[normalizedName];
+      if (typeof currentHandler !== "function") {
+        (this as unknown as Record<string, unknown>)[normalizedName] = () => {};
+      }
+    }
+
+    if (normalizedName === "style" && !this.#syncingStyleAttribute && this.#style) {
       this.#syncingStyleAttribute = true;
       this.#style.cssText = value;
       this.#syncingStyleAttribute = false;
@@ -102,7 +111,13 @@ export class HTMLElement extends Element {
 
   override removeAttribute(name: string): void {
     super.removeAttribute(name);
-    if (name.toLowerCase() === "style" && !this.#syncingStyleAttribute && this.#style) {
+    const normalizedName = name.toLowerCase();
+
+    if (normalizedName.startsWith("on")) {
+      (this as unknown as Record<string, unknown>)[normalizedName] = null;
+    }
+
+    if (normalizedName === "style" && !this.#syncingStyleAttribute && this.#style) {
       this.#syncingStyleAttribute = true;
       this.#style.cssText = "";
       this.#syncingStyleAttribute = false;
@@ -205,6 +220,14 @@ export class HTMLInputElement extends HTMLElement {
   #value: string | null = null;
   #checked: boolean | null = null;
 
+  get type(): string {
+    return this.getAttribute("type")?.toLowerCase() ?? "text";
+  }
+
+  set type(value: string) {
+    this.setAttribute("type", value);
+  }
+
   get value(): string {
     return this.#value ?? this.defaultValue;
   }
@@ -239,6 +262,56 @@ export class HTMLInputElement extends HTMLElement {
     } else {
       this.removeAttribute("checked");
     }
+  }
+
+  override dispatchEvent(event: Event): boolean {
+    if (event.type === "click" && this.disabled) {
+      return true;
+    }
+
+    const inputType = this.type;
+    const togglesChecked = event.type === "click" && (inputType === "checkbox" || inputType === "radio");
+    const previousChecked = this.checked;
+
+    if (togglesChecked) {
+      this.checked = inputType === "checkbox" ? !this.checked : true;
+    }
+
+    const result = super.dispatchEvent(event);
+    if (event.type !== "click") {
+      return result;
+    }
+
+    if (event.defaultPrevented) {
+      if (togglesChecked) {
+        this.checked = previousChecked;
+      }
+      return result;
+    }
+
+    if (togglesChecked) {
+      super.dispatchEvent(new Event("input", { bubbles: true }));
+      super.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    if (inputType === "submit") {
+      this.closestForm()?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    } else if (inputType === "reset") {
+      this.closestForm()?.reset();
+    }
+
+    return result;
+  }
+
+  private closestForm(): HTMLFormElement | null {
+    let cursor = this.parentNode;
+    while (cursor) {
+      if (cursor instanceof HTMLFormElement) {
+        return cursor;
+      }
+      cursor = cursor.parentNode;
+    }
+    return null;
   }
 
   _resetForForm(): void {

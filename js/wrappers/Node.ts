@@ -22,6 +22,19 @@ export class Node extends EventTargetBase {
   readonly _handle: number;
   readonly #nodeType: number;
 
+  readonly ELEMENT_NODE = Node.ELEMENT_NODE;
+  readonly TEXT_NODE = Node.TEXT_NODE;
+  readonly COMMENT_NODE = Node.COMMENT_NODE;
+  readonly DOCUMENT_NODE = Node.DOCUMENT_NODE;
+  readonly DOCUMENT_FRAGMENT_NODE = Node.DOCUMENT_FRAGMENT_NODE;
+
+  readonly DOCUMENT_POSITION_DISCONNECTED = Node.DOCUMENT_POSITION_DISCONNECTED;
+  readonly DOCUMENT_POSITION_PRECEDING = Node.DOCUMENT_POSITION_PRECEDING;
+  readonly DOCUMENT_POSITION_FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+  readonly DOCUMENT_POSITION_CONTAINS = Node.DOCUMENT_POSITION_CONTAINS;
+  readonly DOCUMENT_POSITION_CONTAINED_BY = Node.DOCUMENT_POSITION_CONTAINED_BY;
+  readonly DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC;
+
   constructor(window: Window, handle: number, nodeType?: number) {
     super();
     this._window = window;

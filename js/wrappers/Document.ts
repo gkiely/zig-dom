@@ -10,6 +10,10 @@ import { Text } from "./Text.ts";
 import type { Window } from "./Window.ts";
 
 export class Document extends Node {
+  #documentElementCache: Element | null = null;
+  #headCache: Element | null = null;
+  #bodyCache: Element | null = null;
+
   constructor(window: Window, handle: number, nodeType = Node.DOCUMENT_NODE) {
     super(window, handle, nodeType);
   }
@@ -20,26 +24,41 @@ export class Document extends Node {
 
   get documentElement(): Element {
     this._window.assertOpen();
+    if (this.#documentElementCache) {
+      return this.#documentElementCache;
+    }
+
     const handle = native.windowDocumentElement(this._window._nativeWindowHandle);
     const node = this._window.getNode(handle);
     if (!node) throw new Error("documentElement not found");
-    return node as Element;
+    this.#documentElementCache = node as Element;
+    return this.#documentElementCache;
   }
 
   get head(): Element {
     this._window.assertOpen();
+    if (this.#headCache) {
+      return this.#headCache;
+    }
+
     const handle = native.windowHead(this._window._nativeWindowHandle);
     const node = this._window.getNode(handle);
     if (!node) throw new Error("head not found");
-    return node as Element;
+    this.#headCache = node as Element;
+    return this.#headCache;
   }
 
   get body(): Element {
     this._window.assertOpen();
+    if (this.#bodyCache) {
+      return this.#bodyCache;
+    }
+
     const handle = native.windowBody(this._window._nativeWindowHandle);
     const node = this._window.getNode(handle);
     if (!node) throw new Error("body not found");
-    return node as Element;
+    this.#bodyCache = node as Element;
+    return this.#bodyCache;
   }
 
   get URL(): string {
@@ -158,6 +177,9 @@ export class Document extends Node {
   reset(): void {
     this._window.assertOpen();
     native.documentReset(this._handle);
+    this.#documentElementCache = null;
+    this.#headCache = null;
+    this.#bodyCache = null;
     this._window.setActiveElement(null);
   }
 }

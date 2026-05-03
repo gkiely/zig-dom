@@ -210,6 +210,15 @@ export class Element extends Node {
     return value;
   }
 
+  getAttributeNode(name: string): Attr | null {
+    const value = this.getAttribute(name);
+    if (value == null) {
+      return null;
+    }
+
+    return { name, value } as unknown as Attr;
+  }
+
   setAttribute(name: string, value: string): void {
     const key = name.toLowerCase();
     const previousValue = this.getAttribute(key);
