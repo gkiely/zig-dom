@@ -280,6 +280,9 @@ export class HTMLInputElement extends HTMLElement {
 
   set checked(next: boolean) {
     this.#checked = Boolean(next);
+    if (this.#checked && this.type === "radio") {
+      this.#uncheckSameGroupRadios();
+    }
   }
 
   get defaultChecked(): boolean {
@@ -405,6 +408,17 @@ export class HTMLTextAreaElement extends HTMLElement {
 export class HTMLOptionElement extends HTMLElement {
   #selected: boolean | null = null;
 
+  #closestSelect(): HTMLSelectElement | null {
+    let cursor = this.parentNode;
+    while (cursor) {
+      if (cursor instanceof HTMLSelectElement) {
+        return cursor;
+      }
+      cursor = cursor.parentNode;
+    }
+    return null;
+  }
+
   get value(): string {
     return this.getAttribute("value") ?? this.textContent;
   }
@@ -419,6 +433,27 @@ export class HTMLOptionElement extends HTMLElement {
 
   set selected(next: boolean) {
     this.#selected = Boolean(next);
+    if (!this.#selected) {
+      return;
+    }
+
+    const select = this.#closestSelect();
+    if (!select) {
+      return;
+    }
+
+    select._clearExplicitClearedValueState();
+
+    if (select.multiple) {
+      return;
+    }
+
+    for (const option of select.options) {
+      if (option === this) {
+        continue;
+      }
+      (option as HTMLOptionElement).#selected = false;
+    }
   }
 
   get defaultSelected(): boolean {
@@ -439,6 +474,24 @@ export class HTMLOptionElement extends HTMLElement {
 }
 
 export class HTMLSelectElement extends HTMLElement {
+  #valueExplicitlyCleared = false;
+
+  _clearExplicitClearedValueState(): void {
+    this.#valueExplicitlyCleared = false;
+  }
+
+  get multiple(): boolean {
+    return this.hasAttribute("multiple");
+  }
+
+  set multiple(next: boolean) {
+    if (next) {
+      this.setAttribute("multiple", "");
+    } else {
+      this.removeAttribute("multiple");
+    }
+  }
+
   get options(): HTMLCollection {
     return createIndexedCollection(() => collectOptionElements(this));
   }
@@ -448,6 +501,10 @@ export class HTMLSelectElement extends HTMLElement {
       if ((option as HTMLOptionElement).selected) {
         return (option as HTMLOptionElement).value;
       }
+    }
+
+    if (this.#valueExplicitlyCleared) {
+      return "";
     }
 
     const first = this.options.item(0) as HTMLOptionElement | null;
@@ -469,13 +526,18 @@ export class HTMLSelectElement extends HTMLElement {
       for (const option of this.options) {
         (option as HTMLOptionElement).selected = false;
       }
+      this.#valueExplicitlyCleared = true;
+      return;
     }
+
+    this.#valueExplicitlyCleared = false;
   }
 
   _resetForForm(): void {
     for (const option of this.options) {
       (option as HTMLOptionElement)._resetForForm();
     }
+    this.#valueExplicitlyCleared = false;
   }
 }
 
@@ -496,6 +558,16 @@ export class HTMLLabelElement extends HTMLElement {
       const target = event.target;
       if (target === control) {
         return;
+      }
+
+      if (target instanceof Element && target !== this) {
+        let cursor: Element | null = target;
+        while (cursor && cursor !== this) {
+          if (cursor !== control && isInteractiveDescendantTag(cursor.tagName.toLowerCase())) {
+            return;
+          }
+          cursor = cursor.parentNode as Element | null;
+        }
       }
 
       if (target instanceof Element && control.contains(target)) {
@@ -519,6 +591,15 @@ export class HTMLLabelElement extends HTMLElement {
 
     return null;
   }
+}
+
+function isInteractiveDescendantTag(tagName: string): boolean {
+  return tagName === "a" ||
+    tagName === "button" ||
+    tagName === "input" ||
+    tagName === "select" ||
+    tagName === "textarea" ||
+    tagName === "option";
 }
 
 function collectFormControls(root: Element): Element[] {

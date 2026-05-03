@@ -72,4 +72,83 @@ describe("react refs and dom interop", () => {
     expect(element.className).toBe("card card-active");
     expect(element.style.marginTop).toBe("8px");
   });
+
+  test("multiple select keeps existing selections when selecting additional options via refs", () => {
+    function MultiSelectHarness(): JSX.Element {
+      const optionARef = useRef<HTMLOptionElement | null>(null);
+      const optionBRef = useRef<HTMLOptionElement | null>(null);
+
+      return (
+        <section>
+          <select aria-label="letters" multiple>
+            <option ref={optionARef} value="a">
+              A
+            </option>
+            <option ref={optionBRef} value="b">
+              B
+            </option>
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              if (optionARef.current) {
+                optionARef.current.selected = true;
+              }
+              if (optionBRef.current) {
+                optionBRef.current.selected = true;
+              }
+            }}
+          >
+            Select Both
+          </button>
+        </section>
+      );
+    }
+
+    const { getByLabelText, getByText } = render(<MultiSelectHarness />);
+    const select = getByLabelText("letters") as HTMLSelectElement;
+
+    fireEvent.click(getByText("Select Both"));
+
+    const selectedValues = [...select.options]
+      .filter((option) => option.selected)
+      .map((option) => option.value)
+      .sort();
+
+    expect(selectedValues).toEqual(["a", "b"]);
+  });
+
+  test("imperative select value assignment to missing option clears value", () => {
+    function SelectValueHarness(): JSX.Element {
+      const selectRef = useRef<HTMLSelectElement | null>(null);
+
+      return (
+        <section>
+          <select ref={selectRef} aria-label="single-select" defaultValue="a">
+            <option value="a">A</option>
+            <option value="b">B</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              if (selectRef.current) {
+                selectRef.current.value = "missing";
+              }
+            }}
+          >
+            Select missing
+          </button>
+        </section>
+      );
+    }
+
+    const { getByLabelText, getByText } = render(<SelectValueHarness />);
+    const select = getByLabelText("single-select") as HTMLSelectElement;
+
+    expect(select.value).toBe("a");
+
+    fireEvent.click(getByText("Select missing"));
+
+    expect(select.value).toBe("");
+  });
 });

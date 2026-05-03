@@ -201,6 +201,35 @@ test("child element click inside wrapping label toggles nested checkbox", () => 
   expect(checkbox.checked).toBe(true);
 });
 
+test("interactive link click inside htmlFor label does not toggle checkbox", () => {
+  function HtmlForInteractiveChildHarness(): JSX.Element {
+    const [checked, setChecked] = useState(false);
+
+    return (
+      <section>
+        <label htmlFor="news-checkbox">
+          <a href="#help">Help</a>
+        </label>
+        <input
+          id="news-checkbox"
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => setChecked((event.target as HTMLInputElement).checked)}
+        />
+      </section>
+    );
+  }
+
+  const { getByRole, getByText } = render(<HtmlForInteractiveChildHarness />);
+  const checkbox = getByRole("checkbox") as HTMLInputElement;
+
+  expect(checkbox.checked).toBe(false);
+
+  fireEvent.click(getByText("Help"));
+
+  expect(checkbox.checked).toBe(false);
+});
+
 test("uncontrolled radios keep single checked value in same group", () => {
   function UncontrolledRadiosHarness(): JSX.Element {
     return (
