@@ -1010,6 +1010,7 @@ export class Node extends EventTargetBase {
       event.currentTarget = null;
       event.eventPhase = Event.NONE;
       event.setDispatchFlag(false);
+      event.resetAfterDispatch();
     }
   }
 

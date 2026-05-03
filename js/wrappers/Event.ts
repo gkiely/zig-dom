@@ -123,6 +123,11 @@ export class Event {
     this.#path = path;
   }
 
+  resetAfterDispatch(): void {
+    this.#propagationStopped = false;
+    this.#immediatePropagationStopped = false;
+  }
+
   get dispatching(): boolean {
     return this.#dispatchFlag;
   }
@@ -141,6 +146,9 @@ export class CustomEvent<T = unknown> extends Event {
   }
 
   initCustomEvent(type: string, bubbles = false, cancelable = false, detail?: T): void {
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'initCustomEvent': 1 argument required.");
+    }
     if (this.eventPhase !== Event.NONE) {
       return;
     }
@@ -383,6 +391,7 @@ export class EventTargetBase {
       event.currentTarget = null;
       event.eventPhase = Event.NONE;
       event.setDispatchFlag(false);
+      event.resetAfterDispatch();
     }
   }
 
@@ -438,4 +447,18 @@ export class EventTargetBase {
 
     return null;
   }
+}
+
+for (const [name, value] of Object.entries({
+  NONE: Event.NONE,
+  CAPTURING_PHASE: Event.CAPTURING_PHASE,
+  AT_TARGET: Event.AT_TARGET,
+  BUBBLING_PHASE: Event.BUBBLING_PHASE
+})) {
+  Object.defineProperty(Event.prototype, name, {
+    value,
+    writable: false,
+    enumerable: true,
+    configurable: true
+  });
 }
