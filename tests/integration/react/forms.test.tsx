@@ -253,3 +253,46 @@ test("uncontrolled radios keep single checked value in same group", () => {
   expect(dog.checked).toBe(true);
 });
 
+test("jsdom parity: multiple defaultChecked radios can both appear checked", () => {
+  function DefaultCheckedRadioHarness(): JSX.Element {
+    return (
+      <section>
+        <input type="radio" name="size" defaultChecked aria-label="small" />
+        <input type="radio" name="size" defaultChecked aria-label="large" />
+      </section>
+    );
+  }
+
+  const { getByLabelText } = render(<DefaultCheckedRadioHarness />);
+  const small = getByLabelText("small") as HTMLInputElement;
+  const large = getByLabelText("large") as HTMLInputElement;
+
+  expect(small.checked).toBe(true);
+  expect(large.checked).toBe(true);
+});
+
+test("clicking already checked radio does not fire onInput", () => {
+  function CheckedRadioInputHarness(): JSX.Element {
+    const [inputs, setInputs] = useState(0);
+
+    return (
+      <section>
+        <input
+          type="radio"
+          name="mode"
+          defaultChecked
+          aria-label="mode"
+          onInput={() => setInputs((value) => value + 1)}
+        />
+        <output>{inputs}</output>
+      </section>
+    );
+  }
+
+  const { getByLabelText, getByText } = render(<CheckedRadioInputHarness />);
+
+  fireEvent.click(getByLabelText("mode"));
+
+  expect(getByText("0")).toBeDefined();
+});
+

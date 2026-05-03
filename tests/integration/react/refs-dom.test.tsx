@@ -151,4 +151,19 @@ describe("react refs and dom interop", () => {
 
     expect(select.value).toBe("");
   });
+
+  test("title prop reflects to HTMLElement.title and clears on rerender", () => {
+    function TitleHarness({ withTitle }: { withTitle: boolean }): JSX.Element {
+      return <div data-testid="title-target" title={withTitle ? "Tooltip" : undefined}>content</div>;
+    }
+
+    const { getByTestId, rerender } = render(<TitleHarness withTitle />);
+    const target = getByTestId("title-target") as HTMLDivElement;
+
+    expect(target.title).toBe("Tooltip");
+
+    rerender(<TitleHarness withTitle={false} />);
+
+    expect(target.title).toBe("");
+  });
 });

@@ -172,6 +172,19 @@ export class HTMLElement extends Element {
       this.removeAttribute("disabled");
     }
   }
+
+  get title(): string {
+    return this.getAttribute("title") ?? "";
+  }
+
+  set title(next: string) {
+    const value = String(next);
+    if (value.length === 0) {
+      this.removeAttribute("title");
+    } else {
+      this.setAttribute("title", value);
+    }
+  }
 }
 
 export class HTMLButtonElement extends HTMLElement {
@@ -219,6 +232,41 @@ export class HTMLIFrameElement extends HTMLElement {}
 export class HTMLInputElement extends HTMLElement {
   #value: string | null = null;
   #checked: boolean | null = null;
+
+  #isDefaultCheckedRadioWinner(): boolean {
+    const name = this.getAttribute("name");
+    if (!name) {
+      return true;
+    }
+
+    const document = this.ownerDocument;
+    if (!document) {
+      return true;
+    }
+
+    const form = this.closestForm();
+    let winner: HTMLInputElement | null = null;
+    for (const candidate of document.querySelectorAll("input")) {
+      if (!(candidate instanceof HTMLInputElement)) {
+        continue;
+      }
+      if (candidate.type !== "radio") {
+        continue;
+      }
+      if ((candidate.getAttribute("name") ?? "") !== name) {
+        continue;
+      }
+      if (candidate.closestForm() !== form) {
+        continue;
+      }
+      if (!candidate.defaultChecked) {
+        continue;
+      }
+      winner = candidate;
+    }
+
+    return winner ? winner === this : true;
+  }
 
   #uncheckSameGroupRadios(): void {
     const name = this.getAttribute("name");
@@ -275,7 +323,15 @@ export class HTMLInputElement extends HTMLElement {
   }
 
   get checked(): boolean {
-    return this.#checked ?? this.defaultChecked;
+    if (this.#checked !== null) {
+      return this.#checked;
+    }
+
+    if (this.type === "radio" && this.defaultChecked) {
+      return this.#isDefaultCheckedRadioWinner();
+    }
+
+    return this.defaultChecked;
   }
 
   set checked(next: boolean) {
@@ -292,6 +348,9 @@ export class HTMLInputElement extends HTMLElement {
   set defaultChecked(next: boolean) {
     if (next) {
       this.setAttribute("checked", "");
+      if (this.#checked === null && this.type === "radio") {
+        this.#uncheckSameGroupRadios();
+      }
     } else {
       this.removeAttribute("checked");
     }
@@ -303,7 +362,8 @@ export class HTMLInputElement extends HTMLElement {
     }
 
     const inputType = this.type;
-    const togglesChecked = event.type === "click" && (inputType === "checkbox" || inputType === "radio");
+    const radioAlreadyChecked = inputType === "radio" && this.checked;
+    const togglesChecked = event.type === "click" && (inputType === "checkbox" || (inputType === "radio" && !radioAlreadyChecked));
     const previousChecked = this.checked;
 
     if (togglesChecked) {
@@ -322,7 +382,7 @@ export class HTMLInputElement extends HTMLElement {
       return result;
     }
 
-    if (inputType === "radio" && this.checked) {
+    if (inputType === "radio" && togglesChecked && this.checked) {
       this.#uncheckSameGroupRadios();
     }
 
