@@ -1650,18 +1650,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-implementation.html",
-      "subtest": "__all__",
-      "reason": "DOMImplementation interface identity is approximated",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-implementation.html",
-      "subtest": "__timeout__",
-      "reason": "DOMImplementation interface identity is approximated",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-importNode.html",
       "subtest": "__all__",
       "reason": "Attr importNode namespace/prefix support is incomplete",

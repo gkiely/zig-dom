@@ -19,6 +19,13 @@ const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const MATHML_NAMESPACE = "http://www.w3.org/1998/Math/MathML";
 
+type DOMImplementationShape = {
+  createDocument: (namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null) => Document;
+  createHTMLDocument: (title?: string) => Document;
+  createDocumentType: (qualifiedName: string, publicId?: string, systemId?: string) => DocumentType;
+  hasFeature: (...args: unknown[]) => boolean;
+};
+
 function asciiLowercase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
@@ -179,6 +186,7 @@ export class Document extends Node {
   #headCache: Element | null = null;
   #bodyCache: Element | null = null;
   #doctypeCache: DocumentType | null = null;
+  #implementationCache: DOMImplementationShape | null = null;
 
   constructor(window: Window, handle: number, nodeType = Node.DOCUMENT_NODE) {
     super(window, handle, nodeType);
@@ -327,12 +335,11 @@ export class Document extends Node {
     return this._window.getSelection();
   }
 
-  get implementation(): {
-    createDocument: (namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null) => Document;
-    createHTMLDocument: (title?: string) => Document;
-    createDocumentType: (qualifiedName: string, publicId?: string, systemId?: string) => DocumentType;
-    hasFeature: (...args: unknown[]) => boolean;
-  } {
+  get implementation(): DOMImplementationShape {
+    if (this.#implementationCache) {
+      return this.#implementationCache;
+    }
+
     const ownerDocument = this;
     const createDocument = function(namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null): Document {
       if (arguments.length < 2) {
@@ -387,7 +394,7 @@ export class Document extends Node {
       return createSyntheticDocumentType(ownerDocument, name, String(publicId), String(systemId));
     };
 
-    return {
+    const implementation = {
       createDocument,
       createDocumentType,
       hasFeature: (): boolean => true,
@@ -420,6 +427,12 @@ export class Document extends Node {
         return nextDocument;
       }
     };
+    const DOMImplementationCtor = ownerDocument._window.DOMImplementation as { prototype?: object };
+    if (DOMImplementationCtor.prototype) {
+      Object.setPrototypeOf(implementation, DOMImplementationCtor.prototype);
+    }
+    this.#implementationCache = implementation;
+    return implementation;
   }
 
   createRange(): Range {
