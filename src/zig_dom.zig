@@ -984,10 +984,11 @@ pub export fn zig_dom_node_name(node: u64, out_ptr: *[*c]u8, out_len: *usize) u3
 
 pub export fn zig_dom_node_append_child(parent: u64, child: u64) u32 {
 
-    const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
-    const window_for_child = resolveNodeWindow(child) orelse return STATUS_INVALID_HANDLE;
-    if (window.handle != window_for_child.handle) return STATUS_HIERARCHY;
+    const window_handle = decodeNodeWindowHandle(parent);
+    if (window_handle == 0) return STATUS_INVALID_HANDLE;
+    if (decodeNodeWindowHandle(child) != window_handle) return STATUS_HIERARCHY;
 
+    const window = resolveWindow(window_handle) orelse return STATUS_INVALID_HANDLE;
     return @intFromEnum(appendChild(window, parent, child));
 }
 

@@ -38,6 +38,13 @@ const CUSTOM_ELEMENT_UPGRADED = Symbol("zig-dom-custom-element-upgraded");
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
+function asciiLowercase(value: string): string {
+  if (!/[A-Z]/.test(value)) {
+    return value;
+  }
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
 type CustomElementLifecycle = {
   [CUSTOM_ELEMENT_UPGRADED]?: boolean;
   connectedCallback?: () => void;
@@ -248,6 +255,8 @@ export class Window extends EventTargetBase {
   readonly localStorage = new Storage();
   readonly sessionStorage = new Storage();
   readonly customElements: CustomElementRegistry;
+  _hasCustomElementDefinitions = false;
+  _hasMutationObservers = false;
   onanimationend: ((event: Event) => void) | null = null;
   onanimationiteration: ((event: Event) => void) | null = null;
   onanimationstart: ((event: Event) => void) | null = null;
@@ -265,6 +274,7 @@ export class Window extends EventTargetBase {
     this.#documentHandle = native.windowDocument(this._nativeWindowHandle);
 
     this.customElements = new CustomElementRegistry((name) => {
+      this._hasCustomElementDefinitions = true;
       this.upgradeDefinedElements(name);
     });
 
@@ -717,7 +727,7 @@ export class Window extends EventTargetBase {
     }
 
     const kind = native.nodeKind(handle);
-    const tagName = kind === Node.ELEMENT_NODE ? native.nodeName(handle).toLowerCase() : undefined;
+    const tagName = kind === Node.ELEMENT_NODE ? asciiLowercase(native.nodeName(handle)) : undefined;
     return this.#createNode(handle, kind, tagName, false);
   }
 
@@ -745,6 +755,24 @@ export class Window extends EventTargetBase {
     return this.#createNode(handle, Node.ELEMENT_NODE, tagName, skipInitialStyleSync) as Element;
   }
 
+  bindNodeToHandle(handle: number, node: Node): void {
+    if (!handle) {
+      return;
+    }
+    const nodeId = nodeIdFromHandle(handle);
+    this.#nodeCache[nodeId] = node;
+  }
+
+  unbindNodeFromHandle(handle: number, node?: Node): void {
+    if (!handle) {
+      return;
+    }
+    const nodeId = nodeIdFromHandle(handle);
+    if (node == null || this.#nodeCache[nodeId] === node) {
+      this.#nodeCache[nodeId] = undefined;
+    }
+  }
+
   #createNode(handle: number, kind: number, tagNameHint: string | undefined, skipInitialStyleSync: boolean): Node {
     let wrapped: Node;
     let elementTagName: string | undefined;
@@ -753,7 +781,7 @@ export class Window extends EventTargetBase {
         wrapped = new Document(this, handle, kind);
         break;
       case Node.ELEMENT_NODE: {
-        const tagName = tagNameHint ?? native.nodeName(handle).toLowerCase();
+        const tagName = tagNameHint ?? asciiLowercase(native.nodeName(handle));
         elementTagName = tagName;
         switch (tagName) {
           case "input":
@@ -990,14 +1018,16 @@ export class Window extends EventTargetBase {
 
   registerMutationObserver(observer: MutationObserverLike): void {
     this.#mutationObservers.add(observer);
+    this._hasMutationObservers = true;
   }
 
   unregisterMutationObserver(observer: MutationObserverLike): void {
     this.#mutationObservers.delete(observer);
+    this._hasMutationObservers = this.#mutationObservers.size > 0;
   }
 
   hasMutationObservers(): boolean {
-    return this.#mutationObservers.size > 0;
+    return this._hasMutationObservers;
   }
 
   private emitMutationRecord(record: InternalMutationRecord): void {
@@ -1074,6 +1104,7 @@ export class Window extends EventTargetBase {
     this.#closed = true;
     this.#activeElementHandle = null;
     this.#mutationObservers.clear();
+    this._hasMutationObservers = false;
     native.destroyWindow(this._nativeWindowHandle);
     this.#nodeCache.length = 0;
   }

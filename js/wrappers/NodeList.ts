@@ -1,6 +1,7 @@
 import type { Node } from "./Node.ts";
 
 const GET_NODES = Symbol("getNodes");
+const STATIC_LENGTH = Symbol("staticLength");
 
 export class NodeList implements Iterable<Node> {
   declare readonly forEach: (callback: (value: Node, index: number, parent: NodeList) => void, thisArg?: unknown) => void;
@@ -10,15 +11,24 @@ export class NodeList implements Iterable<Node> {
   declare readonly [Symbol.iterator]: () => Iterator<Node>;
 
   constructor(getNodes: () => Node[], options: { static?: boolean } = {}) {
+    const staticNodes = options.static ? getNodes().slice() : null;
+    const readNodes = staticNodes ? () => staticNodes : getNodes;
+
     Object.defineProperty(this, GET_NODES, {
-      value: getNodes,
+      value: readNodes,
       configurable: false,
       writable: false,
       enumerable: false
     });
 
-    if (options.static) {
-      const nodes = getNodes();
+    if (staticNodes) {
+      const nodes = staticNodes;
+      Object.defineProperty(this, STATIC_LENGTH, {
+        value: nodes.length,
+        configurable: false,
+        writable: false,
+        enumerable: false
+      });
       for (let index = 0; index < nodes.length; index += 1) {
         Object.defineProperty(this, String(index), {
           value: nodes[index],
@@ -30,7 +40,6 @@ export class NodeList implements Iterable<Node> {
       return this;
     }
 
-    const readNodes = getNodes;
     return new Proxy(this, {
       get(target, property, receiver) {
         if (typeof property === "string" && /^\d+$/.test(property)) {
@@ -68,6 +77,10 @@ export class NodeList implements Iterable<Node> {
   }
 
   get length(): number {
+    const staticLength = (this as unknown as { [STATIC_LENGTH]?: number })[STATIC_LENGTH];
+    if (typeof staticLength === "number") {
+      return staticLength;
+    }
     return (this as unknown as { [GET_NODES]: () => Node[] })[GET_NODES]().length;
   }
 

@@ -213,31 +213,32 @@ export class Node extends EventTargetBase {
 
   appendChild<TNode extends Node>(child: TNode): TNode {
     this._window.assertOpen();
+    let node = child as Node;
     const canSkipPreInsertionValidation =
       this.#nodeType === Node.ELEMENT_NODE &&
-      child.#nodeType === Node.ELEMENT_NODE &&
-      child._window === this._window;
+      node.#nodeType === Node.ELEMENT_NODE &&
+      node._window === this._window;
     if (!canSkipPreInsertionValidation) {
-      validatePreInsertion(this, child, null);
+      validatePreInsertion(this, node, null);
     }
 
-    if (child.#nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-      while (child.firstChild) {
-        this.appendChild(child.firstChild);
+    if (node.#nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      while (node.firstChild) {
+        this.appendChild(node.firstChild);
       }
       return child;
     }
 
-    if (child._window !== this._window) {
-      throwHierarchyRequestError();
+    if (!canSkipPreInsertionValidation && needsAdoptionForParent(this, node)) {
+      node = adoptForeignNodeForParent(this, node);
     }
 
-    const trackMutations = this._window.hasMutationObservers();
-    const hasCustomElements = this._window.customElements.hasDefinitions;
+    const trackMutations = this._window._hasMutationObservers;
+    const hasCustomElements = this._window._hasCustomElementDefinitions;
     if (!trackMutations && !hasCustomElements) {
-      native.appendChild(this._handle, child._handle);
-      if (child instanceof this._window.HTMLIFrameElement) {
-        scheduleIFrameLoadIfNeeded(child);
+      native.appendChild(this._handle, node._handle);
+      if (isIFrameElement(node)) {
+        scheduleIFrameLoad(node);
       }
       if (this.#nodeType === Node.DOCUMENT_NODE) {
         refreshDocumentElementFlag(this);
@@ -245,22 +246,22 @@ export class Node extends EventTargetBase {
       return child;
     }
 
-    const previousParent = trackMutations ? child.parentNode : null;
-    const previousSibling = trackMutations ? child.previousSibling : null;
-    const nextSibling = trackMutations ? child.nextSibling : null;
-    const wasConnected = this._window.isConnectedNode(child);
-    native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, child._handle);
+    const previousParent = trackMutations ? node.parentNode : null;
+    const previousSibling = trackMutations ? node.previousSibling : null;
+    const nextSibling = trackMutations ? node.nextSibling : null;
+    const wasConnected = this._window.isConnectedNode(node);
+    native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, node._handle);
 
     if (trackMutations) {
-      this._window.notifyChildListMutation(this, [child], [], child.previousSibling, child.nextSibling);
+      this._window.notifyChildListMutation(this, [node], [], node.previousSibling, node.nextSibling);
       if (previousParent && previousParent !== this) {
-        this._window.notifyChildListMutation(previousParent, [], [child], previousSibling, nextSibling);
+        this._window.notifyChildListMutation(previousParent, [], [node], previousSibling, nextSibling);
       }
     }
 
     if (!hasCustomElements) {
-      if (child instanceof this._window.HTMLIFrameElement) {
-        scheduleIFrameLoadIfNeeded(child);
+      if (isIFrameElement(node)) {
+        scheduleIFrameLoad(node);
       }
       if (this.#nodeType === Node.DOCUMENT_NODE) {
         refreshDocumentElementFlag(this);
@@ -268,18 +269,18 @@ export class Node extends EventTargetBase {
       return child;
     }
 
-    const isConnected = this._window.isConnectedNode(child);
+    const isConnected = this._window.isConnectedNode(node);
     if (!wasConnected && isConnected) {
-      this._window.notifyConnectedSubtree(child);
+      this._window.notifyConnectedSubtree(node);
     } else if (wasConnected && !isConnected) {
-      this._window.notifyDisconnectedSubtree(child);
+      this._window.notifyDisconnectedSubtree(node);
     } else if (wasConnected && isConnected && previousParent && previousParent !== this) {
-      this._window.notifyDisconnectedSubtree(child);
-      this._window.notifyConnectedSubtree(child);
+      this._window.notifyDisconnectedSubtree(node);
+      this._window.notifyConnectedSubtree(node);
     }
 
-    if (child instanceof this._window.HTMLIFrameElement) {
-      scheduleIFrameLoadIfNeeded(child);
+    if (isIFrameElement(node)) {
+      scheduleIFrameLoad(node);
     }
     if (this.#nodeType === Node.DOCUMENT_NODE) {
       refreshDocumentElementFlag(this);
@@ -410,48 +411,49 @@ export class Node extends EventTargetBase {
       return newChild;
     }
 
-    if (newChild._window !== this._window) {
-      throwHierarchyRequestError();
+    let childToInsert = newChild as Node;
+    if (needsAdoptionForParent(this, childToInsert)) {
+      childToInsert = adoptForeignNodeForParent(this, childToInsert);
     }
 
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
-      native.insertBefore(this._handle, newChild._handle, reference?._handle ?? 0);
-      scheduleIFrameLoadIfNeeded(newChild);
+      native.insertBefore(this._handle, childToInsert._handle, reference?._handle ?? 0);
+      scheduleIFrameLoadIfNeeded(childToInsert);
       refreshDocumentElementFlag(this);
       return newChild;
     }
 
-    const previousParent = trackMutations ? newChild.parentNode : null;
-    const previousSibling = trackMutations ? newChild.previousSibling : null;
-    const nextSibling = trackMutations ? newChild.nextSibling : null;
-    const wasConnected = this._window.isConnectedNode(newChild);
-    native.insertBefore(this._handle, newChild._handle, reference?._handle ?? 0);
+    const previousParent = trackMutations ? childToInsert.parentNode : null;
+    const previousSibling = trackMutations ? childToInsert.previousSibling : null;
+    const nextSibling = trackMutations ? childToInsert.nextSibling : null;
+    const wasConnected = this._window.isConnectedNode(childToInsert);
+    native.insertBefore(this._handle, childToInsert._handle, reference?._handle ?? 0);
 
     if (trackMutations) {
-      this._window.notifyChildListMutation(this, [newChild], [], newChild.previousSibling, newChild.nextSibling);
+      this._window.notifyChildListMutation(this, [childToInsert], [], childToInsert.previousSibling, childToInsert.nextSibling);
       if (previousParent && previousParent !== this) {
-        this._window.notifyChildListMutation(previousParent, [], [newChild], previousSibling, nextSibling);
+        this._window.notifyChildListMutation(previousParent, [], [childToInsert], previousSibling, nextSibling);
       }
     }
 
     if (!this._window.customElements.hasDefinitions) {
-      scheduleIFrameLoadIfNeeded(newChild);
+      scheduleIFrameLoadIfNeeded(childToInsert);
       refreshDocumentElementFlag(this);
       return newChild;
     }
 
-    const isConnected = this._window.isConnectedNode(newChild);
+    const isConnected = this._window.isConnectedNode(childToInsert);
     if (!wasConnected && isConnected) {
-      this._window.notifyConnectedSubtree(newChild);
+      this._window.notifyConnectedSubtree(childToInsert);
     } else if (wasConnected && !isConnected) {
-      this._window.notifyDisconnectedSubtree(newChild);
+      this._window.notifyDisconnectedSubtree(childToInsert);
     } else if (wasConnected && isConnected && previousParent && previousParent !== this) {
-      this._window.notifyDisconnectedSubtree(newChild);
-      this._window.notifyConnectedSubtree(newChild);
+      this._window.notifyDisconnectedSubtree(childToInsert);
+      this._window.notifyConnectedSubtree(childToInsert);
     }
 
-    scheduleIFrameLoadIfNeeded(newChild);
+    scheduleIFrameLoadIfNeeded(childToInsert);
     refreshDocumentElementFlag(this);
     return newChild;
   }
@@ -623,14 +625,15 @@ export class Node extends EventTargetBase {
       return oldChild;
     }
 
-    if ((newChild as Node)._window !== this._window) {
-      throwHierarchyRequestError();
+    let replacementChild = newChild as Node;
+    if (needsAdoptionForParent(this, replacementChild)) {
+      replacementChild = adoptForeignNodeForParent(this, replacementChild);
     }
 
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
-      native.replaceChild(this._handle, newChild._handle, oldChild._handle);
-      scheduleIFrameLoadIfNeeded(newChild as Node);
+      native.replaceChild(this._handle, replacementChild._handle, oldChild._handle);
+      scheduleIFrameLoadIfNeeded(replacementChild);
       refreshDocumentElementFlag(this);
       return oldChild;
     }
@@ -638,40 +641,40 @@ export class Node extends EventTargetBase {
     const oldPreviousSibling = trackMutations ? oldChild.previousSibling : null;
     const oldNextSibling = trackMutations ? oldChild.nextSibling : null;
     const oldWasConnected = this._window.isConnectedNode(oldChild);
-    const newWasConnected = this._window.isConnectedNode(newChild);
-    const newPreviousParent = trackMutations ? newChild.parentNode : null;
-    const newPreviousSibling = trackMutations ? newChild.previousSibling : null;
-    const newNextSibling = trackMutations ? newChild.nextSibling : null;
-    native.replaceChild(this._handle, newChild._handle, oldChild._handle);
+    const newWasConnected = this._window.isConnectedNode(replacementChild);
+    const newPreviousParent = trackMutations ? replacementChild.parentNode : null;
+    const newPreviousSibling = trackMutations ? replacementChild.previousSibling : null;
+    const newNextSibling = trackMutations ? replacementChild.nextSibling : null;
+    native.replaceChild(this._handle, replacementChild._handle, oldChild._handle);
 
     if (trackMutations) {
       this._window.notifyChildListMutation(this, [], [oldChild], oldPreviousSibling, oldNextSibling);
-      this._window.notifyChildListMutation(this, [newChild], [], newChild.previousSibling, newChild.nextSibling);
+      this._window.notifyChildListMutation(this, [replacementChild], [], replacementChild.previousSibling, replacementChild.nextSibling);
       if (newPreviousParent && newPreviousParent !== this) {
-        this._window.notifyChildListMutation(newPreviousParent, [], [newChild], newPreviousSibling, newNextSibling);
+        this._window.notifyChildListMutation(newPreviousParent, [], [replacementChild], newPreviousSibling, newNextSibling);
       }
     }
 
     if (!this._window.customElements.hasDefinitions) {
-      scheduleIFrameLoadIfNeeded(newChild as Node);
+      scheduleIFrameLoadIfNeeded(replacementChild);
       refreshDocumentElementFlag(this);
       return oldChild;
     }
 
     const oldIsConnected = this._window.isConnectedNode(oldChild);
-    const newIsConnected = this._window.isConnectedNode(newChild);
+    const newIsConnected = this._window.isConnectedNode(replacementChild);
 
     if (oldWasConnected && !oldIsConnected) {
       this._window.notifyDisconnectedSubtree(oldChild);
     }
     if (!newWasConnected && newIsConnected) {
-      this._window.notifyConnectedSubtree(newChild);
+      this._window.notifyConnectedSubtree(replacementChild);
     } else if (newWasConnected && newIsConnected && newPreviousParent && newPreviousParent !== this) {
-      this._window.notifyDisconnectedSubtree(newChild);
-      this._window.notifyConnectedSubtree(newChild);
+      this._window.notifyDisconnectedSubtree(replacementChild);
+      this._window.notifyConnectedSubtree(replacementChild);
     }
 
-    scheduleIFrameLoadIfNeeded(newChild as Node);
+    scheduleIFrameLoadIfNeeded(replacementChild);
     refreshDocumentElementFlag(this);
     return oldChild;
   }
@@ -1148,9 +1151,7 @@ const NODE_PROTOTYPE_CONSTANTS: Record<string, number> = {
 };
 
 function adoptForeignNodeForParent(parent: Node, foreignNode: Node): Node {
-  const destinationDocument = parent.nodeType === Node.DOCUMENT_NODE
-    ? (parent as unknown as Document)
-    : parent.ownerDocument;
+  const destinationDocument = destinationDocumentForParent(parent);
 
   if (!destinationDocument) {
     throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
@@ -1167,6 +1168,29 @@ function adoptForeignNodeForParent(parent: Node, foreignNode: Node): Node {
 
 function throwHierarchyRequestError(): never {
   throw new ZigDOMException("The operation would yield an incorrect node tree.", "HierarchyRequestError", 3);
+}
+
+function destinationDocumentForParent(parent: Node): Document | null {
+  return parent.nodeType === Node.DOCUMENT_NODE
+    ? (parent as unknown as Document)
+    : parent.ownerDocument;
+}
+
+function needsAdoptionForParent(parent: Node, node: Node): boolean {
+  const destinationDocument = destinationDocumentForParent(parent);
+  if (!destinationDocument) {
+    return false;
+  }
+
+  if (node._window !== parent._window) {
+    return true;
+  }
+
+  const ownerDocument = node.nodeType === Node.DOCUMENT_NODE
+    ? (node as unknown as Document)
+    : node.ownerDocument;
+
+  return ownerDocument != null && ownerDocument !== destinationDocument;
 }
 
 function validatePreInsertion(parent: Node, newChild: Node, referenceChild: Node | null): void {
@@ -1305,6 +1329,13 @@ function remapNodeIdentity(source: Node, replacement: Node): void {
   const sourceChildren = source.childNodes.toArray();
   const replacementChildren = replacement.childNodes.toArray();
 
+  const sourceLike = source as unknown as {
+    _window: Window;
+    _handle: number;
+  };
+  const previousWindow = sourceLike._window;
+  const previousHandle = sourceLike._handle;
+
   const mutableSource = source as unknown as {
     _window: Window;
     _handle: number;
@@ -1322,6 +1353,8 @@ function remapNodeIdentity(source: Node, replacement: Node): void {
 
   mutableSource._window = replacementLike._window;
   mutableSource._handle = replacementLike._handle;
+  previousWindow.unbindNodeFromHandle(previousHandle, source);
+  replacementLike._window.bindNodeToHandle(replacementLike._handle, source);
 
   if (source.nodeType === Node.ELEMENT_NODE) {
     mutableSource.__namespaceURI = replacementLike.__namespaceURI;
@@ -1429,10 +1462,18 @@ function isEqualDocumentNode(left: Node, right: Node): boolean {
 }
 
 function scheduleIFrameLoadIfNeeded(node: Node): void {
-  if (!(node instanceof node._window.HTMLIFrameElement)) {
+  if (!isIFrameElement(node)) {
     return;
   }
 
+  scheduleIFrameLoad(node);
+}
+
+function isIFrameElement(node: Node): boolean {
+  return (node as unknown as { constructor?: unknown }).constructor === node._window.HTMLIFrameElement;
+}
+
+function scheduleIFrameLoad(node: Node): void {
   const elementLike = node as unknown as {
     dispatchEvent?: (event: Event) => boolean;
     onload?: ((event: Event) => void) | null;

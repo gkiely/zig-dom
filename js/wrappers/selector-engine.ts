@@ -1,7 +1,7 @@
 import type { Document } from "./Document.ts";
+import { ZigDOMException } from "./DOMException.ts";
 import type { Element } from "./Element.ts";
 import { Node } from "./Node.ts";
-import { ZigDOMException } from "./DOMException.ts";
 
 type Combinator = "descendant" | "child" | "adjacent" | "sibling";
 type AttributeOperator = "=" | "~=" | "|=" | "^=" | "$=" | "*=";
@@ -36,6 +36,13 @@ type ComplexSelector = {
   compounds: CompoundSelector[];
   combinators: Combinator[];
 };
+
+function asciiLowercase(value: string): string {
+  if (!/[A-Z]/.test(value)) {
+    return value;
+  }
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
 
 export function canUseNativeSelector(selector: string): boolean {
   return /^[A-Za-z][A-Za-z0-9_-]*$/.test(selector)
@@ -145,14 +152,14 @@ type FastSimpleSelector =
 
 function parseFastSimpleSelector(selector: string): FastSimpleSelector | null {
   if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(selector)) {
-    return { kind: "tag", value: selector.toLowerCase() };
+    return { kind: "tag", value: selector };
   }
   if (/^\.[A-Za-z_][A-Za-z0-9_-]*$/.test(selector)) {
     return { kind: "class", value: selector.slice(1) };
   }
   const attributeMatch = selector.match(/^\[([A-Za-z_][A-Za-z0-9_:-]*)\]$/);
   if (attributeMatch?.[1]) {
-    return { kind: "attribute", value: attributeMatch[1].toLowerCase() };
+    return { kind: "attribute", value: attributeMatch[1] };
   }
   return null;
 }
@@ -185,12 +192,18 @@ function queryFastSimpleSelectorFromRoots(roots: Node[], selector: FastSimpleSel
         const element = current as unknown as Element;
         let matched = false;
         if (selector.kind === "tag") {
-          matched = element.localName === selector.value;
+          const selectorTagName = isHtmlElement(element)
+            ? asciiLowercase(selector.value)
+            : selector.value;
+          matched = element.localName === selectorTagName;
         } else if (selector.kind === "class") {
           const className = element.getAttribute("class");
           matched = className != null && className.split(/[\t\n\f\r ]+/).includes(selector.value);
         } else {
-          matched = element.getAttribute(selector.value) != null;
+          const attributeName = isHtmlElement(element)
+            ? asciiLowercase(selector.value)
+            : selector.value;
+          matched = element.getAttribute(attributeName) != null;
         }
         if (matched && !seen.has(element._handle)) {
           seen.add(element._handle);

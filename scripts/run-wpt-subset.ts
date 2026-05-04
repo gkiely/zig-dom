@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createContext, runInContext } from "node:vm";
-import { Window } from "../js/wrappers/Window";
 import { NodeList } from "../js/wrappers/NodeList";
+import { Window } from "../js/wrappers/Window";
 
 const globalAsyncErrors: string[] = [];
 const nodeListPrototypeDescriptors = Object.getOwnPropertyDescriptors(NodeList.prototype);
@@ -199,6 +199,35 @@ function parseMetaScripts(html: string): string[] {
     }
   }
   return metaScripts;
+}
+
+function readHtmlAttribute(tag: string, attribute: string): string | null {
+  const match = tag.match(new RegExp(`\\b${attribute}\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'>]+))`, "i"));
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+}
+
+function hasLongTimeoutHint(html: string): boolean {
+  const metaTags = html.match(/<meta\b[^>]*>/gi) ?? [];
+  for (const tag of metaTags) {
+    const name = readHtmlAttribute(tag, "name")?.toLowerCase();
+    const content = readHtmlAttribute(tag, "content")?.toLowerCase();
+    if (name === "timeout" && content === "long") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resolveScriptTimeout(baseTimeoutMs: number, html: string): number | undefined {
+  if (baseTimeoutMs <= 0) {
+    return undefined;
+  }
+
+  if (hasLongTimeoutHint(html)) {
+    return Math.max(baseTimeoutMs * 10, 5000);
+  }
+
+  return baseTimeoutMs;
 }
 
 function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string): string[] {
@@ -452,6 +481,7 @@ function restoreSharedPrototypeState(): void {
 async function runHtmlEntry(file: string, wptRootPath: string, variant?: string): Promise<SubtestResult[]> {
   restoreSharedPrototypeState();
   const html = readText(file);
+  const entryScriptTimeoutMs = resolveScriptTimeout(scriptTimeoutMs, html);
   const assert = createAssert();
   const pendingTests: Promise<void>[] = [];
   const results: SubtestResult[] = [];
@@ -502,10 +532,11 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       frameRecord.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
       try {
         const scripts = parseScriptBlocks(framePath, frameSource, wptRootPath);
+        const frameScriptTimeoutMs = resolveScriptTimeout(scriptTimeoutMs, frameSource);
         if (scripts.length > 0) {
           runInContext(scripts.join("\n;\n"), frameContext, {
             filename: framePath,
-            timeout: scriptTimeoutMs > 0 ? scriptTimeoutMs : undefined
+            timeout: frameScriptTimeoutMs
           });
         }
         const onload = (frameWindow as unknown as { onload?: ((event: Event) => void) | null }).onload;
@@ -590,7 +621,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
         vmContext,
         {
           filename: `${file}#harness-callback`,
-          timeout: scriptTimeoutMs > 0 ? scriptTimeoutMs : undefined
+          timeout: entryScriptTimeoutMs
         }
       ) as void | Promise<void>;
     } finally {
@@ -1153,7 +1184,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   const executeScript = (source: string) => {
     runInContext(source, vmContext, {
       filename: file,
-      timeout: scriptTimeoutMs > 0 ? scriptTimeoutMs : undefined
+      timeout: entryScriptTimeoutMs
     });
   };
 

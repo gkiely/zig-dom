@@ -2,10 +2,10 @@ import { native } from "../ffi.ts";
 import type { Document } from "./Document.ts";
 import { ZigDOMException } from "./DOMException.ts";
 import { Event } from "./Event.ts";
+import { parseHtmlInto } from "./html-parser.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
-import { parseHtmlInto } from "./html-parser.ts";
 import { elementMatchesSelector, querySelectorAllInElement } from "./selector-engine.ts";
 
 type AttributeEntry = { name: string; value: string };
@@ -39,6 +39,10 @@ function asciiLowercase(value: string): string {
 
 function asciiUppercase(value: string): string {
   return value.replace(/[a-z]/g, (letter) => String.fromCharCode(letter.charCodeAt(0) - 0x20));
+}
+
+function normalizeAttributeValue(value: string): string {
+  return value === "\u0000" ? "" : value;
 }
 
 function splitAsciiWhitespace(value: string): string[] {
@@ -460,7 +464,7 @@ export class Element extends Node {
   }
 
   get localName(): string {
-    return (this as unknown as { __localName?: string }).__localName ?? native.nodeName(this._handle).toLowerCase();
+    return (this as unknown as { __localName?: string }).__localName ?? asciiLowercase(native.nodeName(this._handle));
   }
 
   get id(): string {
@@ -527,7 +531,11 @@ export class Element extends Node {
       .filter((attribute) => {
         const key = this.#attributeKey(attribute.name);
         return !syntheticNames.has(key) || this.#plainAttributeNames.has(key);
-      });
+      })
+      .map((attribute) => ({
+        name: attribute.name,
+        value: normalizeAttributeValue(attribute.value)
+      }));
     const attrs = [...nativeAttrs];
     for (const [name, value] of this.#nonHtmlAttributes) {
       const displayName = this.#attributeDisplayName(name);
@@ -543,21 +551,26 @@ export class Element extends Node {
     const ownerDocument = this.ownerDocument;
     const cache = new Map<string, string | null>();
     for (const attr of attrs) {
-      cache.set(this.#attributeKey(attr.name), attr.value);
+      const key = this.#attributeKey(attr.name);
+      if (!cache.has(key)) {
+        cache.set(key, normalizeAttributeValue(attr.value));
+      }
     }
     this.#attributeCache = cache;
     const collection = attrs.map((attr) => {
       const internalName = [...this.#attributeMetadata.entries()].find(([, metadata]) => metadata.qualifiedName === attr.name)?.[0] ?? attr.name;
       const metadata = this.#attributeMetadata.get(internalName);
       const name = this.#isHtmlElement() && !this.#nonHtmlAttributes.has(attr.name) && !metadata
-        ? attr.name.toLowerCase()
+        ? asciiLowercase(attr.name)
         : attr.name;
+      const value = normalizeAttributeValue(attr.value);
       return {
       ...attr,
+      value,
       name,
       nodeName: name,
-      nodeValue: attr.value,
-      textContent: attr.value,
+      nodeValue: value,
+      textContent: value,
       specified: true,
       ownerElement: this,
       ownerDocument,
@@ -739,7 +752,8 @@ export class Element extends Node {
   getAttribute(name: string): string | null {
     const key = this.#attributeKey(name);
     if (this.#attributeCache?.has(key)) {
-      return this.#attributeCache.get(key) ?? null;
+      const cached = this.#attributeCache.get(key);
+      return cached == null ? null : normalizeAttributeValue(cached);
     }
 
     if (this.#plainAttributeNames.has(key)) {
@@ -867,7 +881,7 @@ export class Element extends Node {
     }
     if (!this.#isHtmlElement()) {
       this.#mutableNonHtmlAttributes().set(key, stringValue);
-    } else if (key !== name.toLowerCase()) {
+    } else if (key !== asciiLowercase(name)) {
       this.#mutableNonHtmlAttributes().set(key, stringValue);
     }
     if (!this.#attributeNamespaces.has(key)) {
