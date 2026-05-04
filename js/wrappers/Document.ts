@@ -231,7 +231,8 @@ export class Document extends Node {
   }
 
   get location(): Location | null {
-    return (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument ? null : this._window.location as unknown as Location;
+    const metadata = this as unknown as { __isXMLDocument?: boolean; __hasBrowsingContext?: boolean };
+    return metadata.__isXMLDocument || metadata.__hasBrowsingContext === false ? null : this._window.location as unknown as Location;
   }
 
   get charset(): string {
@@ -351,19 +352,20 @@ export class Document extends Node {
       if (/>|\s/.test(name)) {
         throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
       }
-      return createSyntheticDocumentType(this, name, String(publicId), String(systemId));
+      return createSyntheticDocumentType(ownerDocument, name, String(publicId), String(systemId));
     };
 
     return {
       createDocument,
       createDocumentType,
       hasFeature: (): boolean => true,
-      createHTMLDocument: (title?: string): Document => {
-        const DocumentCtor = (this._window as unknown as {
+      createHTMLDocument: function(title?: string): Document {
+        const DocumentCtor = (ownerDocument._window as unknown as {
           Document: new () => Document;
         }).Document;
         const nextDocument = new DocumentCtor();
         Object.setPrototypeOf(nextDocument, DocumentCtor.prototype);
+        (nextDocument as unknown as { __hasBrowsingContext?: boolean }).__hasBrowsingContext = false;
         const doctype = createSyntheticDocumentType(nextDocument, "html", "", "");
         nextDocument.#doctypeCache = doctype;
         nextDocument.appendChild(doctype);
@@ -378,9 +380,9 @@ export class Document extends Node {
         nextDocument.#headCache = head;
         nextDocument.#bodyCache = body;
 
-        if (title && title.length > 0) {
+        if (arguments.length > 0 && title !== undefined) {
           const titleElement = nextDocument.createElement("title");
-          titleElement.textContent = title;
+          titleElement.appendChild(nextDocument.createTextNode(String(title)));
           head.appendChild(titleElement);
         }
         return nextDocument;

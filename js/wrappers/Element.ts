@@ -93,15 +93,13 @@ class DOMTokenList {
 
   add(...tokens: string[]): void {
     const next = new Set(this.#tokens());
-    let changed = false;
     for (const rawToken of tokens) {
       const token = this.#validate(rawToken);
       if (!next.has(token)) {
-        changed = true;
         next.add(token);
       }
     }
-    if (changed) {
+    if (tokens.length > 0 || this.element.hasAttribute(this.attributeName)) {
       this.#set([...next]);
     }
   }
@@ -110,7 +108,7 @@ class DOMTokenList {
     const toRemove = new Set(tokens.map((token) => this.#validate(token)));
     const current = this.#tokens();
     const next = current.filter((token) => !toRemove.has(token));
-    if (next.length !== current.length) {
+    if (tokens.length > 0 || this.element.hasAttribute(this.attributeName)) {
       this.#set(next);
     }
   }
@@ -146,6 +144,10 @@ class DOMTokenList {
     const index = tokens.indexOf(oldValue);
     if (index === -1) {
       return false;
+    }
+    if (oldValue === newValue) {
+      this.#set(tokens);
+      return true;
     }
     if (tokens.includes(newValue)) {
       this.#set(tokens.filter((current) => current !== oldValue));
@@ -190,6 +192,10 @@ class DOMTokenList {
 
   set value(value: string) {
     this.element.setAttribute(this.attributeName, String(value));
+  }
+
+  supports(): never {
+    throw new TypeError("DOMTokenList does not define supported tokens for this attribute.");
   }
 }
 
@@ -254,6 +260,10 @@ export class Element extends Node {
     return this.#classList;
   }
 
+  set classList(_value: DOMTokenList | string) {
+    // The Web IDL attribute is readonly; assignment is ignored in this runtime.
+  }
+
   get relList(): DOMTokenList | undefined {
     const isSupportedHtml = this.namespaceURI === "http://www.w3.org/1999/xhtml" && ["a", "area", "link"].includes(this.localName);
     const isSupportedSvg = this.namespaceURI === "http://www.w3.org/2000/svg" && this.localName === "a";
@@ -286,6 +296,22 @@ export class Element extends Node {
       return qualifiedName.toUpperCase();
     }
     return qualifiedName;
+  }
+
+  get href(): string {
+    const raw = this.getAttribute("href");
+    if (raw == null) {
+      return "";
+    }
+    try {
+      return new URL(raw, this.ownerDocument?.URL ?? this._window.location.href).href;
+    } catch {
+      return raw;
+    }
+  }
+
+  set href(value: string) {
+    this.setAttribute("href", String(value));
   }
 
   override get nodeName(): string {
