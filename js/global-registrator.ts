@@ -114,7 +114,7 @@ export class GlobalRegistrator {
       File: window.File,
       URL: window.URL,
       CSS: (window as unknown as Record<string, unknown>).CSS,
-      URLSearchParams: globalThis.URLSearchParams,
+      URLSearchParams: window.URLSearchParams,
       AbortController: window.AbortController,
       AbortSignal: window.AbortSignal,
       DOMParser: (window as unknown as { DOMParser?: unknown }).DOMParser

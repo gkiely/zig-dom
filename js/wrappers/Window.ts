@@ -934,6 +934,7 @@ export class Window extends EventTargetBase {
     this.Blob = globalThis.Blob;
     this.File = globalThis.File;
     this.URL = globalThis.URL;
+    this.URLSearchParams = globalThis.URLSearchParams;
     this.AbortSignal = globalThis.AbortSignal;
     this.AbortController = globalThis.AbortController;
     const nativeCSS = (globalThis as unknown as {
@@ -1620,6 +1621,7 @@ export class Window extends EventTargetBase {
   Blob!: typeof globalThis.Blob;
   File!: typeof globalThis.File;
   URL!: typeof globalThis.URL;
+  URLSearchParams!: typeof globalThis.URLSearchParams;
   CSS!: typeof globalThis.CSS;
   AbortSignal!: typeof globalThis.AbortSignal;
   AbortController!: typeof globalThis.AbortController;
