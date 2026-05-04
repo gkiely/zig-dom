@@ -563,6 +563,14 @@ export class Node extends EventTargetBase {
     if (newChildLike.nodeType === Node.DOCUMENT_FRAGMENT_NODE && newChild instanceof Node) {
       const fragmentChildren = newChild.childNodes.toArray();
       const reference = oldChild.nextSibling;
+      if (this.nodeType === Node.DOCUMENT_NODE) {
+        this.removeChild(oldChild);
+        for (const child of fragmentChildren) {
+          this.insertBefore(child, reference);
+        }
+        refreshDocumentElementFlag(this);
+        return oldChild;
+      }
       for (const child of fragmentChildren) {
         this.insertBefore(child, reference);
       }
@@ -1429,10 +1437,10 @@ function isEqualHtmlRoot(leftRoot: Node, rightRoot: Node): boolean {
     return false;
   }
 
-  if (leftHead && rightHead && !leftHead.isEqualNode(rightHead)) {
+  if (leftHead && rightHead && !isEqualHtmlDocumentChild(leftHead, rightHead)) {
     return false;
   }
-  if (leftBody && rightBody && !leftBody.isEqualNode(rightBody)) {
+  if (leftBody && rightBody && !isEqualHtmlDocumentChild(leftBody, rightBody)) {
     return false;
   }
 
@@ -1455,6 +1463,46 @@ function isEqualHtmlRoot(leftRoot: Node, rightRoot: Node): boolean {
     }
   }
 
+  return true;
+}
+
+function isEqualHtmlDocumentChild(left: Node, right: Node): boolean {
+  const leftElement = left as unknown as { localName?: string; attributes?: Array<{ namespaceURI?: string | null; localName?: string; name: string; value: string }> };
+  const rightElement = right as unknown as { localName?: string; attributes?: Array<{ namespaceURI?: string | null; localName?: string; name: string; value: string }> };
+  if (leftElement.localName !== rightElement.localName) {
+    return false;
+  }
+
+  const leftAttrs = leftElement.attributes ?? [];
+  const rightAttrs = rightElement.attributes ?? [];
+  if (leftAttrs.length !== rightAttrs.length) {
+    return false;
+  }
+
+  const sortAttrs = (items: Array<{ namespaceURI?: string | null; localName?: string; name: string; value: string }>) =>
+    [...items].sort((a, b) => `${a.namespaceURI ?? ""}:${a.localName ?? a.name}`.localeCompare(`${b.namespaceURI ?? ""}:${b.localName ?? b.name}`));
+  const leftSorted = sortAttrs(leftAttrs);
+  const rightSorted = sortAttrs(rightAttrs);
+  for (let index = 0; index < leftSorted.length; index += 1) {
+    const leftAttr = leftSorted[index];
+    const rightAttr = rightSorted[index];
+    if (!leftAttr || !rightAttr || leftAttr.namespaceURI !== rightAttr.namespaceURI ||
+        (leftAttr.localName ?? leftAttr.name) !== (rightAttr.localName ?? rightAttr.name) ||
+        leftAttr.value !== rightAttr.value) {
+      return false;
+    }
+  }
+
+  const leftChildren = left.childNodes.toArray();
+  const rightChildren = right.childNodes.toArray();
+  if (leftChildren.length !== rightChildren.length) {
+    return false;
+  }
+  for (let index = 0; index < leftChildren.length; index += 1) {
+    if (!leftChildren[index]?.isEqualNode(rightChildren[index] ?? null)) {
+      return false;
+    }
+  }
   return true;
 }
 
