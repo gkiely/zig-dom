@@ -738,6 +738,9 @@ export class Window extends EventTargetBase {
     }
 
     const kind = native.nodeKind(handle);
+    if (kind === 0) {
+      return null;
+    }
     const tagName = kind === Node.ELEMENT_NODE ? asciiLowercase(native.nodeName(handle)) : undefined;
     return this.#createNode(handle, kind, tagName, false);
   }

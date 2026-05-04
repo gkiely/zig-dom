@@ -1,125 +1,125 @@
 {
-  "generatedAt": "2026-05-04T06:05:06.897Z",
+  "generatedAt": "2026-05-04T06:28:52.909Z",
   "rows": [
     {
       "metric": "append_10k_children_ms",
-      "zig-dom": 0.9213330000000042,
-      "happy-dom": 2.932832999999846,
-      "jsdom": 9.632458999999471
+      "zig-dom": 0.7727919999999813,
+      "happy-dom": 4.184332999999697,
+      "jsdom": 9.20995800000037
     },
     {
       "metric": "create_10k_elements_ms",
-      "zig-dom": 1.5017080000000078,
-      "happy-dom": 2.4739580000000387,
-      "jsdom": 7.041791999999987
+      "zig-dom": 1.6072919999999726,
+      "happy-dom": 4.384167000000161,
+      "jsdom": 9.252207999999882
     },
     {
       "metric": "custom_elements_create_append_1k_ms",
-      "zig-dom": 0.8799169999999776,
-      "happy-dom": 2.407249999999749,
-      "jsdom": 2.9530839999997625
+      "zig-dom": 0.9816669999999021,
+      "happy-dom": 2.6345830000000205,
+      "jsdom": 2.9518330000000788
     },
     {
       "metric": "element_query_all_class_10k_ms",
-      "zig-dom": 1.5938330000000178,
-      "happy-dom": 14.085125000000062,
-      "jsdom": 19.107874999999694
+      "zig-dom": 1.4430419999999913,
+      "happy-dom": 13.649833000000399,
+      "jsdom": 16.66187499999978
     },
     {
       "metric": "fragment_append_10k_children_ms",
-      "zig-dom": 2.742290999999966,
-      "happy-dom": 19.772165999999743,
-      "jsdom": 14.905999999999949
+      "zig-dom": 2.7489160000000084,
+      "happy-dom": 22.709791000000223,
+      "jsdom": 17.66520799999944
     },
     {
       "metric": "global_register_ms",
-      "zig-dom": 0.2922919999999749,
+      "zig-dom": 0.2829590000000053,
       "happy-dom": null,
       "jsdom": null
     },
     {
       "metric": "import_time_ms",
-      "zig-dom": 20.632041,
-      "happy-dom": 55.460958000000005,
-      "jsdom": 280.978042
+      "zig-dom": 35.949916,
+      "happy-dom": 56.420208,
+      "jsdom": 281.23954200000003
     },
     {
       "metric": "inner_html_parse_ms",
-      "zig-dom": 0.4352089999999862,
-      "happy-dom": 11.133542000000034,
-      "jsdom": 26.43116700000064
+      "zig-dom": 0.3442499999999882,
+      "happy-dom": 11.440625000000182,
+      "jsdom": 24.207500000000437
     },
     {
       "metric": "mixed_dom_workflow_1k_ms",
-      "zig-dom": 2.2114579999999933,
-      "happy-dom": 8.176084000000174,
-      "jsdom": 10.187249999999949
+      "zig-dom": 2.260249999999928,
+      "happy-dom": 10.30566699999963,
+      "jsdom": 13.093374999999469
     },
     {
       "metric": "mutation_observer_append_1k_ms",
-      "zig-dom": 1.470583999999917,
-      "happy-dom": 1.7427920000000086,
-      "jsdom": 4.529999999999745
+      "zig-dom": 1.4492910000000165,
+      "happy-dom": 1.6334170000000086,
+      "jsdom": 4.032165999999961
     },
     {
       "metric": "outer_html_serialize_ms",
-      "zig-dom": 0.13037499999995816,
-      "happy-dom": 1.7560829999997623,
-      "jsdom": 2.201290999999401
+      "zig-dom": 0.1346249999999145,
+      "happy-dom": 2.052042000000256,
+      "jsdom": 2.0206250000010186
     },
     {
       "metric": "query_all_attr_10k_ms",
-      "zig-dom": 1.292416000000003,
-      "happy-dom": 5.804166999999779,
-      "jsdom": 13.419624999999542
+      "zig-dom": 1.4217500000000882,
+      "happy-dom": 6.262833000000228,
+      "jsdom": 12.741666999999325
     },
     {
       "metric": "query_all_class_10k_ms",
-      "zig-dom": 1.4017089999999826,
-      "happy-dom": 14.090041999999812,
-      "jsdom": 18.51929199999995
+      "zig-dom": 1.5445829999999887,
+      "happy-dom": 14.190624999999727,
+      "jsdom": 15.53650000000016
     },
     {
       "metric": "query_all_div_10k_ms",
-      "zig-dom": 1.5919169999999667,
-      "happy-dom": 4.586583000000246,
-      "jsdom": 5.5031669999998485
+      "zig-dom": 1.4405409999999392,
+      "happy-dom": 4.734874999999647,
+      "jsdom": 5.45629099999951
     },
     {
       "metric": "react_render_10k_rows_ms",
-      "zig-dom": 42.20937499999991,
-      "happy-dom": 95.36295800000062,
-      "jsdom": 137.4110409999994
+      "zig-dom": 43.38391700000011,
+      "happy-dom": 99.88129200000003,
+      "jsdom": 123.33549999999923
     },
     {
       "metric": "react_render_smoke_ms",
-      "zig-dom": 114.75579199999993,
+      "zig-dom": 135.0937080000001,
       "happy-dom": null,
       "jsdom": null
     },
     {
       "metric": "react_update_10k_rows_ms",
-      "zig-dom": 29.087792000000036,
-      "happy-dom": 37.085000000000036,
-      "jsdom": 49.34441700000025
+      "zig-dom": 28.576416999999992,
+      "happy-dom": 37.956208000000515,
+      "jsdom": 47.259125000000495
     },
     {
       "metric": "replace_children_10k_ms",
-      "zig-dom": 3.0657079999999723,
-      "happy-dom": 6.058666999999787,
-      "jsdom": 27.318500000000313
+      "zig-dom": 3.2414580000000797,
+      "happy-dom": 5.838874999999916,
+      "jsdom": 28.341667000000598
     },
     {
       "metric": "reset_500x_ms",
-      "zig-dom": 0.5110839999999826,
-      "happy-dom": 0.7955000000001746,
-      "jsdom": 4.18120799999997
+      "zig-dom": 0.47870899999998073,
+      "happy-dom": 0.7049580000000333,
+      "jsdom": 3.964125000000422
     },
     {
       "metric": "set_get_10k_attributes_ms",
-      "zig-dom": 7.299874999999986,
-      "happy-dom": 12.925792000000001,
-      "jsdom": 15.292209000000184
+      "zig-dom": 7.397874999999999,
+      "happy-dom": 21.506124999999884,
+      "jsdom": 15.45208299999922
     }
   ]
 }

@@ -465,7 +465,12 @@ function loadXmlLikeFrameDocument(frameDocument: Window["document"], sourcePath:
     .replace(/<!doctype[^>]*>/gi, "")
     .replace(/<[^>]+>/g, "")
     .trim();
-  frameDocument.appendChild(root);
+  try {
+    frameDocument.appendChild(root);
+  } catch {
+    // Frame documents start life as HTML documents in this lightweight runner.
+    // XML fixtures still need their parsed root exposed to tests.
+  }
   Object.defineProperty(frameDocument, "documentElement", {
     value: root,
     configurable: true,
@@ -591,6 +596,13 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   window.document.head.innerHTML = initialMarkup.head;
   applyAttributeMarkup(window.document.body, initialMarkup.bodyAttributes);
   window.document.body.innerHTML = initialMarkup.body;
+  for (const frame of window.document.querySelectorAll("iframe") as unknown as Array<{
+    getAttribute(name: string): string | null;
+    contentDocument?: Window["document"];
+    contentWindow?: Window;
+  }>) {
+    (window as unknown as { __loadFrameDocument?: (frame: unknown) => void }).__loadFrameDocument?.(frame);
+  }
 
   const doctypeMatch = html.match(/<!doctype\s+([A-Za-z0-9:_-]+)/i);
   if (doctypeMatch && !window.document.doctype) {

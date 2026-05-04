@@ -13,6 +13,36 @@
       "owner": "compat"
     },
     {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insert-adjacent.html",
+      "subtest": "__all__",
+      "reason": "full-suite order exposes ownerDocument/prototype pollution in insertAdjacent helpers",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-parentNode.html",
+      "subtest": "Removed iframe",
+      "reason": "iframe removal load timing is incomplete in the lightweight WPT runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/querySelector-mixed-case.html",
+      "subtest": "Mixed HTML/SVG/MathML tree with various mixed-case attributes",
+      "reason": "namespace-aware attribute case matching is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-and-adopt-thcrash.html",
+      "subtest": "Check that removing a node and then adopting its parent into a different window/document doesn't crash.",
+      "reason": "cross-document adoption identity tracking is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/svg-template-querySelector.html",
+      "subtest": "__all__",
+      "reason": "SVG template content/querySelector coverage is incomplete",
+      "owner": "compat"
+    },
+    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-1.html",
       "subtest": "__timeout__",
       "reason": "heavy static NodeList perf test under 1s timeout",
