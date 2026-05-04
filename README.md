@@ -16,8 +16,6 @@ bun add zig-dom
 npm install zig-dom
 ```
 
-Native packages are published for macOS, Linux, and Windows.
-
 ## Test Setup
 
 Create a Bun preload file:
