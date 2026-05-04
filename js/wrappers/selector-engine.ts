@@ -72,23 +72,48 @@ export function querySelectorAllInSubtree(root: Node, selector: string): Element
 }
 
 export function elementMatchesSelector(element: Element, selector: string, scopeRoot: Element = element): boolean {
+  return createElementMatcher(selector, scopeRoot)(element);
+}
+
+export function createElementMatcher(selector: string, scopeRoot: Element): (element: Element) => boolean {
   const simpleId = parseSimpleIdSelector(selector);
   if (simpleId != null) {
-    return element.id === simpleId;
+    return (element) => element.id === simpleId;
+  }
+
+  const simpleSelectorList = parseFastSimpleSelectorList(selector);
+  if (simpleSelectorList) {
+    const prepared = simpleSelectorList.map((simpleSelector) => ({
+      selector: simpleSelector,
+      selectorTagName: simpleSelector.kind === "tag" ? asciiLowercase(simpleSelector.value) : "",
+      attributeName: simpleSelector.kind === "attribute" ? asciiLowercase(simpleSelector.value) : "",
+    }));
+    return (element) => prepared.some(({ selector, selectorTagName, attributeName }) =>
+      matchesFastSimpleSelector(element, selector, selectorTagName, attributeName)
+    );
+  }
+
+  const simpleSelector = parseFastSimpleSelector(selector);
+  if (simpleSelector) {
+    const selectorTagName = simpleSelector.kind === "tag" ? asciiLowercase(simpleSelector.value) : "";
+    const attributeName = simpleSelector.kind === "attribute" ? asciiLowercase(simpleSelector.value) : "";
+    return (element) => matchesFastSimpleSelector(element, simpleSelector, selectorTagName, attributeName);
   }
 
   const selectors = parseSelectorList(selector);
   if (selectors.length === 0) {
-    return false;
+    return () => false;
   }
 
-  for (const complex of selectors) {
-    if (matchesComplex(element, complex, scopeRoot)) {
-      return true;
+  return (element) => {
+    for (const complex of selectors) {
+      if (matchesComplex(element, complex, scopeRoot)) {
+        return true;
+      }
     }
-  }
 
-  return false;
+    return false;
+  };
 }
 
 function queryFromRoots(roots: Node[], selector: string, scopeRoot: Element | null, includeRoot: boolean): Element[] {
@@ -156,7 +181,23 @@ function queryFromRoots(roots: Node[], selector: string, scopeRoot: Element | nu
 type FastSimpleSelector =
   | { kind: "tag"; value: string }
   | { kind: "class"; value: string }
-  | { kind: "attribute"; value: string };
+  | { kind: "attribute"; value: string; attributeValue?: string };
+
+function parseFastSimpleSelectorList(selector: string): FastSimpleSelector[] | null {
+  if (!selector.includes(",")) {
+    return null;
+  }
+
+  const selectors: FastSimpleSelector[] = [];
+  for (const part of selector.split(",")) {
+    const simpleSelector = parseFastSimpleSelector(trimAsciiWhitespace(part));
+    if (!simpleSelector) {
+      return null;
+    }
+    selectors.push(simpleSelector);
+  }
+  return selectors.length > 0 ? selectors : null;
+}
 
 function parseFastSimpleSelector(selector: string): FastSimpleSelector | null {
   if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(selector)) {
@@ -168,6 +209,10 @@ function parseFastSimpleSelector(selector: string): FastSimpleSelector | null {
   const attributeMatch = selector.match(/^\[([A-Za-z_][A-Za-z0-9_:-]*)\]$/);
   if (attributeMatch?.[1]) {
     return { kind: "attribute", value: attributeMatch[1] };
+  }
+  const attributeValueMatch = selector.match(/^\[([A-Za-z_][A-Za-z0-9_:-]*)=(?:"([^"]*)"|([A-Za-z0-9_-]+))\]$/);
+  if (attributeValueMatch?.[1]) {
+    return { kind: "attribute", value: attributeValueMatch[1], attributeValue: attributeValueMatch[2] ?? attributeValueMatch[3] ?? "" };
   }
   return null;
 }
@@ -230,7 +275,11 @@ function matchesFastSimpleSelector(element: Element, selector: FastSimpleSelecto
     return className != null && classNameContains(className, selector.value);
   }
   const expectedAttributeName = attributeName || asciiLowercase(selector.value);
-  return element.getAttribute(isHtmlElement(element) ? expectedAttributeName : selector.value) != null;
+  const actual = element.getAttribute(isHtmlElement(element) ? expectedAttributeName : selector.value);
+  if (selector.attributeValue === undefined) {
+    return actual != null;
+  }
+  return actual === selector.attributeValue;
 }
 
 function querySimpleIdFromRoots(roots: Node[], id: string, includeRoot: boolean): Element[] {

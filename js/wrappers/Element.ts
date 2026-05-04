@@ -6,7 +6,7 @@ import { parseHtmlInto } from "./html-parser.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
-import { canUseNativeSelector, elementMatchesSelector, querySelectorAllInElement } from "./selector-engine.ts";
+import { canUseNativeSelector, createElementMatcher, elementMatchesSelector, querySelectorAllInElement } from "./selector-engine.ts";
 
 type AttributeEntry = { name: string; value: string };
 type AttributeMetadata = { namespaceURI: string | null; prefix: string | null; localName: string; qualifiedName: string };
@@ -1317,9 +1317,10 @@ export class Element extends Node {
       throw new TypeError("Failed to execute 'closest': 1 argument required, but only 0 present.");
     }
     const normalizedSelector = String(selector);
+    const matches = createElementMatcher(normalizedSelector, this);
     let current: Element | null = this;
     while (current) {
-      if (elementMatchesSelector(current, normalizedSelector, this)) {
+      if (matches(current)) {
         return current;
       }
       current = current.parentElement;
