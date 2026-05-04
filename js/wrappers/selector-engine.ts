@@ -1,6 +1,7 @@
 import type { Document } from "./Document.ts";
 import type { Element } from "./Element.ts";
 import { Node } from "./Node.ts";
+import { ZigDOMException } from "./DOMException.ts";
 
 type Combinator = "descendant" | "child" | "adjacent" | "sibling";
 type AttributeOperator = "=" | "~=" | "|=" | "^=" | "$=" | "*=";
@@ -20,6 +21,7 @@ type PseudoSelector = {
 
 type SimpleSelector =
   | { kind: "universal" }
+  | { kind: "namespace-none"; value: string | null }
   | { kind: "tag"; value: string }
   | { kind: "id"; value: string }
   | { kind: "class"; value: string }
@@ -42,7 +44,7 @@ export function canUseNativeSelector(selector: string): boolean {
 
 export function querySelectorAllInDocument(document: Document, selector: string): Element[] {
   const roots = [document.documentElement as unknown as Node];
-  return queryFromRoots(roots, selector, null, false);
+  return queryFromRoots(roots, selector, null, true);
 }
 
 export function querySelectorAllInElement(root: Element, selector: string): Element[] {
@@ -92,8 +94,12 @@ function queryFromRoots(roots: Node[], selector: string, scopeRoot: Element | nu
     if (includeRoot) {
       stack.push(root);
     } else {
-      for (const child of root.childNodes.toArray()) {
-        stack.push(child);
+      const children = root.childNodes.toArray();
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child) {
+          stack.push(child);
+        }
       }
     }
 
@@ -135,8 +141,12 @@ function querySimpleIdFromRoots(roots: Node[], id: string, includeRoot: boolean)
     if (includeRoot) {
       stack.push(root);
     } else {
-      for (const child of root.childNodes.toArray()) {
-        stack.push(child);
+      const children = root.childNodes.toArray();
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child) {
+          stack.push(child);
+        }
       }
     }
 
@@ -187,9 +197,15 @@ function parseSelectorList(selector: string): ComplexSelector[] {
   }
   groups.push(selector.slice(start));
 
-  return groups
-    .map((value) => parseComplexSelector(trimAsciiWhitespace(value)))
-    .filter((value): value is ComplexSelector => value !== null);
+  const selectors = groups.map((value) => {
+    const parsed = parseComplexSelector(trimAsciiWhitespace(value));
+    if (!parsed) {
+      throwSelectorSyntaxError(selector);
+    }
+    return parsed;
+  });
+
+  return selectors;
 }
 
 function parseComplexSelector(input: string): ComplexSelector | null {
@@ -219,7 +235,7 @@ function parseComplexSelector(input: string): ComplexSelector | null {
 
     const ch = input[index];
     if (ch === ">" || ch === "+" || ch === "~") {
-      if (compounds.length === 0) {
+      if (compounds.length === 0 || combinators.length >= compounds.length) {
         return null;
       }
       combinators.push(ch === ">" ? "child" : ch === "+" ? "adjacent" : "sibling");
@@ -257,7 +273,20 @@ function parseCompoundSelector(input: string, start: number): { compound: Compou
   let index = start;
   const simples: SimpleSelector[] = [];
 
-  if (input[index] === "*" && input[index + 1] === "|") {
+  if (input[index] === "|" && input[index + 1] === "*") {
+    simples.push({ kind: "namespace-none", value: null });
+    index += 2;
+  } else if (input[index] === "|") {
+    const tag = readIdentifier(input, index + 1);
+    if (!tag.value) return null;
+    simples.push({ kind: "namespace-none", value: tag.value.toLowerCase() });
+    index = tag.next;
+  } else if (input[index] === "*" && input[index + 1] === "*" ) {
+    return null;
+  } else if (input[index] === "*" && input[index + 1] === "|" && input[index + 2] === "*") {
+    simples.push({ kind: "universal" });
+    index += 3;
+  } else if (input[index] === "*" && input[index + 1] === "|") {
     const tag = readIdentifier(input, index + 2);
     if (!tag.value) return null;
     simples.push({ kind: "tag", value: tag.value.toLowerCase() });
@@ -289,7 +318,7 @@ function parseCompoundSelector(input: string, start: number): { compound: Compou
 
     if (ch === ".") {
       const ident = readIdentifier(input, index + 1);
-      if (!ident.value) return null;
+      if (!ident.value || /^[0-9]/.test(ident.value)) return null;
       simples.push({ kind: "class", value: ident.value });
       index = ident.next;
       continue;
@@ -387,7 +416,7 @@ function parseAttributeSelector(input: string, start: number): { selector: Attri
       while (index < input.length && input[index] !== quote) {
         index += 1;
       }
-      value = input.slice(valueStart, index);
+      value = readCssStringValue(input.slice(valueStart, index));
       if (input[index] === quote) {
         index += 1;
       }
@@ -412,11 +441,13 @@ function parseAttributeSelector(input: string, start: number): { selector: Attri
     }
   }
 
-  if (input[index] !== "]") {
+  if (input[index] !== "]" && (index < input.length || !operator)) {
     return null;
   }
 
-  index += 1;
+  if (input[index] === "]") {
+    index += 1;
+  }
   return {
     selector: { namespaceAny, name, operator, value, caseInsensitive },
     next: index
@@ -425,6 +456,10 @@ function parseAttributeSelector(input: string, start: number): { selector: Attri
 
 function parsePseudoSelector(input: string, start: number): { selector: PseudoSelector; next: number } | null {
   let index = start + 1;
+  const isPseudoElement = input[index] === ":";
+  if (isPseudoElement) {
+    index += 1;
+  }
   const ident = readIdentifier(input, index);
   if (!ident.value) {
     return null;
@@ -432,24 +467,60 @@ function parsePseudoSelector(input: string, start: number): { selector: PseudoSe
 
   const name = ident.value.toLowerCase();
   index = ident.next;
+  const legacyPseudoElementNames = ["after", "before", "first-letter", "first-line"];
+
+  if (isPseudoElement) {
+    if (["slotted", ...legacyPseudoElementNames, "selection"].includes(name)) {
+      let argument: string | null = null;
+      if (input[index] === "(") {
+        const parsedArgument = readPseudoArgument(input, index);
+        if (!parsedArgument) {
+          if (name !== "slotted") {
+            return null;
+          }
+          argument = input.slice(index + 1).trim();
+          index = input.length;
+        } else {
+          argument = parsedArgument.argument;
+          index = parsedArgument.next;
+        }
+      }
+      return {
+        selector: { name: `::${name}`, argument },
+        next: index
+      };
+    }
+    return null;
+  }
+
+  if (legacyPseudoElementNames.includes(name)) {
+    return {
+      selector: { name: `::${name}`, argument: null },
+      next: index
+    };
+  }
+
+  const knownPseudoClassNames = [
+    "checked", "disabled", "empty", "enabled", "first-child", "first-of-type", "has", "invalid", "is", "lang",
+    "last-child", "last-of-type", "link", "not", "nth-child", "nth-last-child", "nth-last-of-type",
+    "nth-of-type", "only-child", "only-of-type", "root", "scope", "target", "visited", "where"
+  ];
+  if (!knownPseudoClassNames.includes(name)) {
+    return null;
+  }
 
   let argument: string | null = null;
   if (input[index] === "(") {
-    index += 1;
-    const argumentStart = index;
-    let depth = 1;
-    while (index < input.length && depth > 0) {
-      const ch = input[index];
-      if (ch === "(") depth += 1;
-      if (ch === ")") depth -= 1;
-      index += 1;
-    }
-
-    if (depth !== 0) {
+    const parsedArgument = readPseudoArgument(input, index);
+    if (!parsedArgument) {
       return null;
     }
+    argument = parsedArgument.argument;
+    index = parsedArgument.next;
+  }
 
-    argument = input.slice(argumentStart, index - 1).trim();
+  if (["not", "is", "where", "has"].includes(name)) {
+    parseSelectorList(argument ?? "");
   }
 
   return {
@@ -464,7 +535,7 @@ function readIdentifier(input: string, start: number): { value: string; next: nu
 
   while (index < input.length) {
     const ch = input[index] ?? "";
-    if (!ch || isAsciiWhitespace(ch) || ",>+~#.:[]()=\"'*|^$".includes(ch)) {
+    if (!ch || isAsciiWhitespace(ch) || ",>+~#.:[]()=\"'*|^${}$%<>".includes(ch)) {
       break;
     }
 
@@ -487,6 +558,43 @@ function readIdentifier(input: string, start: number): { value: string; next: nu
 
   return {
     value,
+    next: index
+  };
+}
+
+function readCssStringValue(input: string): string {
+  let index = 0;
+  let value = "";
+  while (index < input.length) {
+    if (input[index] === "\\") {
+      const parsedEscape = parseCssEscape(input, index);
+      value += parsedEscape.value;
+      index = parsedEscape.next;
+      continue;
+    }
+    value += input[index] ?? "";
+    index += 1;
+  }
+  return value;
+}
+
+function readPseudoArgument(input: string, start: number): { argument: string; next: number } | null {
+  let index = start + 1;
+  const argumentStart = index;
+  let depth = 1;
+  while (index < input.length && depth > 0) {
+    const ch = input[index];
+    if (ch === "(") depth += 1;
+    if (ch === ")") depth -= 1;
+    index += 1;
+  }
+
+  if (depth !== 0) {
+    return null;
+  }
+
+  return {
+    argument: input.slice(argumentStart, index - 1).trim(),
     next: index
   };
 }
@@ -623,6 +731,16 @@ function matchesCompound(element: Element, compound: CompoundSelector, scopeRoot
       continue;
     }
 
+    if (simple.kind === "namespace-none") {
+      if (element.namespaceURI !== "" && element.namespaceURI != null) {
+        return false;
+      }
+      if (simple.value != null && element.localName.toLowerCase() !== simple.value) {
+        return false;
+      }
+      continue;
+    }
+
     if (simple.kind === "tag") {
       if (element.tagName.toLowerCase() !== simple.value && element.localName.toLowerCase() !== simple.value) {
         return false;
@@ -667,11 +785,14 @@ function matchesAttributeSelector(element: Element, selector: AttributeSelector)
     const attributes = Array.from(((element as unknown as {
       attributes?: Array<{ name: string; localName?: string; value: string }>;
     }).attributes ?? []) as Array<{ name: string; localName?: string; value: string }>);
-    const match = attributes.find((attribute) => (attribute.localName ?? attribute.name.split(":").pop() ?? attribute.name) === selector.name);
+    const selectorName = isHtmlElement(element) ? selector.name.toLowerCase() : selector.name;
+    const match = attributes.find((attribute) => {
+      const attributeName = attribute.localName ?? attribute.name.split(":").pop() ?? attribute.name;
+      return (isHtmlElement(element) ? attributeName.toLowerCase() : attributeName) === selectorName;
+    });
     actual = match?.value ?? null;
   } else {
-    const isHtmlElement = (element as unknown as { namespaceURI?: string | null }).namespaceURI === "http://www.w3.org/1999/xhtml";
-    const attributeName = isHtmlElement ? selector.name.toLowerCase() : selector.name;
+    const attributeName = isHtmlElement(element) ? selector.name.toLowerCase() : selector.name;
     actual = element.getAttribute(attributeName);
   }
 
@@ -696,14 +817,29 @@ function matchesAttributeSelector(element: Element, selector: AttributeSelector)
     case "=":
       return compare(actual, expected);
     case "~=":
+      if (expected === "") {
+        return false;
+      }
       return actual.split(/\s+/).filter(Boolean).some((token) => compare(token, expected));
     case "|=":
+      if (expected === "") {
+        return false;
+      }
       return compare(actual, expected) || normalize(actual).startsWith(`${normalize(expected)}-`);
     case "^=":
+      if (expected === "") {
+        return false;
+      }
       return normalize(actual).startsWith(normalize(expected));
     case "$=":
+      if (expected === "") {
+        return false;
+      }
       return normalize(actual).endsWith(normalize(expected));
     case "*=":
+      if (expected === "") {
+        return false;
+      }
       return normalize(actual).includes(normalize(expected));
     default:
       return false;
@@ -728,12 +864,30 @@ function trimAsciiWhitespace(value: string): string {
 
 function matchesPseudoSelector(element: Element, pseudo: PseudoSelector, scopeRoot: Element | null): boolean {
   switch (pseudo.name) {
+    case "root":
+      return element.ownerDocument?.documentElement === element;
     case "first-child":
       return previousElementSibling(element) === null;
     case "last-child":
       return nextElementSibling(element) === null;
+    case "only-child":
+      return previousElementSibling(element) === null && nextElementSibling(element) === null;
     case "nth-child":
-      return matchesNthChild(element, pseudo.argument ?? "");
+      return matchesNth(element, pseudo.argument ?? "", false, false);
+    case "nth-last-child":
+      return matchesNth(element, pseudo.argument ?? "", true, false);
+    case "nth-of-type":
+      return matchesNth(element, pseudo.argument ?? "", false, true);
+    case "nth-last-of-type":
+      return matchesNth(element, pseudo.argument ?? "", true, true);
+    case "first-of-type":
+      return typeIndex(element, false).index === 1;
+    case "last-of-type": {
+      const position = typeIndex(element, true);
+      return position.index === 1;
+    }
+    case "only-of-type":
+      return typeIndex(element, false).total === 1;
     case "not": {
       const selectors = parseSelectorList(pseudo.argument ?? "");
       if (selectors.length === 0) {
@@ -752,9 +906,24 @@ function matchesPseudoSelector(element: Element, pseudo: PseudoSelector, scopeRo
     case "scope":
       return scopeRoot ? scopeRoot === element : false;
     case "target": {
+      if (!element.isConnected) {
+        return false;
+      }
       const hash = element.ownerDocument?.defaultView?.location.hash ?? "";
       return hash.length > 1 && element.id === decodeURIComponent(hash.slice(1));
     }
+    case "link":
+      return isLinkElement(element) && element.hasAttribute("href");
+    case "visited":
+      return false;
+    case "lang":
+      return matchesLang(element, pseudo.argument ?? "");
+    case "enabled":
+      return isFormControl(element) && !isDisabledFormControl(element);
+    case "disabled":
+      return isFormControl(element) && isDisabledFormControl(element);
+    case "checked":
+      return isCheckable(element) && element.hasAttribute("checked");
     case "empty":
       return element.childNodes.toArray().every((child) => {
         if (child.nodeType === Node.ELEMENT_NODE) {
@@ -776,8 +945,15 @@ function matchesPseudoSelector(element: Element, pseudo: PseudoSelector, scopeRo
       const descendants = collectDescendantElements(element);
       return descendants.some((descendant) => selectors.some((selector) => matchesComplex(descendant, selector, scopeRoot)));
     }
-    default:
+    case "::after":
+    case "::before":
+    case "::first-letter":
+    case "::first-line":
+    case "::slotted":
+    case "::selection":
       return false;
+    default:
+      throwSelectorSyntaxError(`:${pseudo.name}`);
   }
 }
 
@@ -803,31 +979,129 @@ function isInvalidFormControl(element: Element): boolean {
   return false;
 }
 
-function matchesNthChild(element: Element, argument: string): boolean {
-  const normalized = argument.trim().toLowerCase();
+function matchesNth(element: Element, argument: string, fromEnd: boolean, ofType: boolean): boolean {
   const parent = parentElement(element);
   if (!parent) {
     return false;
   }
 
-  const siblings = parent.children.toArray();
+  const siblings = ofType
+    ? parent.children.toArray().filter((sibling) => sameElementType(sibling, element))
+    : parent.children.toArray();
   const index = siblings.indexOf(element) + 1;
   if (index <= 0) {
     return false;
   }
 
-  if (normalized === "odd") {
-    return index % 2 === 1;
-  }
-  if (normalized === "even") {
-    return index % 2 === 0;
+  const parsed = parseNth(argument);
+  if (!parsed) {
+    throwSelectorSyntaxError(`:nth-child(${argument})`);
   }
 
-  const parsed = Number.parseInt(normalized, 10);
-  if (Number.isNaN(parsed)) {
+  const candidateIndex = fromEnd ? siblings.length - index + 1 : index;
+  const { a, b } = parsed;
+  if (a === 0) {
+    return candidateIndex === b;
+  }
+  const n = (candidateIndex - b) / a;
+  return Number.isInteger(n) && n >= 0;
+}
+
+function parseNth(argument: string): { a: number; b: number } | null {
+  const normalized = argument.replace(/\s+/g, "").toLowerCase();
+  if (normalized === "odd") {
+    return { a: 2, b: 1 };
+  }
+  if (normalized === "even") {
+    return { a: 2, b: 0 };
+  }
+
+  const integer = normalized.match(/^[+-]?\d+$/);
+  if (integer) {
+    return { a: 0, b: Number.parseInt(normalized, 10) };
+  }
+
+  const linear = normalized.match(/^([+-]?\d*)n([+-]?\d+)?$/);
+  if (!linear) {
+    return null;
+  }
+
+  const rawA = linear[1] ?? "";
+  const a = rawA === "" || rawA === "+" ? 1 : rawA === "-" ? -1 : Number.parseInt(rawA, 10);
+  const b = linear[2] ? Number.parseInt(linear[2], 10) : 0;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return null;
+  }
+  return { a, b };
+}
+
+function typeIndex(element: Element, fromEnd: boolean): { index: number; total: number } {
+  const parent = parentElement(element);
+  if (!parent) {
+    return { index: 0, total: 0 };
+  }
+
+  const siblings = parent.children.toArray().filter((sibling) => sameElementType(sibling, element));
+  const index = siblings.indexOf(element);
+  return {
+    index: fromEnd ? siblings.length - index : index + 1,
+    total: siblings.length
+  };
+}
+
+function sameElementType(left: Element, right: Element): boolean {
+  return left.localName.toLowerCase() === right.localName.toLowerCase() && left.namespaceURI === right.namespaceURI;
+}
+
+function isLinkElement(element: Element): boolean {
+  const localName = element.localName.toLowerCase();
+  return localName === "a" || localName === "area";
+}
+
+function isFormControl(element: Element): boolean {
+  return ["button", "input", "select", "textarea", "option", "optgroup", "fieldset"].includes(element.localName.toLowerCase());
+}
+
+function isDisabledFormControl(element: Element): boolean {
+  return element.hasAttribute("disabled");
+}
+
+function isCheckable(element: Element): boolean {
+  const localName = element.localName.toLowerCase();
+  if (localName === "option") {
+    return true;
+  }
+  if (localName !== "input") {
     return false;
   }
-  return index === parsed;
+  const type = (element.getAttribute("type") ?? "text").toLowerCase();
+  return type === "checkbox" || type === "radio";
+}
+
+function matchesLang(element: Element, argument: string): boolean {
+  const expected = argument.trim().replace(/^["']|["']$/g, "").toLowerCase();
+  if (expected.length === 0) {
+    return false;
+  }
+
+  let cursor: Element | null = element;
+  while (cursor) {
+    const lang = cursor.getAttribute("lang") ?? cursor.getAttribute("xml:lang");
+    if (lang) {
+      const normalized = lang.toLowerCase();
+      return normalized === expected || normalized.startsWith(`${expected}-`);
+    }
+    cursor = parentElement(cursor);
+  }
+  return false;
+}
+
+function isHtmlElement(element: Element): boolean {
+  return (element as unknown as { namespaceURI?: string | null }).namespaceURI === "http://www.w3.org/1999/xhtml";
+}
+
+function throwSelectorSyntaxError(selector: string): never {
+  throw new ZigDOMException(`'${selector}' is not a valid selector.`, "SyntaxError", 12);
 }
 
 function parentElement(node: Node): Element | null {

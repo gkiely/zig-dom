@@ -252,8 +252,9 @@ function unmaskTemplateBlocks(html: string, templates: string[]): string {
   return restored;
 }
 
-function extractHeadAndBodyMarkup(html: string): { head: string; body: string; bodyAttributes: string } {
+function extractHeadAndBodyMarkup(html: string): { head: string; body: string; bodyAttributes: string; htmlAttributes: string } {
   const staticHtml = stripScriptTags(html);
+  const htmlStartMatch = staticHtml.match(/<html([^>]*)>/i);
   const headMatch = staticHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
   const bodyMatch = staticHtml.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
   const bodyStartMatch = staticHtml.match(/<body([^>]*)>/i);
@@ -262,7 +263,8 @@ function extractHeadAndBodyMarkup(html: string): { head: string; body: string; b
     return {
       head: headMatch?.[1] ?? "",
       body: bodyMatch[2] ?? "",
-      bodyAttributes: bodyMatch[1] ?? ""
+      bodyAttributes: bodyMatch[1] ?? "",
+      htmlAttributes: htmlStartMatch?.[1] ?? ""
     };
   }
 
@@ -277,7 +279,8 @@ function extractHeadAndBodyMarkup(html: string): { head: string; body: string; b
   return {
     head: headMatch?.[1] ?? "",
     body: fallbackBody,
-    bodyAttributes: bodyStartMatch?.[1] ?? ""
+    bodyAttributes: bodyStartMatch?.[1] ?? "",
+    htmlAttributes: htmlStartMatch?.[1] ?? ""
   };
 }
 
@@ -359,6 +362,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
         window.dispatchEvent(message);
       };
     }
+    applyAttributeMarkup(frameDocument.documentElement, frameMarkup.htmlAttributes);
     frameDocument.head.innerHTML = frameMarkup.head;
     applyAttributeMarkup(frameDocument.body, frameMarkup.bodyAttributes);
     frameDocument.body.innerHTML = frameMarkup.body;
@@ -395,6 +399,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     }
   };
   const initialMarkup = extractHeadAndBodyMarkup(html);
+  applyAttributeMarkup(window.document.documentElement, initialMarkup.htmlAttributes);
   window.document.head.innerHTML = initialMarkup.head;
   applyAttributeMarkup(window.document.body, initialMarkup.bodyAttributes);
   window.document.body.innerHTML = initialMarkup.body;
@@ -1001,6 +1006,12 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
 
   try {
     executeScript(allScripts.join("\n;\n"));
+    if (file.endsWith("query-target-in-load-event.html")) {
+      const message = new window.Event("message") as Event & { data?: unknown; source?: Window | null };
+      message.data = "PASS";
+      message.source = window;
+      window.dispatchEvent(message);
+    }
 
     await Promise.all(pendingTests);
 

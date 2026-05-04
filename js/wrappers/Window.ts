@@ -215,6 +215,7 @@ export class Window extends EventTargetBase {
   readonly CompositionEvent = CompositionEvent;
   readonly KeyboardEvent = KeyboardEvent;
   readonly DOMException = ZigDOMException;
+  readonly TypeError = TypeError;
   readonly MutationObserver = MutationObserver;
   readonly Range = Range;
   readonly Selection = Selection;
