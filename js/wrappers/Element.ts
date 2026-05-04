@@ -1,6 +1,7 @@
 import { native } from "../ffi.ts";
 import type { Document } from "./Document.ts";
 import { ZigDOMException } from "./DOMException.ts";
+import { Event } from "./Event.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
@@ -339,6 +340,25 @@ export class Element extends Node {
 
   set src(value: string) {
     this.setAttribute("src", String(value));
+    if (this.localName === "iframe") {
+      const pending = this as unknown as { __pendingInitialLoadEvent?: boolean };
+      if (pending.__pendingInitialLoadEvent) {
+        return;
+      }
+      pending.__pendingInitialLoadEvent = true;
+      this._window.queueMicrotask(() => {
+        pending.__pendingInitialLoadEvent = false;
+        if (!this.isConnected) {
+          return;
+        }
+        (this._window as unknown as { __loadFrameDocument?: (frame: unknown) => void }).__loadFrameDocument?.(this);
+        const event = new Event("load");
+        if (!this.hasAttribute("onload")) {
+          (this as unknown as { onload?: ((event: Event) => void) | null }).onload?.call(this, event);
+        }
+        this.dispatchEvent(event);
+      });
+    }
   }
 
   override get nodeName(): string {
@@ -640,6 +660,9 @@ export class Element extends Node {
       const value = native.getAttribute(this._handle, key);
       if (value != null) {
         const cachedValue = this.#attributeCache?.get(key);
+        if (cachedValue != null && cachedValue !== value) {
+          return cachedValue;
+        }
         if (value === "" && cachedValue) {
           return cachedValue;
         }
@@ -928,11 +951,17 @@ export class Element extends Node {
   }
 
   querySelector(selector: string): Element | null {
-    return this.querySelectorAll(selector)[0] ?? null;
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'querySelector': 1 argument required, but only 0 present.");
+    }
+    return this.querySelectorAll(String(selector))[0] ?? null;
   }
 
   querySelectorAll(selector: string): Element[] {
-    const snapshot = querySelectorAllInElement(this, selector);
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'querySelectorAll': 1 argument required, but only 0 present.");
+    }
+    const snapshot = querySelectorAllInElement(this, String(selector));
     return new NodeList(() => snapshot as unknown as Node[], { static: true }) as unknown as Element[];
   }
 

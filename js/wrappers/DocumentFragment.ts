@@ -30,11 +30,17 @@ export class DocumentFragment extends Node {
   }
 
   querySelector(selector: string): Element | null {
-    return this.querySelectorAll(selector)[0] ?? null;
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'querySelector': 1 argument required, but only 0 present.");
+    }
+    return this.querySelectorAll(String(selector))[0] ?? null;
   }
 
   querySelectorAll(selector: string): Element[] {
-    const snapshot = querySelectorAllInSubtree(this, selector);
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'querySelectorAll': 1 argument required, but only 0 present.");
+    }
+    const snapshot = querySelectorAllInSubtree(this, String(selector));
     return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
   }
 }

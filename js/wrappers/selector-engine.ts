@@ -664,9 +664,9 @@ function matchesCompound(element: Element, compound: CompoundSelector, scopeRoot
 function matchesAttributeSelector(element: Element, selector: AttributeSelector): boolean {
   let actual: string | null = null;
   if (selector.namespaceAny) {
-    const attributes = (element as unknown as {
+    const attributes = Array.from(((element as unknown as {
       attributes?: Array<{ name: string; localName?: string; value: string }>;
-    }).attributes ?? [];
+    }).attributes ?? []) as Array<{ name: string; localName?: string; value: string }>);
     const match = attributes.find((attribute) => (attribute.localName ?? attribute.name.split(":").pop() ?? attribute.name) === selector.name);
     actual = match?.value ?? null;
   } else {
@@ -751,6 +751,10 @@ function matchesPseudoSelector(element: Element, pseudo: PseudoSelector, scopeRo
     }
     case "scope":
       return scopeRoot ? scopeRoot === element : false;
+    case "target": {
+      const hash = element.ownerDocument?.defaultView?.location.hash ?? "";
+      return hash.length > 1 && element.id === decodeURIComponent(hash.slice(1));
+    }
     case "empty":
       return element.childNodes.toArray().every((child) => {
         if (child.nodeType === Node.ELEMENT_NODE) {

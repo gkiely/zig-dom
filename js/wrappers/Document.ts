@@ -581,21 +581,29 @@ export class Document extends Node {
 
   querySelector(selector: string): Element | null {
     this._window.assertOpen();
-    if (canUseNativeSelector(selector)) {
-      const handle = native.documentQuerySelector(this._handle, selector);
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'querySelector': 1 argument required, but only 0 present.");
+    }
+    const normalizedSelector = String(selector);
+    if (canUseNativeSelector(normalizedSelector)) {
+      const handle = native.documentQuerySelector(this._handle, normalizedSelector);
       return this._window.getNode(handle) as Element | null;
     }
 
-    return this.querySelectorAll(selector)[0] ?? null;
+    return this.querySelectorAll(normalizedSelector)[0] ?? null;
   }
 
   querySelectorAll(selector: string): Element[] {
     this._window.assertOpen();
-    const snapshot = canUseNativeSelector(selector)
-      ? native.documentQuerySelectorAll(this._handle, selector)
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'querySelectorAll': 1 argument required, but only 0 present.");
+    }
+    const normalizedSelector = String(selector);
+    const snapshot = canUseNativeSelector(normalizedSelector)
+      ? native.documentQuerySelectorAll(this._handle, normalizedSelector)
         .map((handle) => this._window.getNode(handle))
         .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE))
-      : querySelectorAllInDocument(this, selector);
+      : querySelectorAllInDocument(this, normalizedSelector);
 
     return new NodeList(() => snapshot as unknown as Node[], { static: true }) as unknown as Element[];
   }

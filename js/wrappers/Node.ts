@@ -320,15 +320,52 @@ export class Node extends EventTargetBase {
   replaceChildren(...nodes: Array<Node | string>): void {
     this._window.assertOpen();
 
+    const document = this.nodeType === Node.DOCUMENT_NODE
+      ? (this as unknown as Document)
+      : this.ownerDocument;
+
+    if (!document) {
+      throw new Error("replaceChildren() requires an owner document");
+    }
+
+    const insertionNodes = (nodes as unknown[]).map((node) => coerceInsertionNode(document, node));
+    validateInsertionSequence(this, insertionNodes, null);
+
+    for (const node of insertionNodes) {
+      const parent = node.parentNode;
+      if (parent && parent !== this) {
+        parent.removeChild(node);
+      }
+    }
+
+    const trackMutations = this._window.hasMutationObservers();
+    if (trackMutations && !this._window.customElements.hasDefinitions) {
+      const removedChildren = this.childNodes.toArray();
+      const addedChildren = insertionNodes.flatMap((node) =>
+        node.nodeType === Node.DOCUMENT_FRAGMENT_NODE ? node.childNodes.toArray() : [node]
+      );
+
+      while (this.firstChild) {
+        native.removeChild(this._handle, this.firstChild._handle);
+      }
+      for (const node of addedChildren) {
+        native.appendChild(this._handle, node._handle);
+        scheduleIFrameLoadIfNeeded(node);
+      }
+      if (removedChildren.length > 0 || addedChildren.length > 0) {
+        this._window.notifyChildListMutation(this, addedChildren, removedChildren, null, null);
+      }
+      refreshDocumentElementFlag(this);
+      return;
+    }
+
     while (this.firstChild) {
       this.removeChild(this.firstChild);
     }
 
-    if (nodes.length === 0) {
-      return;
+    for (const node of insertionNodes) {
+      this.appendChild(node);
     }
-
-    this.append(...nodes);
   }
 
   insertBefore<TNode extends Node>(newChild: TNode, referenceChild: Node | null): TNode {
@@ -1228,11 +1265,14 @@ function validatePreInsertion(parent: Node, newChild: Node, referenceChild: Node
 }
 
 function validateInsertionSequence(parent: Node, insertionNodes: Node[], referenceChild: Node | null): void {
+  const validationNodes = insertionNodes.flatMap((node) =>
+    node.nodeType === Node.DOCUMENT_FRAGMENT_NODE ? node.childNodes.toArray() : [node]
+  );
   const syntheticFragment = {
     nodeType: Node.DOCUMENT_FRAGMENT_NODE,
     parentNode: null,
     childNodes: {
-      toArray: () => insertionNodes
+      toArray: () => validationNodes
     }
   } as unknown as Node;
 
@@ -1358,6 +1398,8 @@ function scheduleIFrameLoadIfNeeded(node: Node): void {
   const elementLike = node as unknown as {
     tagName?: string;
     dispatchEvent?: (event: Event) => boolean;
+    onload?: ((event: Event) => void) | null;
+    hasAttribute?: (name: string) => boolean;
     __pendingInitialLoadEvent?: boolean;
   };
 
@@ -1376,7 +1418,11 @@ function scheduleIFrameLoadIfNeeded(node: Node): void {
       return;
     }
     (node._window as unknown as { __loadFrameDocument?: (frame: unknown) => void }).__loadFrameDocument?.(node);
-    elementLike.dispatchEvent?.(new Event("load"));
+    const event = new Event("load");
+    if (!elementLike.hasAttribute?.("onload")) {
+      elementLike.onload?.call(node, event);
+    }
+    elementLike.dispatchEvent?.(event);
   });
 }
 

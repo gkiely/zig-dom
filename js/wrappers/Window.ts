@@ -579,6 +579,12 @@ export class Window extends EventTargetBase {
     this.clearTimeout = globalThis.clearTimeout.bind(globalThis);
     this.setInterval = globalThis.setInterval.bind(globalThis);
     this.clearInterval = globalThis.clearInterval.bind(globalThis);
+    this.requestAnimationFrame = (callback: FrameRequestCallback): number => {
+      return globalThis.setTimeout(() => callback(globalThis.performance.now()), 0) as unknown as number;
+    };
+    this.cancelAnimationFrame = (handle: number): void => {
+      globalThis.clearTimeout(handle as unknown as ReturnType<typeof globalThis.setTimeout>);
+    };
     this.queueMicrotask = globalThis.queueMicrotask.bind(globalThis);
     this.fetch = globalThis.fetch.bind(globalThis);
     this.Headers = globalThis.Headers;
@@ -1045,6 +1051,8 @@ export class Window extends EventTargetBase {
   clearTimeout!: typeof globalThis.clearTimeout;
   setInterval!: typeof globalThis.setInterval;
   clearInterval!: typeof globalThis.clearInterval;
+  requestAnimationFrame!: typeof globalThis.requestAnimationFrame;
+  cancelAnimationFrame!: typeof globalThis.cancelAnimationFrame;
   queueMicrotask!: typeof globalThis.queueMicrotask;
   fetch!: typeof globalThis.fetch;
   Headers!: typeof globalThis.Headers;

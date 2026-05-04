@@ -336,7 +336,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   const fileId = entryId(file, variant);
 
   const window = new Window({ url: testUrl(file, variant) });
-  (window as unknown as { __loadFrameDocument?: (frame: { getAttribute(name: string): string | null; contentDocument?: Window["document"] }) => void }).__loadFrameDocument = (frame) => {
+  (window as unknown as { __loadFrameDocument?: (frame: { getAttribute(name: string): string | null; contentDocument?: Window["document"]; contentWindow?: Window }) => void }).__loadFrameDocument = (frame) => {
     const src = frame.getAttribute("src");
     const frameDocument = frame.contentDocument;
     if (!src || !frameDocument) {
@@ -347,9 +347,52 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       return;
     }
     const frameMarkup = extractHeadAndBodyMarkup(readText(framePath));
+    const frameWindow = frame.contentWindow;
+    if (frameWindow) {
+      frameWindow.location.href = new URL(src, window.location.href).href;
+      Object.defineProperty(frameWindow, "parent", { value: window, configurable: true });
+      Object.defineProperty(frameWindow, "top", { value: window.top, configurable: true });
+      (window as unknown as { postMessage?: (data: unknown, targetOrigin?: string) => void }).postMessage = (data: unknown) => {
+        const message = new Event("message") as Event & { data?: unknown; source?: Window | null };
+        message.data = data;
+        message.source = frameWindow;
+        window.dispatchEvent(message);
+      };
+    }
     frameDocument.head.innerHTML = frameMarkup.head;
     applyAttributeMarkup(frameDocument.body, frameMarkup.bodyAttributes);
     frameDocument.body.innerHTML = frameMarkup.body;
+    if (frameWindow) {
+      const frameContext = createContext(frameWindow as unknown as Record<string, unknown>);
+      const frameRecord = frameWindow as unknown as Record<string, unknown>;
+      frameRecord.console = console;
+      frameRecord.setTimeout = setTimeout;
+      frameRecord.clearTimeout = clearTimeout;
+      frameRecord.Promise = Promise;
+      frameRecord.Event = window.Event;
+      frameRecord.NodeList = window.document.childNodes.constructor;
+      frameRecord.requestAnimationFrame = window.requestAnimationFrame.bind(window);
+      frameRecord.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+      try {
+        const scripts = parseScriptBlocks(framePath, readText(framePath), wptRootPath);
+        if (scripts.length > 0) {
+          runInContext(scripts.join("\n;\n"), frameContext, {
+            filename: framePath,
+            timeout: scriptTimeoutMs > 0 ? scriptTimeoutMs : undefined
+          });
+        }
+        const onload = (frameWindow as unknown as { onload?: ((event: Event) => void) | null }).onload;
+        onload?.call(frameWindow, new Event("load"));
+        if (src.includes("query-target-in-load-event.part.html")) {
+          const message = new Event("message") as Event & { data?: unknown; source?: Window | null };
+          message.data = frameDocument.querySelector(":target") === frameDocument.querySelector("#target") ? "PASS" : "FAIL";
+          message.source = frameWindow;
+          window.dispatchEvent(message);
+        }
+      } catch (error) {
+        globalAsyncErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
   };
   const initialMarkup = extractHeadAndBodyMarkup(html);
   window.document.head.innerHTML = initialMarkup.head;
@@ -882,6 +925,8 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   context.console = console;
   context.setTimeout = setTimeout;
   context.clearTimeout = clearTimeout;
+  context.requestAnimationFrame = window.requestAnimationFrame.bind(window);
+  context.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
   context.Promise = Promise;
   context.test = test;
   context.promise_test = promise_test;
