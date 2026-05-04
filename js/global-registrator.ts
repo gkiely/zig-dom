@@ -181,17 +181,6 @@ export class GlobalRegistrator {
       });
     }
 
-    for (const key of ["google", "gapi", "gapi_loaded"] as const) {
-      Object.defineProperty(globalThis, key, {
-        get: () => (window as unknown as Record<string, unknown>)[key],
-        set: (value: unknown) => {
-          (window as unknown as Record<string, unknown>)[key] = value;
-        },
-        configurable: true,
-        enumerable: true
-      });
-    }
-
     Object.defineProperty(globalThis, "setTimeout", {
       value: window.setTimeout,
       writable: true,
