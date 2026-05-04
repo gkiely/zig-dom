@@ -6,7 +6,7 @@ import { ZigDOMException } from "./DOMException.ts";
 import { Document } from "./Document.ts";
 import { DocumentFragment } from "./DocumentFragment.ts";
 import { DocumentType } from "./DocumentType.ts";
-import { Element } from "./Element.ts";
+import { DOMTokenList, Element } from "./Element.ts";
 import { CompositionEvent, CustomEvent, Event, EventTargetBase, FocusEvent, InputEvent, KeyboardEvent, MouseEvent, UIEvent, WheelEvent } from "./Event.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import {
@@ -18,15 +18,25 @@ import {
   HTMLLabelElement,
   HTMLOptionElement,
   HTMLSelectElement,
+  HTMLSpanElement,
   HTMLTextAreaElement
 } from "./HTMLElement.ts";
 import { MutationObserver, type InternalMutationRecord } from "./MutationObserver.ts";
 import { Node } from "./Node.ts";
+import { NodeList } from "./NodeList.ts";
 import { Range, Selection } from "./Range.ts";
 import { Storage } from "./Storage.ts";
 import { Text } from "./Text.ts";
 
+class DOMImplementation {}
+class NodeIterator {}
+class TreeWalker {}
+class NodeFilter {}
+class ProcessingInstruction {}
+
 const CUSTOM_ELEMENT_UPGRADED = Symbol("zig-dom-custom-element-upgraded");
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
 type CustomElementLifecycle = {
   [CUSTOM_ELEMENT_UPGRADED]?: boolean;
@@ -188,6 +198,7 @@ export class Window extends EventTargetBase {
   #closed = false;
 
   readonly Node = Node;
+  readonly NodeList = NodeList;
   readonly Element = Element;
   readonly HTMLElement = HTMLElement;
   readonly HTMLButtonElement = HTMLButtonElement;
@@ -202,6 +213,7 @@ export class Window extends EventTargetBase {
   readonly CharacterData = CharacterData;
   readonly Comment = Comment;
   readonly DocumentFragment = DocumentFragment;
+  readonly ProcessingInstruction = ProcessingInstruction;
   readonly DocumentType = DocumentType;
   readonly HTMLCollection = HTMLCollection;
   readonly EventTarget = EventTargetBase;
@@ -216,6 +228,11 @@ export class Window extends EventTargetBase {
   readonly KeyboardEvent = KeyboardEvent;
   readonly DOMException = ZigDOMException;
   readonly TypeError = TypeError;
+  readonly DOMImplementation = DOMImplementation;
+  readonly NodeIterator = NodeIterator;
+  readonly TreeWalker = TreeWalker;
+  readonly NodeFilter = NodeFilter;
+  readonly DOMTokenList = DOMTokenList;
   readonly MutationObserver = MutationObserver;
   readonly Range = Range;
   readonly Selection = Selection;
@@ -227,6 +244,14 @@ export class Window extends EventTargetBase {
   readonly localStorage = new Storage();
   readonly sessionStorage = new Storage();
   readonly customElements: CustomElementRegistry;
+  onanimationend: ((event: Event) => void) | null = null;
+  onwebkitanimationend: ((event: Event) => void) | null = null;
+  onanimationiteration: ((event: Event) => void) | null = null;
+  onwebkitanimationiteration: ((event: Event) => void) | null = null;
+  onanimationstart: ((event: Event) => void) | null = null;
+  onwebkitanimationstart: ((event: Event) => void) | null = null;
+  ontransitionend: ((event: Event) => void) | null = null;
+  onwebkittransitionend: ((event: Event) => void) | null = null;
 
   readonly happyDOM: {
     reset: () => void;
@@ -398,7 +423,7 @@ export class Window extends EventTargetBase {
     for (const constructorName of htmlElementAliases) {
       if (!(constructorName in selfRecord)) {
         Object.defineProperty(this, constructorName, {
-          value: HTMLElement,
+          value: constructorName === "HTMLSpanElement" ? HTMLSpanElement : HTMLElement,
           configurable: true,
           writable: true
         });
@@ -532,17 +557,47 @@ export class Window extends EventTargetBase {
       });
     }
 
+    for (const constructorName of [
+      "BeforeUnloadEvent",
+      "DeviceMotionEvent",
+      "DeviceOrientationEvent",
+      "DragEvent",
+      "HashChangeEvent",
+      "MessageEvent",
+      "PageTransitionEvent",
+      "PopStateEvent",
+      "StorageEvent"
+    ]) {
+      if (!(constructorName in selfRecord)) {
+        Object.defineProperty(this, constructorName, {
+          value: Event,
+          configurable: true,
+          writable: true
+        });
+      }
+    }
+
     class DOMParserImpl {
       parseFromString(source: string, type: string): Document {
-        if (type.toLowerCase().includes("xml")) {
+        const mimeType = String(type).toLowerCase();
+        if (mimeType.includes("xml") || mimeType === "image/svg+xml") {
           const parsedDocument = new DocumentConstructor() as unknown as Document;
+          const documentMetadata = parsedDocument as unknown as { __isXMLDocument?: boolean; __contentType?: string };
+          documentMetadata.__isXMLDocument = true;
+          documentMetadata.__contentType = mimeType;
           const rootMatch = source.match(/<\s*([A-Za-z_][A-Za-z0-9._:-]*)[^>]*\/?\s*>/);
           const rootName = rootMatch?.[1];
           if (rootName) {
             const rootSource = rootMatch?.[0] ?? "";
             const namespaceMatch = rootSource.match(/\sxmlns=(?:"([^"]*)"|'([^']*)')/);
-            const namespaceURI = namespaceMatch ? namespaceMatch[1] ?? namespaceMatch[2] ?? null : null;
-            const root = parsedDocument.createElement(rootName);
+            const namespaceURI = namespaceMatch
+              ? namespaceMatch[1] ?? namespaceMatch[2] ?? null
+              : mimeType === "application/xhtml+xml"
+                ? HTML_NAMESPACE
+                : mimeType === "image/svg+xml"
+                  ? SVG_NAMESPACE
+                  : null;
+            const root = parsedDocument.createElementNS(namespaceURI, rootName);
             const metadata = root as unknown as { __namespaceURI?: string | null; __isXMLNode?: boolean };
             metadata.__namespaceURI = namespaceURI;
             metadata.__isXMLNode = true;
@@ -598,6 +653,7 @@ export class Window extends EventTargetBase {
     this.AbortSignal = globalThis.AbortSignal;
     this.AbortController = globalThis.AbortController;
     this.getComputedStyle = this.getComputedStyle.bind(this);
+    this.#makeInterfacePropertiesNonEnumerable();
 
     if (!("performance" in selfRecord)) {
       Object.defineProperty(this, "performance", {
@@ -620,6 +676,27 @@ export class Window extends EventTargetBase {
         value: (globalThis as unknown as Record<string, unknown>).XMLHttpRequest,
         configurable: true,
         writable: true
+      });
+    }
+  }
+
+  #makeInterfacePropertiesNonEnumerable(): void {
+    const names = [
+      "Event", "CustomEvent", "EventTarget", "AbortController", "AbortSignal",
+      "Node", "Document", "DOMImplementation", "DocumentFragment", "ProcessingInstruction",
+      "DocumentType", "Element", "Attr", "CharacterData", "Text", "Comment",
+      "NodeIterator", "TreeWalker", "NodeFilter", "NodeList", "HTMLCollection", "DOMTokenList"
+    ];
+    for (const name of names) {
+      const value = (this as unknown as Record<string, unknown>)[name];
+      if (value == null) {
+        continue;
+      }
+      Object.defineProperty(this, name, {
+        value,
+        configurable: true,
+        writable: true,
+        enumerable: false
       });
     }
   }
@@ -686,6 +763,8 @@ export class Window extends EventTargetBase {
           wrapped = new HTMLOptionElement(this, handle, kind, skipInitialStyleSync);
         } else if (tagName === "textarea") {
           wrapped = new HTMLTextAreaElement(this, handle, kind, skipInitialStyleSync);
+        } else if (tagName === "span") {
+          wrapped = new HTMLSpanElement(this, handle, kind, skipInitialStyleSync);
         } else if (tagName === "iframe") {
           wrapped = new HTMLIFrameElement(this, handle, kind, skipInitialStyleSync);
         } else {

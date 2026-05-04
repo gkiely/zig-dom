@@ -217,16 +217,87 @@ function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string)
         continue;
       }
       const sourcePath = resolveScriptPath(entryFile, srcValue, wptRootPath);
-      scripts.push(readText(sourcePath));
+      scripts.push(readText(sourcePath) + rangeCommonGlobalExportScript(sourcePath));
       continue;
     }
 
     if (body.trim().length > 0) {
-      scripts.push(body);
+      scripts.push(rewriteRangeEval(entryFile, body));
     }
   }
 
   return scripts;
+}
+
+function rewriteRangeEval(entryFile: string, source: string): string {
+  return entryFile.includes("/dom/ranges/")
+    ? source.replace(/\beval\s*\(/g, "rangeEval(")
+    : source;
+}
+
+function rangeCommonGlobalExportScript(sourcePath: string): string {
+  if (!sourcePath.endsWith("/dom/common.js")) {
+    return "";
+  }
+
+  return `
+;window.testDiv = testDiv;
+window.paras = paras;
+window.detachedDiv = detachedDiv;
+window.detachedPara1 = detachedPara1;
+window.detachedPara2 = detachedPara2;
+window.foreignDoc = foreignDoc;
+window.foreignPara1 = foreignPara1;
+window.foreignPara2 = foreignPara2;
+window.xmlDoc = xmlDoc;
+window.xmlElement = xmlElement;
+window.detachedXmlElement = detachedXmlElement;
+window.detachedTextNode = detachedTextNode;
+window.foreignTextNode = foreignTextNode;
+window.detachedForeignTextNode = detachedForeignTextNode;
+window.xmlTextNode = xmlTextNode;
+window.detachedXmlTextNode = detachedXmlTextNode;
+window.processingInstruction = processingInstruction;
+window.detachedProcessingInstruction = detachedProcessingInstruction;
+window.comment = comment;
+window.detachedComment = detachedComment;
+window.foreignComment = foreignComment;
+window.detachedForeignComment = detachedForeignComment;
+window.xmlComment = xmlComment;
+window.detachedXmlComment = detachedXmlComment;
+window.docfrag = docfrag;
+window.foreignDocfrag = foreignDocfrag;
+window.xmlDocfrag = xmlDocfrag;
+window.doctype = doctype;
+window.foreignDoctype = foreignDoctype;
+window.xmlDoctype = xmlDoctype;
+window.testRangesShort = testRangesShort;
+window.testRanges = testRanges;
+window.testPoints = testPoints;
+window.testNodesShort = testNodesShort;
+window.testNodes = testNodes;
+window.rangeEval = function(source) {
+  return Function(
+    "document", "testDiv", "paras", "detachedDiv", "detachedPara1", "detachedPara2",
+    "foreignDoc", "foreignPara1", "foreignPara2", "xmlDoc", "xmlElement",
+    "detachedXmlElement", "detachedTextNode", "foreignTextNode",
+    "detachedForeignTextNode", "xmlTextNode", "detachedXmlTextNode",
+    "processingInstruction", "detachedProcessingInstruction", "comment",
+    "detachedComment", "foreignComment", "detachedForeignComment", "xmlComment",
+    "detachedXmlComment", "docfrag", "foreignDocfrag", "xmlDocfrag", "doctype",
+    "foreignDoctype", "xmlDoctype",
+    "return (" + source + ");"
+  )(
+    document, testDiv, paras, detachedDiv, detachedPara1, detachedPara2,
+    foreignDoc, foreignPara1, foreignPara2, xmlDoc, xmlElement,
+    detachedXmlElement, detachedTextNode, foreignTextNode,
+    detachedForeignTextNode, xmlTextNode, detachedXmlTextNode,
+    processingInstruction, detachedProcessingInstruction, comment,
+    detachedComment, foreignComment, detachedForeignComment, xmlComment,
+    detachedXmlComment, docfrag, foreignDocfrag, xmlDocfrag, doctype,
+    foreignDoctype, xmlDoctype
+  );
+};`;
 }
 
 function stripScriptTags(html: string): string {
@@ -295,6 +366,53 @@ function applyAttributeMarkup(element: { setAttribute(name: string, value: strin
   }
 }
 
+function loadXmlLikeFrameDocument(frameDocument: Window["document"], sourcePath: string, source: string): boolean {
+  const lowerPath = sourcePath.toLowerCase();
+  const contentType = lowerPath.endsWith(".xhtml")
+    ? "application/xhtml+xml"
+    : lowerPath.endsWith(".svg")
+      ? "image/svg+xml"
+      : lowerPath.endsWith(".xml")
+        ? "application/xml"
+        : null;
+
+  if (!contentType) {
+    return false;
+  }
+
+  const rootMatch = source.match(/<\s*([A-Za-z_][A-Za-z0-9._:-]*)[^>]*>/);
+  const rootName = rootMatch?.[1] ?? (contentType === "application/xhtml+xml" ? "html" : "root");
+  const rootSource = rootMatch?.[0] ?? "";
+  const namespaceMatch = rootSource.match(/\sxmlns=(?:"([^"]*)"|'([^']*)')/);
+  const namespaceURI = namespaceMatch
+    ? namespaceMatch[1] ?? namespaceMatch[2] ?? null
+    : contentType === "application/xhtml+xml"
+      ? "http://www.w3.org/1999/xhtml"
+      : contentType === "image/svg+xml"
+        ? "http://www.w3.org/2000/svg"
+        : null;
+
+  const metadata = frameDocument as unknown as { __isXMLDocument?: boolean; __contentType?: string };
+  metadata.__isXMLDocument = true;
+  metadata.__contentType = contentType;
+  while (frameDocument.firstChild) {
+    frameDocument.removeChild(frameDocument.firstChild);
+  }
+
+  const root = frameDocument.createElementNS(namespaceURI, rootName);
+  root.textContent = source
+    .replace(/<!doctype[^>]*>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+  frameDocument.appendChild(root);
+  Object.defineProperty(frameDocument, "documentElement", {
+    value: root,
+    configurable: true,
+    writable: true
+  });
+  return true;
+}
+
 function assignNamedElementGlobals(context: Record<string, unknown>, window: Window): void {
   const elements = window.document.querySelectorAll("[id]");
   for (const element of elements) {
@@ -349,7 +467,11 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     if (!existsSync(framePath)) {
       return;
     }
-    const frameMarkup = extractHeadAndBodyMarkup(readText(framePath));
+    const frameSource = readText(framePath);
+    if (loadXmlLikeFrameDocument(frameDocument, framePath, frameSource)) {
+      return;
+    }
+    const frameMarkup = extractHeadAndBodyMarkup(frameSource);
     const frameWindow = frame.contentWindow;
     if (frameWindow) {
       frameWindow.location.href = new URL(src, window.location.href).href;
@@ -378,7 +500,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       frameRecord.requestAnimationFrame = window.requestAnimationFrame.bind(window);
       frameRecord.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
       try {
-        const scripts = parseScriptBlocks(framePath, readText(framePath), wptRootPath);
+        const scripts = parseScriptBlocks(framePath, frameSource, wptRootPath);
         if (scripts.length > 0) {
           runInContext(scripts.join("\n;\n"), frameContext, {
             filename: framePath,
@@ -445,6 +567,37 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   };
 
   let activeCleanupStack: CleanupCallback[] | null = null;
+  let vmContext: ReturnType<typeof createContext> | null = null;
+  const callInRealm = <TArgs extends unknown[]>(
+    fn: (...args: TArgs) => void | Promise<void>,
+    thisArg: unknown,
+    args: TArgs
+  ): void | Promise<void> => {
+    if (!vmContext) {
+      return fn.apply(thisArg, args);
+    }
+
+    const realmCallKey = "__zigDomRealmCall";
+    const realmThisKey = "__zigDomRealmThis";
+    const realmArgsKey = "__zigDomRealmArgs";
+    context[realmCallKey] = fn;
+    context[realmThisKey] = thisArg;
+    context[realmArgsKey] = args;
+    try {
+      return runInContext(
+        `${realmCallKey}.apply(${realmThisKey}, ${realmArgsKey})`,
+        vmContext,
+        {
+          filename: `${file}#harness-callback`,
+          timeout: scriptTimeoutMs > 0 ? scriptTimeoutMs : undefined
+        }
+      ) as void | Promise<void>;
+    } finally {
+      delete context[realmCallKey];
+      delete context[realmThisKey];
+      delete context[realmArgsKey];
+    }
+  };
 
   const runCleanupCallbacks = async (cleanups: CleanupCallback[]) => {
     let firstError: unknown = null;
@@ -474,7 +627,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
         const previousCleanups = activeCleanupStack;
         activeCleanupStack = cleanups;
         try {
-          fn.call(testObj);
+          callInRealm(fn, testObj, []);
         } catch (error) {
           if (onStepError) {
             onStepError(error);
@@ -521,7 +674,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       const previousCleanups = activeCleanupStack;
       activeCleanupStack = cleanups;
       try {
-        await fn.call(testObj, testObj);
+        await callInRealm(fn, testObj, [testObj]);
       } finally {
         activeCleanupStack = previousCleanups;
         await runCleanupCallbacks(cleanups);
@@ -536,7 +689,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       const previousCleanups = activeCleanupStack;
       activeCleanupStack = cleanups;
       try {
-        await fn.call(testObj, testObj);
+        await callInRealm(fn, testObj, [testObj]);
       } finally {
         activeCleanupStack = previousCleanups;
         await runCleanupCallbacks(cleanups);
@@ -570,7 +723,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       const previousCleanups = activeCleanupStack;
       activeCleanupStack = cleanups;
       try {
-        callback.call(testObj, testObj);
+        callInRealm(callback, testObj, [testObj]);
       } catch (error) {
         failError = error;
         resolveDone();
@@ -979,7 +1132,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   }
   assignNamedElementGlobals(context, window);
 
-  const vmContext = createContext(context);
+  vmContext = createContext(context);
   const vmGlobalThis = runInContext("globalThis", vmContext) as unknown as Record<string, unknown>;
   (window as unknown as { __scriptContext?: Record<string, unknown> }).__scriptContext = vmGlobalThis;
   runInContext(`
@@ -1003,9 +1156,12 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   allScripts.push(...parseScriptBlocks(file, html, wptRootPath));
 
   const start = performance.now();
+  const WindowEvent = window.Event;
 
   try {
     executeScript(allScripts.join("\n;\n"));
+    await Promise.resolve();
+    window.dispatchEvent(new WindowEvent("load"));
     if (file.endsWith("query-target-in-load-event.html")) {
       const message = new window.Event("message") as Event & { data?: unknown; source?: Window | null };
       message.data = "PASS";

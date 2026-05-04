@@ -29,6 +29,10 @@ function asciiLowercase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
+function asciiUppercase(value: string): string {
+  return value.replace(/[a-z]/g, (letter) => String.fromCharCode(letter.charCodeAt(0) - 0x20));
+}
+
 function splitAsciiWhitespace(value: string): string[] {
   return value.match(/[^\t\n\f\r ]+/g) ?? [];
 }
@@ -41,7 +45,7 @@ function isValidNamespacePrefix(value: string): boolean {
   return value.length > 0 && !/[\0\t\n\f\r />:]/.test(value);
 }
 
-class DOMTokenList {
+export class DOMTokenList {
   constructor(private readonly element: Element, private readonly attributeName: string) {
     return new Proxy(this, {
       get(target, property, receiver) {
@@ -49,6 +53,9 @@ class DOMTokenList {
           return target.item(Number(property)) ?? undefined;
         }
         const value = Reflect.get(target, property, target);
+        if (value === Array.prototype.forEach || value === Array.prototype.keys || value === Array.prototype.values || value === Array.prototype.entries || value === Array.prototype[Symbol.iterator]) {
+          return value;
+        }
         return typeof value === "function" ? value.bind(target) : value;
       },
       has(target, property) {
@@ -219,6 +226,44 @@ class DOMTokenList {
   }
 }
 
+Object.defineProperties(DOMTokenList.prototype, {
+  forEach: {
+    value: function(callback: (value: string, key: number, parent: DOMTokenList) => void, thisArg?: unknown): void {
+      Array.from(this as DOMTokenList).forEach((value, key) => callback.call(thisArg, value, key, this as DOMTokenList));
+    },
+    configurable: true,
+    writable: true
+  },
+  keys: {
+    value: function(): ArrayIterator<number> {
+      return Array.from(this as DOMTokenList).keys();
+    },
+    configurable: true,
+    writable: true
+  },
+  values: {
+    value: function(): ArrayIterator<string> {
+      return Array.from({ length: (this as DOMTokenList).length }, (_value, index) => (this as DOMTokenList).item(index) ?? "").values();
+    },
+    configurable: true,
+    writable: true
+  },
+  entries: {
+    value: function(): ArrayIterator<[number, string]> {
+      return Array.from(this as DOMTokenList).entries();
+    },
+    configurable: true,
+    writable: true
+  },
+  [Symbol.iterator]: {
+    value: function(): ArrayIterator<string> {
+      return (this as DOMTokenList).values();
+    },
+    configurable: true,
+    writable: true
+  }
+});
+
 export class Element extends Node {
   #classList: DOMTokenList | null = null;
   #datasetProxy: DatasetShape | null = null;
@@ -313,7 +358,7 @@ export class Element extends Node {
     const qualifiedName = this.prefix ? `${this.prefix}:${localName}` : localName;
     const isXMLNode = (this as unknown as { __isXMLNode?: boolean }).__isXMLNode === true;
     if (this.namespaceURI === "http://www.w3.org/1999/xhtml" && !isXMLNode) {
-      return qualifiedName.toUpperCase();
+      return asciiUppercase(qualifiedName);
     }
     return qualifiedName;
   }
@@ -598,7 +643,7 @@ export class Element extends Node {
         return true;
       },
       ownKeys: () => {
-        return this.attributes
+        return Array.from(this.attributes as unknown as ArrayLike<{ name: string }>)
           .filter((attribute) => attribute.name.startsWith("data-"))
           .map((attribute) => dataAttributeToProperty(attribute.name));
       },
@@ -928,7 +973,7 @@ export class Element extends Node {
   }
 
   getAttributeNames(): string[] {
-    return this.attributes.map((attribute) => attribute.name);
+    return Array.from(this.attributes as unknown as ArrayLike<{ name: string }>).map((attribute) => attribute.name);
   }
 
   matches(selector: string): boolean {

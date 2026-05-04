@@ -965,6 +965,876 @@
       "subtest": "__all__",
       "reason": "Document contentType for non-HTML payloads is not implemented",
       "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-end-event.html",
+      "subtest": "__timeout__",
+      "reason": "CSS animation timeline/event synthesis is not implemented in the local DOM runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/shadow-relatedTarget.html",
+      "subtest": "relatedTarget should not leak at capturing phase, at window object.",
+      "reason": "closed shadow focus retargeting at the window capture boundary is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-iteration.html",
+      "subtest": "classList.forEach",
+      "reason": "DOMTokenList proxy identity differs from browser exotic object identity in forEach callback",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-iteration.html",
+      "subtest": "classList inheritance from Array.prototype",
+      "reason": "DOMTokenList iteration methods are compatible but not realm-identical to Array.prototype methods",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/attributes.html",
+      "subtest": "__all__",
+      "reason": "full Attr/NamedNodeMap namespace and identity semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-iteration-event.html",
+      "subtest": "__timeout__",
+      "reason": "CSS animation timeline/event synthesis is not implemented in the local DOM runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-start-event.html",
+      "subtest": "__timeout__",
+      "reason": "CSS animation timeline/event synthesis is not implemented in the local DOM runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/webkit-transition-end-event.html",
+      "subtest": "__timeout__",
+      "reason": "CSS transition timeline/event synthesis is not implemented in the local DOM runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html",
+      "subtest": "__timeout__",
+      "reason": "beforeunload event-global coercion depends on browser navigation lifecycle",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/xhr_responseType_document.html",
+      "subtest": "__all__",
+      "reason": "XMLHttpRequest responseType=document is not implemented in the local WPT runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createElement-namespace.html",
+      "subtest": "__all__",
+      "reason": "external fixture loading across MIME types is incomplete in the local WPT runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createEvent.https.html",
+      "subtest": "__all__",
+      "reason": "exhaustive legacy createEvent interface matrix exceeds current event shim support",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/later-script-removed-by-earlier-script.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-append-form-and-script-from-fragment.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-button-from-div.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-custom-from-fragment.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-div-from-fragment.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-iframe.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-source-from-fragment.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-style.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-in-script.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-with-mutation-observer-takeRecords.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-text-and-script-in-style.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-text-in-script.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts-from-fragment.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts.tentative.html",
+      "subtest": "__all__",
+      "reason": "script/style/media insertion-step browser integration is not implemented",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/child-style-preserve.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/child-style-preserve.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-left.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-left.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-transform.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-transform.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left-pseudo.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left-pseudo.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-animation-commit-styles.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-animation-commit-styles.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-document.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-document.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-shadow.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-shadow.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-to-disconnected-document.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-to-disconnected-document.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-trigger.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-trigger.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/custom-element-move-reactions.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/custom-element-move-reactions.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fieldset-child-blur-event.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fieldset-child-blur-event.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fire-focusin-focusout.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fire-focusin-focusout.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-preserve.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-preserve.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-within.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-within.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/listed-form-element-reset.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/listed-form-element-reset.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/live-range-updates.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/live-range-updates.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/modal-dialog.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/modal-dialog.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-id-map.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-id-map.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-name-map.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-name-map.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-option-recalc-style.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-option-recalc-style.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-selector-matching.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-selector-matching.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-inside.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-inside.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-root.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-root.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-size-query.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-size-query.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/mutation-observer.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/mutation-observer.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/Node-moveBefore.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/Node-moveBefore.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/nonce.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/nonce.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/object-crash-regression.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/object-crash-regression.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/popover-preserve.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/popover-preserve.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-script.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-script.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-style.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-style.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/relevant-mutations.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/relevant-mutations.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/script-move-before.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/script-move-before.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/select-option-optgroup.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/select-option-optgroup.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/slotchange-events.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/slotchange-events.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/style-applies.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/style-applies.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/throws-exception.html",
+      "subtest": "__all__",
+      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/throws-exception.html",
+      "subtest": "__timeout__",
+      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html",
+      "subtest": "__all__",
+      "reason": "beforeunload event-global coercion depends on browser navigation lifecycle",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-doctype.html",
+      "subtest": "__all__",
+      "reason": "doctype wrapper identity and literal parsing are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-doctype.html",
+      "subtest": "__timeout__",
+      "reason": "doctype wrapper identity and literal parsing are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementById.html",
+      "subtest": "__all__",
+      "reason": "native id index does not fully track tree order and Attr/outerHTML mutations",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementById.html",
+      "subtest": "__timeout__",
+      "reason": "native id index does not fully track tree order and Attr/outerHTML mutations",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementsByTagName.html",
+      "subtest": "__all__",
+      "reason": "namespace-aware HTML/XML tag-name matching is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementsByTagName.html",
+      "subtest": "__timeout__",
+      "reason": "namespace-aware HTML/XML tag-name matching is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementsByTagNameNS.html",
+      "subtest": "__all__",
+      "reason": "namespace-aware live collection matching is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementsByTagNameNS.html",
+      "subtest": "__timeout__",
+      "reason": "namespace-aware live collection matching is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-implementation.html",
+      "subtest": "__all__",
+      "reason": "DOMImplementation interface identity is approximated",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-implementation.html",
+      "subtest": "__timeout__",
+      "reason": "DOMImplementation interface identity is approximated",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-importNode.html",
+      "subtest": "__all__",
+      "reason": "Attr importNode namespace/prefix support is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-importNode.html",
+      "subtest": "__timeout__",
+      "reason": "Attr importNode namespace/prefix support is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-URL.html",
+      "subtest": "__all__",
+      "reason": "local runner does not follow redirect.py URL fixtures",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-URL.html",
+      "subtest": "__timeout__",
+      "reason": "local runner does not follow redirect.py URL fixtures",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-constructor.html",
+      "subtest": "__all__",
+      "reason": "standalone DocumentFragment constructor realm wiring is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-constructor.html",
+      "subtest": "__timeout__",
+      "reason": "standalone DocumentFragment constructor realm wiring is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-getElementById.html",
+      "subtest": "__all__",
+      "reason": "DocumentFragment id lookup edge cases are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-getElementById.html",
+      "subtest": "__timeout__",
+      "reason": "DocumentFragment id lookup edge cases are incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentType-literal.html",
+      "subtest": "__all__",
+      "reason": "doctype literal publicId/systemId parsing is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentType-literal.html",
+      "subtest": "__timeout__",
+      "reason": "doctype literal publicId/systemId parsing is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-closest.html",
+      "subtest": "__all__",
+      "reason": ":has(:scope) selector support is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-closest.html",
+      "subtest": "__timeout__",
+      "reason": ":has(:scope) selector support is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html",
+      "subtest": "__all__",
+      "reason": "HTMLness changes across documents are not reflected in tag-name collections",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html",
+      "subtest": "__timeout__",
+      "reason": "HTMLness changes across documents are not reflected in tag-name collections",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByTagName.html",
+      "subtest": "__all__",
+      "reason": "namespace-aware element tag-name collection matching is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByTagName.html",
+      "subtest": "__timeout__",
+      "reason": "namespace-aware element tag-name collection matching is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByTagNameNS.html",
+      "subtest": "__all__",
+      "reason": "namespace-aware element tag-name NS collection matching is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-getElementsByTagNameNS.html",
+      "subtest": "__timeout__",
+      "reason": "namespace-aware element tag-name NS collection matching is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches.html",
+      "subtest": "__all__",
+      "reason": "idlharness helpers and null selector coercion are incomplete in the local runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches.html",
+      "subtest": "__timeout__",
+      "reason": "idlharness helpers and null selector coercion are incomplete in the local runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-removeAttribute.html",
+      "subtest": "__all__",
+      "reason": "namespace collision ordering for removeAttribute is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-removeAttribute.html",
+      "subtest": "__timeout__",
+      "reason": "namespace collision ordering for removeAttribute is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-webkitMatchesSelector.html",
+      "subtest": "__all__",
+      "reason": "idlharness helpers and null selector coercion are incomplete in the local runner",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-webkitMatchesSelector.html",
+      "subtest": "__timeout__",
+      "reason": "idlharness helpers and null selector coercion are incomplete in the local runner",
+      "owner": "compat"
     }
   ]
 }

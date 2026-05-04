@@ -126,6 +126,10 @@ export class Node extends EventTargetBase {
     return this.#childNodesCache;
   }
 
+  hasChildNodes(): boolean {
+    return this.childNodes.length > 0;
+  }
+
   get textContent(): string {
     this._window.assertOpen();
 
@@ -1046,6 +1050,7 @@ export class Node extends EventTargetBase {
         propagationPath.push(cursor);
         cursor = cursor.parentNode;
       }
+      propagationPath.push(this._window as unknown as Node);
       event.setPath([...propagationPath]);
 
       for (let i = propagationPath.length - 1; i >= 1; i -= 1) {
@@ -1087,7 +1092,7 @@ export class Node extends EventTargetBase {
   }
 
   protected invokePropertyHandler(event: Event): void {
-    const handlerName = `on${event.type}` as keyof this;
+    const handlerName = `on${event.type.slice(0, 1).toLowerCase()}${event.type.slice(1)}` as keyof this;
     const handler = this[handlerName] as unknown;
     if (typeof handler === "function") {
       (handler as (this: Node, event: Event) => void).call(this, event);

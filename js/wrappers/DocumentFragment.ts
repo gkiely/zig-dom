@@ -43,4 +43,12 @@ export class DocumentFragment extends Node {
     const snapshot = querySelectorAllInSubtree(this, String(selector));
     return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
   }
+
+  getElementById(id: string): Element | null {
+    const expected = String(id);
+    if (expected === "") {
+      return null;
+    }
+    return Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).find((element) => element.id === expected) ?? null;
+  }
 }

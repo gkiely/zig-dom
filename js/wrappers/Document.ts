@@ -63,6 +63,10 @@ function isValidDoctypeName(value: string): boolean {
   return !/[\0\t\n\f\r >]/.test(value);
 }
 
+function isValidProcessingInstructionTarget(value: string): boolean {
+  return /^[A-Za-z_:][A-Za-z0-9_.:\-\u00b7]*$/.test(value);
+}
+
 function validateQualifiedName(namespace: string | null, qualifiedName: string): void {
   if (qualifiedName.length === 0 || qualifiedName.endsWith(":")) {
     throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
@@ -74,11 +78,11 @@ function validateQualifiedName(namespace: string | null, qualifiedName: string):
   if (separator < 0 && !isValidElementName(qualifiedName)) {
     throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
   }
-  if (separator >= 0 && namespace == null) {
-    throw new ZigDOMException("The namespace is invalid.", "NamespaceError", 14);
-  }
   if (separator >= 0 && (!isValidNamespacePrefix(prefix ?? "") || !isValidElementName(localName))) {
     throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+  }
+  if (separator >= 0 && namespace == null) {
+    throw new ZigDOMException("The namespace is invalid.", "NamespaceError", 14);
   }
   if (prefix === "xml" && namespace !== XML_NAMESPACE) {
     throw new ZigDOMException("The namespace is invalid.", "NamespaceError", 14);
@@ -463,6 +467,20 @@ export class Document extends Node {
       return new InputEvent("");
     }
 
+    if (
+      normalized === "beforeunloadevent" ||
+      normalized === "devicemotionevent" ||
+      normalized === "deviceorientationevent" ||
+      normalized === "dragevent" ||
+      normalized === "hashchangeevent" ||
+      normalized === "messageevent" ||
+      normalized === "pagetransitionevent" ||
+      normalized === "popstateevent" ||
+      normalized === "storageevent"
+    ) {
+      return new Event("");
+    }
+
     throw new ZigDOMException(`The event interface \"${interfaceName}\" is not supported.`, "NotSupportedError", 9);
   }
 
@@ -483,10 +501,16 @@ export class Document extends Node {
       __namespaceURI?: string | null;
       __prefix?: string | null;
       __localName?: string;
+      __isXMLNode?: boolean;
     };
-    mutable.__namespaceURI = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument ? null : HTML_NAMESPACE;
+    mutable.__namespaceURI = this.contentType === "application/xhtml+xml"
+      ? HTML_NAMESPACE
+      : (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument
+        ? null
+        : HTML_NAMESPACE;
     mutable.__prefix = null;
     mutable.__localName = normalizedTagName;
+    mutable.__isXMLNode = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument === true;
     this._window.upgradeElementInstance(element, normalizedTagName);
     return element;
   }
@@ -509,6 +533,11 @@ export class Document extends Node {
     mutable.__prefix = prefix;
     mutable.__localName = localName;
     mutable.__isXMLNode = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument === true;
+    if (normalizedNamespace !== HTML_NAMESPACE) {
+      Object.setPrototypeOf(element, Element.prototype);
+    } else if (localName !== asciiLowercase(localName)) {
+      Object.setPrototypeOf(element, this._window.HTMLElement.prototype);
+    }
     return element;
   }
 
@@ -533,35 +562,57 @@ export class Document extends Node {
 
   createTextNode(data: string): Text {
     this._window.assertOpen();
-    const handle = native.createTextNode(this._handle, data);
+    const text = String(data);
+    const handle = native.createTextNode(this._handle, text);
     const node = this._window.createKnownNode(handle, Node.TEXT_NODE) as Text;
-    if (data.includes("\u0000")) {
-      (node as unknown as { __textContentOverride?: string }).__textContentOverride = data;
+    if (text.includes("\u0000")) {
+      (node as unknown as { __textContentOverride?: string }).__textContentOverride = text;
     }
     return node;
   }
 
   createComment(data: string): Comment {
     this._window.assertOpen();
-    const handle = native.createComment(this._handle, data);
+    const text = String(data);
+    const handle = native.createComment(this._handle, text);
     const node = this._window.createKnownNode(handle, Node.COMMENT_NODE) as Comment;
-    if (data.includes("\u0000")) {
-      (node as unknown as { __textContentOverride?: string }).__textContentOverride = data;
+    if (text.includes("\u0000")) {
+      (node as unknown as { __textContentOverride?: string }).__textContentOverride = text;
     }
     return node;
   }
 
   createProcessingInstruction(target: string, data: string): ProcessingInstruction {
+    const targetText = String(target);
+    const dataText = String(data);
+    if (!isValidProcessingInstructionTarget(targetText) || dataText.includes("?>")) {
+      throw new ZigDOMException("The target or data is invalid.", "InvalidCharacterError", 5);
+    }
     // Processing instructions are approximated with a comment-backed node plus target metadata.
-    const instruction = this.createComment(data) as unknown as {
+    const instruction = this.createComment(dataText) as unknown as {
       target?: string;
     };
-    instruction.target = target;
+    instruction.target = targetText;
     return instruction as unknown as ProcessingInstruction;
+  }
+
+  createTreeWalker(root: Node, whatToShow = 0xffffffff, filter: ((node: Node) => number) | null = null): TreeWalker {
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'createTreeWalker': 1 argument required, but only 0 present.");
+    }
+    return {
+      root,
+      currentNode: root,
+      whatToShow,
+      filter
+    } as unknown as TreeWalker;
   }
 
   createCDATASection(data: string): Text {
     this._window.assertOpen();
+    if (this.contentType === "text/html") {
+      throw new ZigDOMException("CDATA sections are not supported in HTML documents.", "NotSupportedError", 9);
+    }
     const cdata = this.createTextNode(data) as unknown as Text & { __isCDATASection?: boolean };
     cdata.__isCDATASection = true;
     return cdata;
@@ -575,7 +626,11 @@ export class Document extends Node {
 
   getElementById(id: string): Element | null {
     this._window.assertOpen();
-    const handle = native.documentGetElementById(this._handle, id);
+    const value = String(id);
+    if (value === "") {
+      return null;
+    }
+    const handle = native.documentGetElementById(this._handle, value);
     return this._window.getNode(handle) as Element | null;
   }
 

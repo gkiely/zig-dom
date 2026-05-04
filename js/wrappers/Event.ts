@@ -386,6 +386,7 @@ export class EventTargetBase {
       event.eventPhase = Event.AT_TARGET;
       this.#invoke(event, false);
       this.#invoke(event, true);
+      this.invokePropertyHandler(event);
       return !event.defaultPrevented;
     } finally {
       event.currentTarget = null;
@@ -399,6 +400,14 @@ export class EventTargetBase {
     this.#invoke(event, capturePhase);
   }
 
+  protected invokePropertyHandler(event: Event): void {
+    const handlerName = eventHandlerPropertyName(event.type);
+    const handler = (this as unknown as Record<string, unknown>)[handlerName];
+    if (typeof handler === "function") {
+      (handler as (this: EventTargetBase, event: Event) => void).call(this, event);
+    }
+  }
+
   #invoke(event: Event, capturePhase: boolean): void {
     const listeners = this.#listeners.get(event.type);
     if (!listeners || listeners.length === 0) {
@@ -408,6 +417,13 @@ export class EventTargetBase {
     for (const listener of [...listeners]) {
       if (listener.capture !== capturePhase) {
         continue;
+      }
+      const currentListeners = this.#listeners.get(event.type);
+      if (!currentListeners?.some((entry) => entry.original === listener.original && entry.capture === listener.capture)) {
+        continue;
+      }
+      if (listener.once) {
+        this.removeEventListener(event.type, listener.original, { capture: listener.capture });
       }
       const globalScope = this.#resolveGlobalScope();
       const previousEvent = globalScope ? (globalScope as { event?: Event }).event : undefined;
@@ -425,9 +441,6 @@ export class EventTargetBase {
         }
       }
 
-      if (listener.once) {
-        this.removeEventListener(event.type, listener.original, { capture: listener.capture });
-      }
       if (event.immediatePropagationStopped) {
         break;
       }
@@ -447,6 +460,10 @@ export class EventTargetBase {
 
     return null;
   }
+}
+
+function eventHandlerPropertyName(type: string): string {
+  return `on${type.slice(0, 1).toLowerCase()}${type.slice(1)}`;
 }
 
 for (const [name, value] of Object.entries({

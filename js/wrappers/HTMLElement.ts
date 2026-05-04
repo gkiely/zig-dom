@@ -1,6 +1,6 @@
 import type { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
-import { Event } from "./Event.ts";
+import { Event, FocusEvent } from "./Event.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import type { Window } from "./Window.ts";
 
@@ -51,10 +51,31 @@ type CSSStyleSheetLike = {
   insertRule(rule: string, index?: number): number;
 };
 
+function retargetFocusRelatedTarget(target: unknown): unknown {
+  const maybeNode = target as unknown as { parentNode?: Node | null };
+  let cursor = maybeNode?.parentNode ?? null;
+  while (cursor) {
+    const shadowRoot = cursor as unknown as { host?: HTMLElement };
+    if (shadowRoot.host) {
+      return shadowRoot.host;
+    }
+    cursor = cursor.parentNode;
+  }
+  return target;
+}
+
 export class HTMLElement extends Element {
   onclick: ((event: Event) => void) | null = null;
   onchange: ((event: Event) => void) | null = null;
   oninput: ((event: Event) => void) | null = null;
+  onanimationend: ((event: Event) => void) | null = null;
+  onwebkitanimationend: ((event: Event) => void) | null = null;
+  onanimationiteration: ((event: Event) => void) | null = null;
+  onwebkitanimationiteration: ((event: Event) => void) | null = null;
+  onanimationstart: ((event: Event) => void) | null = null;
+  onwebkitanimationstart: ((event: Event) => void) | null = null;
+  ontransitionend: ((event: Event) => void) | null = null;
+  onwebkittransitionend: ((event: Event) => void) | null = null;
   #style: CSSStyleDeclaration | null = null;
   #styleSheet: CSSStyleSheetLike | null = null;
   #syncingStyleAttribute = false;
@@ -263,8 +284,11 @@ export class HTMLElement extends Element {
     if (this.disabled) {
       return;
     }
+    const previous = this._window.document.activeElement;
     this._window.setActiveElement(this);
-    this.dispatchEvent(new Event("focus"));
+    const event = new FocusEvent("focus");
+    (event as unknown as { relatedTarget: unknown }).relatedTarget = retargetFocusRelatedTarget(previous);
+    this.dispatchEvent(event);
   }
 
   blur(): void {
@@ -299,6 +323,8 @@ export class HTMLElement extends Element {
     }
   }
 }
+
+export class HTMLSpanElement extends HTMLElement {}
 
 export class HTMLButtonElement extends HTMLElement {
   get type(): string {
