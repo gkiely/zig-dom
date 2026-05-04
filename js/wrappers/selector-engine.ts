@@ -65,7 +65,7 @@ export function elementMatchesSelector(element: Element, selector: string): bool
   }
 
   for (const complex of selectors) {
-    if (matchesComplex(element, complex, null)) {
+    if (matchesComplex(element, complex, element)) {
       return true;
     }
   }

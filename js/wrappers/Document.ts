@@ -298,6 +298,7 @@ export class Document extends Node {
     createDocument: (namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null) => Document;
     createHTMLDocument: (title?: string) => Document;
     createDocumentType: (qualifiedName: string, publicId?: string, systemId?: string) => DocumentType;
+    hasFeature: (...args: unknown[]) => boolean;
   } {
     const ownerDocument = this;
     const createDocument = function(namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null): Document {
@@ -356,6 +357,7 @@ export class Document extends Node {
     return {
       createDocument,
       createDocumentType,
+      hasFeature: (): boolean => true,
       createHTMLDocument: (title?: string): Document => {
         const DocumentCtor = (this._window as unknown as {
           Document: new () => Document;

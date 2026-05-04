@@ -33,7 +33,32 @@ function splitAsciiWhitespace(value: string): string[] {
 }
 
 class DOMTokenList {
-  constructor(private readonly element: Element, private readonly attributeName: string) {}
+  constructor(private readonly element: Element, private readonly attributeName: string) {
+    return new Proxy(this, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\d+$/.test(property)) {
+          return target.item(Number(property)) ?? undefined;
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+      has(target, property) {
+        if (typeof property === "string" && /^\d+$/.test(property)) {
+          return Number(property) < target.length;
+        }
+        return Reflect.has(target, property);
+      },
+      getOwnPropertyDescriptor(target, property) {
+        if (typeof property === "string" && /^\d+$/.test(property)) {
+          const value = target.item(Number(property));
+          if (value != null) {
+            return { configurable: true, enumerable: true, writable: false, value };
+          }
+        }
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      }
+    });
+  }
 
   get length(): number {
     return this.#tokens().length;
@@ -41,26 +66,57 @@ class DOMTokenList {
 
   #tokens(): string[] {
     const raw = this.element.getAttribute(this.attributeName) ?? "";
-    return Array.from(new Set(raw.split(/\s+/).map((token) => token.trim()).filter(Boolean)));
+    if (raw === "\u0000") {
+      return [];
+    }
+    return Array.from(new Set(raw.split(/[\t\n\f\r ]+/).filter(Boolean)));
   }
 
   #set(tokens: string[]): void {
+    if (tokens.length === 0) {
+      this.element.removeAttribute(this.attributeName);
+      return;
+    }
     this.element.setAttribute(this.attributeName, tokens.join(" "));
+  }
+
+  #validate(token: string): string {
+    const value = String(token);
+    if (value.length === 0) {
+      throw new ZigDOMException("The token provided must not be empty.", "SyntaxError", 12);
+    }
+    if (/[\t\n\f\r ]/.test(value)) {
+      throw new ZigDOMException("The token provided contains HTML space characters.", "InvalidCharacterError", 5);
+    }
+    return value;
   }
 
   add(...tokens: string[]): void {
     const next = new Set(this.#tokens());
-    for (const token of tokens) next.add(token);
-    this.#set([...next]);
+    let changed = false;
+    for (const rawToken of tokens) {
+      const token = this.#validate(rawToken);
+      if (!next.has(token)) {
+        changed = true;
+        next.add(token);
+      }
+    }
+    if (changed) {
+      this.#set([...next]);
+    }
   }
 
   remove(...tokens: string[]): void {
-    const toRemove = new Set(tokens);
-    this.#set(this.#tokens().filter((token) => !toRemove.has(token)));
+    const toRemove = new Set(tokens.map((token) => this.#validate(token)));
+    const current = this.#tokens();
+    const next = current.filter((token) => !toRemove.has(token));
+    if (next.length !== current.length) {
+      this.#set(next);
+    }
   }
 
   contains(token: string): boolean {
-    return this.#tokens().includes(token);
+    return this.#tokens().includes(String(token));
   }
 
   item(index: number): string | null {
@@ -68,15 +124,36 @@ class DOMTokenList {
   }
 
   toggle(token: string, force?: boolean): boolean {
-    const has = this.contains(token);
+    const value = this.#validate(token);
+    const has = this.contains(value);
+    if (has && force === true) {
+      return true;
+    }
     if (force === true || (!has && force !== false)) {
-      this.add(token);
+      this.add(value);
       return true;
     }
     if (has) {
-      this.remove(token);
+      this.remove(value);
     }
     return false;
+  }
+
+  replace(token: string, newToken: string): boolean {
+    const oldValue = this.#validate(token);
+    const newValue = this.#validate(newToken);
+    const tokens = this.#tokens();
+    const index = tokens.indexOf(oldValue);
+    if (index === -1) {
+      return false;
+    }
+    if (tokens.includes(newValue)) {
+      this.#set(tokens.filter((current) => current !== oldValue));
+      return true;
+    }
+    tokens[index] = newValue;
+    this.#set(tokens);
+    return true;
   }
 
   toString(): string {
@@ -261,6 +338,10 @@ export class Element extends Node {
       return null;
     }
     return children.item(children.length - 1);
+  }
+
+  get childElementCount(): number {
+    return this.children.length;
   }
 
   get previousElementSibling(): Element | null {
@@ -752,6 +833,17 @@ export class Element extends Node {
 
   webkitMatchesSelector(selector: string): boolean {
     return this.matches(selector);
+  }
+
+  closest(selector: string): Element | null {
+    let current: Element | null = this;
+    while (current) {
+      if (current.matches(selector)) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return null;
   }
 
   querySelector(selector: string): Element | null {
