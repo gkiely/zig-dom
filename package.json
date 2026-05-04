@@ -27,6 +27,7 @@
     "build:native:packages": "bun run scripts/build-native-packages.ts",
     "build:js": "bunx tsc -p tsconfig.json",
     "build": "bun run build:js && bun run build:native:packages",
+    "build:local": "bun run build && npm --prefix ../youneedawiki install ../zig-dom",
     "wpt:sync": "bun run scripts/sync-wpt.ts",
     "wpt:manifest": "bun run scripts/generate-wpt-manifest.ts",
     "verify:wpt:upstream:dom:smoke": "bun run wpt:sync && bun run wpt:manifest --dir dom --out-manifest wpt/manifest/upstream-dom-smoke.json --out-expected wpt/expected/upstream-dom-smoke.json --max 200 && bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/upstream-dom-smoke.json --expected wpt/expected/upstream-dom-smoke.json --wpt-root .wpt-cache/web-platform-tests --entry-timeout-ms 3000 --progress-every 20",
