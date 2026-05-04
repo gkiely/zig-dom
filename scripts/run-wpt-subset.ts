@@ -349,9 +349,8 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     window.document.insertBefore(doctype as unknown as Node, window.document.firstChild);
   }
 
-  let harnessTestChain: Promise<void> = Promise.resolve();
   const registerHarnessTest = (name: string, run: () => void | Promise<void>) => {
-    harnessTestChain = harnessTestChain.then(async () => {
+    pendingTests.push((async () => {
       const start = performance.now();
       try {
         await run();
@@ -370,8 +369,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
           durationMs: performance.now() - start
         });
       }
-    });
-    pendingTests.push(harnessTestChain);
+    })());
   };
 
   type CleanupCallback = () => void | Promise<void>;
