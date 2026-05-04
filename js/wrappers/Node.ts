@@ -159,6 +159,12 @@ export class Node extends EventTargetBase {
     }
 
     if (this.#nodeType === Node.ELEMENT_NODE || this.#nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      if (!this._window._hasMutationObservers && !this._window._hasCustomElementDefinitions) {
+        const rawValue = value as unknown;
+        native.setNodeTextContent(this._handle, rawValue == null ? "" : String(rawValue));
+        return;
+      }
+
       const document = this.nodeType === Node.DOCUMENT_NODE
         ? (this as unknown as Document)
         : this.ownerDocument;

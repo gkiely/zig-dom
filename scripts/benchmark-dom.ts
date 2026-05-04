@@ -449,12 +449,12 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
     }, APPEND_SAMPLE_COUNT);
   });
 
-  await withEnv("replace_children_1k_ms", async (env) => {
+  await withEnv("replace_children_10k_ms", async (env) => {
     return medianSample(() => {
       const container = env.document.createElement("div");
       env.document.body.appendChild(container);
       const nodes: Element[] = [];
-      for (let i = 0; i < SMALL_ELEMENT_COUNT; i += 1) {
+      for (let i = 0; i < ELEMENT_COUNT; i += 1) {
         const child = env.document.createElement("span");
         child.textContent = String(i);
         nodes.push(child);

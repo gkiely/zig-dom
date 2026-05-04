@@ -362,6 +362,26 @@ export class Element extends Node {
     return namespace == null ? this.#findAttributeByQualifiedName(localName) : null;
   }
 
+  #trySetPlainHtmlAttributeFastPath(name: string, value: string): boolean {
+    if (
+      !this.#isHtmlElement() ||
+      this.#attributeMetadata.size !== 0 ||
+      this.#nonHtmlAttributes.size !== 0 ||
+      this._window.hasMutationObservers() ||
+      this._window.customElements.hasDefinitions
+    ) {
+      return false;
+    }
+
+    native.setAttribute(this._handle, name, value);
+    this.#mutablePlainAttributeNames().add(name);
+    if (!this.#attributeCache) {
+      this.#attributeCache = new Map();
+    }
+    this.#attributeCache.set(name, value);
+    return true;
+  }
+
   get classList(): DOMTokenList {
     if (!this.#classList) {
       this.#classList = new DOMTokenList(this, "class");
@@ -472,7 +492,10 @@ export class Element extends Node {
   }
 
   set id(value: string) {
-    this.setAttribute("id", value);
+    const stringValue = String(value);
+    if (!this.#trySetPlainHtmlAttributeFastPath("id", stringValue)) {
+      this.setAttribute("id", stringValue);
+    }
   }
 
   get className(): string {
@@ -480,7 +503,10 @@ export class Element extends Node {
   }
 
   set className(value: string) {
-    this.setAttribute("class", value);
+    const stringValue = String(value);
+    if (!this.#trySetPlainHtmlAttributeFastPath("class", stringValue)) {
+      this.setAttribute("class", stringValue);
+    }
   }
 
   get children(): HTMLCollection {
