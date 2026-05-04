@@ -53,7 +53,7 @@ export function querySelectorAllInSubtree(root: Node, selector: string): Element
   return queryFromRoots([root], selector, null, false);
 }
 
-export function elementMatchesSelector(element: Element, selector: string): boolean {
+export function elementMatchesSelector(element: Element, selector: string, scopeRoot: Element = element): boolean {
   const simpleId = parseSimpleIdSelector(selector);
   if (simpleId != null) {
     return element.id === simpleId;
@@ -65,7 +65,7 @@ export function elementMatchesSelector(element: Element, selector: string): bool
   }
 
   for (const complex of selectors) {
-    if (matchesComplex(element, complex, element)) {
+    if (matchesComplex(element, complex, scopeRoot)) {
       return true;
     }
   }
@@ -751,9 +751,52 @@ function matchesPseudoSelector(element: Element, pseudo: PseudoSelector, scopeRo
     }
     case "scope":
       return scopeRoot ? scopeRoot === element : false;
+    case "empty":
+      return element.childNodes.toArray().every((child) => {
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          return false;
+        }
+        return child.nodeType !== Node.TEXT_NODE || child.textContent === "";
+      });
+    case "invalid":
+      return isInvalidFormControl(element) || element.children.toArray().some((child) => matchesPseudoSelector(child, pseudo, scopeRoot));
+    case "has": {
+      const argument = pseudo.argument ?? "";
+      if (/^>\s*:scope$/.test(argument)) {
+        return scopeRoot != null && element.children.toArray().includes(scopeRoot);
+      }
+      const selectors = parseSelectorList(argument);
+      if (selectors.length === 0) {
+        return false;
+      }
+      const descendants = collectDescendantElements(element);
+      return descendants.some((descendant) => selectors.some((selector) => matchesComplex(descendant, selector, scopeRoot)));
+    }
     default:
       return false;
   }
+}
+
+function collectDescendantElements(root: Element): Element[] {
+  const out: Element[] = [];
+  const visit = (node: Node): void => {
+    for (const child of node.childNodes.toArray()) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        out.push(child as unknown as Element);
+        visit(child);
+      }
+    }
+  };
+  visit(root);
+  return out;
+}
+
+function isInvalidFormControl(element: Element): boolean {
+  const localName = element.localName.toLowerCase();
+  if ((localName === "input" || localName === "select" || localName === "textarea") && element.hasAttribute("required")) {
+    return (element as unknown as { value?: string }).value === "";
+  }
+  return false;
 }
 
 function matchesNthChild(element: Element, argument: string): boolean {

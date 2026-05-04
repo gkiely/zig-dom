@@ -112,7 +112,9 @@ export class HTMLCollection implements Iterable<Element> {
   }
 
   item(index: number): Element | null {
-    return this._snapshot()[index] ?? null;
+    const numericIndex = Number(index);
+    const convertedIndex = Number.isFinite(numericIndex) ? Math.trunc(numericIndex) >>> 0 : 0;
+    return this._snapshot()[convertedIndex] ?? null;
   }
 
   namedItem(name: string): Element | null {

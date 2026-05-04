@@ -250,15 +250,17 @@ function unmaskTemplateBlocks(html: string, templates: string[]): string {
   return restored;
 }
 
-function extractHeadAndBodyMarkup(html: string): { head: string; body: string } {
+function extractHeadAndBodyMarkup(html: string): { head: string; body: string; bodyAttributes: string } {
   const staticHtml = stripScriptTags(html);
   const headMatch = staticHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
-  const bodyMatch = staticHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  const bodyMatch = staticHtml.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
+  const bodyStartMatch = staticHtml.match(/<body([^>]*)>/i);
 
   if (bodyMatch) {
     return {
       head: headMatch?.[1] ?? "",
-      body: bodyMatch[1] ?? ""
+      body: bodyMatch[2] ?? "",
+      bodyAttributes: bodyMatch[1] ?? ""
     };
   }
 
@@ -272,8 +274,20 @@ function extractHeadAndBodyMarkup(html: string): { head: string; body: string } 
 
   return {
     head: headMatch?.[1] ?? "",
-    body: fallbackBody
+    body: fallbackBody,
+    bodyAttributes: bodyStartMatch?.[1] ?? ""
   };
+}
+
+function applyAttributeMarkup(element: { setAttribute(name: string, value: string): void }, source: string): void {
+  const attrRegex = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+  let match: RegExpExecArray | null = null;
+  while ((match = attrRegex.exec(source)) !== null) {
+    const name = match[1];
+    if (name && name !== "/") {
+      element.setAttribute(name, match[2] ?? match[3] ?? match[4] ?? "");
+    }
+  }
 }
 
 function assignNamedElementGlobals(context: Record<string, unknown>, window: Window): void {
@@ -311,6 +325,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   const window = new Window({ url: testUrl(file, variant) });
   const initialMarkup = extractHeadAndBodyMarkup(html);
   window.document.head.innerHTML = initialMarkup.head;
+  applyAttributeMarkup(window.document.body, initialMarkup.bodyAttributes);
   window.document.body.innerHTML = initialMarkup.body;
 
   const doctypeMatch = html.match(/<!doctype\s+([A-Za-z0-9:_-]+)/i);

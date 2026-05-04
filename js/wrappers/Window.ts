@@ -818,8 +818,8 @@ export class Window extends EventTargetBase {
     });
   }
 
-  notifyAttributeChanged(element: Element, name: string, oldValue: string | null, newValue: string | null): void {
-    if (oldValue === newValue) {
+  notifyAttributeChanged(element: Element, name: string, oldValue: string | null, newValue: string | null, forceMutation = false): void {
+    if (oldValue === newValue && !forceMutation) {
       return;
     }
 

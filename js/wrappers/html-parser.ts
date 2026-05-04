@@ -107,6 +107,14 @@ export function parseHtmlInto(parent: Element | DocumentFragment, html: string):
       const tagName = (firstSpace === -1 ? inner : inner.slice(0, firstSpace)).toLowerCase();
       const attrSource = firstSpace === -1 ? "" : inner.slice(firstSpace + 1);
 
+      if (tagName === "body" && stack.length === 1 && (parent as Element).localName === "body") {
+        if (attrSource) {
+          parseAttributes(parent as Element, attrSource);
+        }
+        stack.push(parent as Element);
+        continue;
+      }
+
       const element = document.createElement(tagName);
       if (attrSource) {
         parseAttributes(element, attrSource);

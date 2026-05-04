@@ -72,8 +72,12 @@ class DOMTokenList {
     return Array.from(new Set(raw.split(/[\t\n\f\r ]+/).filter(Boolean)));
   }
 
-  #set(tokens: string[]): void {
+  #set(tokens: string[], preserveEmptyAttribute = false): void {
     if (tokens.length === 0) {
+      if (preserveEmptyAttribute) {
+        this.element.setAttribute(this.attributeName, "");
+        return;
+      }
       this.element.removeAttribute(this.attributeName);
       return;
     }
@@ -92,6 +96,7 @@ class DOMTokenList {
   }
 
   add(...tokens: string[]): void {
+    const hadAttribute = this.element.hasAttribute(this.attributeName);
     const next = new Set(this.#tokens());
     for (const rawToken of tokens) {
       const token = this.#validate(rawToken);
@@ -100,16 +105,17 @@ class DOMTokenList {
       }
     }
     if (tokens.length > 0 || this.element.hasAttribute(this.attributeName)) {
-      this.#set([...next]);
+      this.#set([...next], hadAttribute);
     }
   }
 
   remove(...tokens: string[]): void {
+    const hadAttribute = this.element.hasAttribute(this.attributeName);
     const toRemove = new Set(tokens.map((token) => this.#validate(token)));
     const current = this.#tokens();
     const next = current.filter((token) => !toRemove.has(token));
     if (tokens.length > 0 || this.element.hasAttribute(this.attributeName)) {
-      this.#set(next);
+      this.#set(next, hadAttribute);
     }
   }
 
@@ -132,12 +138,15 @@ class DOMTokenList {
       return true;
     }
     if (has) {
-      this.remove(value);
+      this.#set(this.#tokens().filter((current) => current !== value), this.element.hasAttribute(this.attributeName));
     }
     return false;
   }
 
   replace(token: string, newToken: string): boolean {
+    if (String(newToken).length === 0) {
+      throw new ZigDOMException("The token provided must not be empty.", "SyntaxError", 12);
+    }
     const oldValue = this.#validate(token);
     const newValue = this.#validate(newToken);
     const tokens = this.#tokens();
@@ -145,16 +154,18 @@ class DOMTokenList {
     if (index === -1) {
       return false;
     }
+    const hadAttribute = this.element.hasAttribute(this.attributeName);
     if (oldValue === newValue) {
+      const previousAttributeValue = this.element.getAttribute(this.attributeName);
       this.#set(tokens);
-      return true;
-    }
-    if (tokens.includes(newValue)) {
-      this.#set(tokens.filter((current) => current !== oldValue));
+      const nextAttributeValue = this.element.getAttribute(this.attributeName);
+      if (previousAttributeValue === nextAttributeValue) {
+        this.element._window.notifyAttributeChanged(this.element, this.attributeName, nextAttributeValue, nextAttributeValue, true);
+      }
       return true;
     }
     tokens[index] = newValue;
-    this.#set(tokens);
+    this.#set(tokens.filter((current, currentIndex) => tokens.indexOf(current) === currentIndex), hadAttribute);
     return true;
   }
 
@@ -602,7 +613,7 @@ export class Element extends Node {
     if (this.#plainAttributeNames.has(key)) {
       const value = native.getAttribute(this._handle, key);
       if (value != null) {
-        return value;
+        return value === "\u0000" ? "" : value;
       }
     }
     const internalName = this.#findAttributeByQualifiedName(name);
@@ -623,11 +634,12 @@ export class Element extends Node {
     }
 
     const value = native.getAttribute(this._handle, key);
+    const normalizedValue = value === "\u0000" ? "" : value;
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
-    this.#attributeCache.set(key, value);
-    return value;
+    this.#attributeCache.set(key, normalizedValue);
+    return normalizedValue;
   }
 
   getAttributeNode(name: string): Attr | null {
@@ -864,7 +876,7 @@ export class Element extends Node {
   closest(selector: string): Element | null {
     let current: Element | null = this;
     while (current) {
-      if (current.matches(selector)) {
+      if (elementMatchesSelector(current, selector, this)) {
         return current;
       }
       current = current.parentElement;
