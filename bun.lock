@@ -19,6 +19,13 @@
         "react-dom": "^18.3.1",
         "typescript": "^6.0.3",
       },
+      "optionalDependencies": {
+        "zig-dom-darwin-arm64": "0.1.1",
+        "zig-dom-darwin-x64": "0.1.1",
+        "zig-dom-linux-arm64": "0.1.1",
+        "zig-dom-linux-x64": "0.1.1",
+        "zig-dom-win32-x64": "0.1.1",
+      },
     },
   },
   "packages": {

@@ -6,23 +6,6 @@ import { Event, EventTargetBase } from "./Event.ts";
 import { NodeList } from "./NodeList.ts";
 import type { Window } from "./Window.ts";
 
-function isInHiddenSubtree(node: Node): boolean {
-  let cursor: Node | null = node.nodeType === 1 ? node : node.parentNode;
-  while (cursor) {
-    if (cursor.nodeType === 1) {
-      const elementLike = cursor as unknown as {
-        getAttribute(name: string): string | null;
-        hasAttribute(name: string): boolean;
-      };
-      if (elementLike.getAttribute("aria-hidden") === "true" || elementLike.hasAttribute("hidden")) {
-        return true;
-      }
-    }
-    cursor = cursor.parentNode;
-  }
-  return false;
-}
-
 export class Node extends EventTargetBase {
   static readonly ELEMENT_NODE = 1;
   static readonly ATTRIBUTE_NODE = 2;
@@ -154,19 +137,16 @@ export class Node extends EventTargetBase {
       return null as unknown as string;
     }
 
-    if (isInHiddenSubtree(this)) {
-      return "";
-    }
-
     const value = native.nodeTextContent(this._handle);
-    const cachedOverride = (this as unknown as { __textContentOverride?: string }).__textContentOverride;
-    if (typeof cachedOverride === "string") {
-      return cachedOverride;
-    }
 
     // Native returns a NUL sentinel for empty character data.
     if (value === "\u0000") {
       return "";
+    }
+
+    const cachedOverride = (this as unknown as { __textContentOverride?: string }).__textContentOverride;
+    if (typeof cachedOverride === "string") {
+      return cachedOverride;
     }
 
     return value;
@@ -1112,6 +1092,21 @@ export class Node extends EventTargetBase {
     }
     if (event.type === "") {
       throw new ZigDOMException("The event has no type.", "InvalidStateError", 11);
+    }
+
+    if (
+      process.env.ZIG_DOM_DEBUG_MENU_MOUSE === "1" &&
+      event.type === "mouseenter" &&
+      this.nodeType === Node.ELEMENT_NODE
+    ) {
+      const element = this as unknown as {
+        getAttribute(name: string): string | null;
+        textContent: string;
+      };
+      if (element.getAttribute("role") === "menuitem") {
+        const label = element.textContent.replace(/\s+/g, " ").trim();
+        throw new Error(`zig-dom menu mouseenter: "${label}"`);
+      }
     }
 
     event.setDispatchFlag(true);

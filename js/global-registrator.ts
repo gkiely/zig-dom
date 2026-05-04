@@ -25,6 +25,17 @@ import { Range, Selection } from "./wrappers/Range.ts";
 import { Text } from "./wrappers/Text.ts";
 import { Window, type WindowOptions } from "./wrappers/Window.ts";
 
+function isPrototypeInChain(object: object, prototype: object): boolean {
+  let cursor = Object.getPrototypeOf(object);
+  while (cursor) {
+    if (cursor === prototype) {
+      return true;
+    }
+    cursor = Object.getPrototypeOf(cursor);
+  }
+  return false;
+}
+
 export class GlobalRegistrator {
   static #registeredWindow: Window | null = null;
 
@@ -102,6 +113,7 @@ export class GlobalRegistrator {
       Blob: window.Blob,
       File: window.File,
       URL: window.URL,
+      CSS: (window as unknown as Record<string, unknown>).CSS,
       URLSearchParams: globalThis.URLSearchParams,
       AbortController: window.AbortController,
       AbortSignal: window.AbortSignal,
@@ -179,6 +191,10 @@ export class GlobalRegistrator {
         configurable: true,
         enumerable: true
       });
+    }
+
+    if (!isPrototypeInChain(globalThis, window)) {
+      Object.setPrototypeOf(globalThis, window);
     }
 
     Object.defineProperty(globalThis, "setTimeout", {

@@ -888,6 +888,32 @@ export class Window extends EventTargetBase {
     this.URL = globalThis.URL;
     this.AbortSignal = globalThis.AbortSignal;
     this.AbortController = globalThis.AbortController;
+    const nativeCSS = (globalThis as unknown as {
+      CSS?: {
+        supports?: (conditionText: string) => boolean;
+        escape?: (value: string) => string;
+      };
+    }).CSS;
+    const supports = (conditionText: string): boolean => {
+      const normalized = String(conditionText).trim().toLowerCase();
+      if (normalized === "selector(:focus-visible)") {
+        return true;
+      }
+
+      if (typeof nativeCSS?.supports !== "function") {
+        return false;
+      }
+
+      try {
+        return nativeCSS.supports(conditionText);
+      } catch {
+        return false;
+      }
+    };
+    this.CSS = {
+      supports,
+      ...(typeof nativeCSS?.escape === "function" ? { escape: nativeCSS.escape.bind(nativeCSS) } : {})
+    } as typeof globalThis.CSS;
     this.getComputedStyle = this.getComputedStyle.bind(this);
     this.#makeInterfacePropertiesNonEnumerable();
 
@@ -1544,6 +1570,7 @@ export class Window extends EventTargetBase {
   Blob!: typeof globalThis.Blob;
   File!: typeof globalThis.File;
   URL!: typeof globalThis.URL;
+  CSS!: typeof globalThis.CSS;
   AbortSignal!: typeof globalThis.AbortSignal;
   AbortController!: typeof globalThis.AbortController;
   declare performance: typeof globalThis.performance;

@@ -596,6 +596,7 @@ function parsePseudoSelector(input: string, start: number): { selector: PseudoSe
     "checked", "disabled", "empty", "enabled", "first-child", "first-of-type", "has", "invalid", "is", "lang",
     "last-child", "last-of-type", "link", "not", "nth-child", "nth-last-child", "nth-last-of-type",
     "nth-of-type", "only-child", "only-of-type", "root", "scope", "target", "visited", "where"
+    , "focus", "focus-visible", "focus-within"
   ];
   if (!knownPseudoClassNames.includes(name)) {
     return null;
@@ -956,6 +957,20 @@ function trimAsciiWhitespace(value: string): string {
 
 function matchesPseudoSelector(element: Element, pseudo: PseudoSelector, scopeRoot: Element | null): boolean {
   switch (pseudo.name) {
+    case "focus": {
+      return element.ownerDocument?.activeElement === element;
+    }
+    case "focus-visible": {
+      // Mirror focus state until keyboard modality tracking exists.
+      return element.ownerDocument?.activeElement === element;
+    }
+    case "focus-within": {
+      const activeElement = element.ownerDocument?.activeElement;
+      if (!activeElement || activeElement.nodeType !== Node.ELEMENT_NODE) {
+        return false;
+      }
+      return activeElement === element || element.contains(activeElement);
+    }
     case "root":
       return element.ownerDocument?.documentElement === element;
     case "first-child":

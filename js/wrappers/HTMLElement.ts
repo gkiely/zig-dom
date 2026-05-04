@@ -45,6 +45,31 @@ function normalizeSelectionDirection(direction: string | undefined): "forward" |
   return "none";
 }
 
+function isNaturallyFocusableElement(element: HTMLElement): boolean {
+  const tag = element.tagName;
+  if (tag === "BUTTON" || tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || tag === "IFRAME") {
+    return true;
+  }
+
+  if (tag === "A" || tag === "AREA") {
+    return element.hasAttribute("href");
+  }
+
+  if (tag === "AUDIO" || tag === "VIDEO") {
+    return element.hasAttribute("controls");
+  }
+
+  if (tag === "SUMMARY") {
+    return true;
+  }
+
+  if (element.hasAttribute("contenteditable")) {
+    return true;
+  }
+
+  return false;
+}
+
 function isValidEmailAddress(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
@@ -222,6 +247,7 @@ export class HTMLElement extends Element {
     }
 
     const previous = this._window.document.activeElement;
+
     if (previous === this) {
       return;
     }
@@ -285,6 +311,21 @@ export class HTMLElement extends Element {
     } else {
       this.setAttribute("title", value);
     }
+  }
+
+  get tabIndex(): number {
+    const raw = this.getAttribute("tabindex");
+    if (raw != null) {
+      const parsed = Number.parseInt(raw, 10);
+      return Number.isNaN(parsed) ? -1 : parsed;
+    }
+
+    return isNaturallyFocusableElement(this) ? 0 : -1;
+  }
+
+  set tabIndex(value: number) {
+    const normalized = Number.isFinite(value) ? Math.trunc(value) : -1;
+    this.setAttribute("tabindex", String(normalized));
   }
 }
 

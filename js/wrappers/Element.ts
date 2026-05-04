@@ -418,6 +418,50 @@ export class Element extends Node {
     return this.#ensureStyle();
   }
 
+  get clientWidth(): number {
+    return 0;
+  }
+
+  get clientHeight(): number {
+    return 0;
+  }
+
+  get clientTop(): number {
+    return 0;
+  }
+
+  get clientLeft(): number {
+    return 0;
+  }
+
+  get offsetWidth(): number {
+    return 0;
+  }
+
+  get offsetHeight(): number {
+    return 0;
+  }
+
+  get offsetTop(): number {
+    return 0;
+  }
+
+  get offsetLeft(): number {
+    return 0;
+  }
+
+  get offsetParent(): Element | null {
+    return null;
+  }
+
+  get scrollWidth(): number {
+    return 0;
+  }
+
+  get scrollHeight(): number {
+    return 0;
+  }
+
   getBoundingClientRect(): DOMRect {
     return {
       x: 0,
