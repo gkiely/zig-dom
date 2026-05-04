@@ -1,6 +1,6 @@
 {
   "name": "zig-dom-win32-x64",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Native Windows x64 library for zig-dom",
   "os": [
     "win32"

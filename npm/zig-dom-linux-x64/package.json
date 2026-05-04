@@ -1,6 +1,6 @@
 {
   "name": "zig-dom-linux-x64",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Native Linux x64 library for zig-dom",
   "os": [
     "linux"
