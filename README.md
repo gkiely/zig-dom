@@ -12,7 +12,7 @@ The current package ships a macOS native library. Linux and Windows builds are n
 
 ## React Test Setup
 
-Use a Bun preload file, similar to `react-ts-template`:
+Create a preload file, similar to `react-ts-template`:
 
 ```ts
 // preload.ts
@@ -27,11 +27,9 @@ const { cleanup } = await import("@testing-library/react");
 afterEach(() => cleanup());
 ```
 
-Then run tests with:
-
-```sh
-bun test --preload ./preload.ts
-```
+| bunfig.toml | CLI fallback |
+| --- | --- |
+| <pre lang="toml">[test]<br>preload = ["./preload.ts"]</pre> | <pre lang="sh">bun test --preload ./preload.ts</pre> |
 
 ## Direct Usage
 
