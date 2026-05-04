@@ -1,6 +1,6 @@
 {
   "name": "zig-dom",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Bun-only Zig-backed DOM implementation with happy-dom-compatible surface",
   "license": "MIT",
   "type": "module",
