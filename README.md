@@ -10,9 +10,24 @@ Bun-only Zig-backed DOM implementation with a `happy-dom`-compatible surface.
 
 The current package ships a macOS native library. Linux and Windows builds are not published yet.
 
-## React Test Setup
+## Direct Usage
 
-Create a preload file, similar to `react-ts-template`:
+Use `Window` directly when you want an isolated DOM:
+
+```ts
+import { Window } from "zig-dom";
+
+const window = new Window({ url: "http://localhost/" });
+window.document.body.innerHTML = "<button>Save</button>";
+
+console.log(window.document.querySelector("button")?.textContent);
+
+window.close();
+```
+
+## React Usage
+
+Create a Bun preload file, similar to `react-ts-template`:
 
 ```ts
 // preload.ts
@@ -30,19 +45,6 @@ afterEach(() => cleanup());
 | bunfig.toml | CLI fallback |
 | --- | --- |
 | <pre lang="toml">[test]<br>preload = ["./preload.ts"]</pre> | <pre lang="sh">bun test --preload ./preload.ts</pre> |
-
-## Direct Usage
-
-```ts
-import { Window } from "zig-dom";
-
-const window = new Window({ url: "http://localhost/" });
-window.document.body.innerHTML = "<button>Save</button>";
-
-console.log(window.document.querySelector("button")?.textContent);
-
-window.close();
-```
 
 ## Development
 
