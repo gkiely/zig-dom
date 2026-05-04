@@ -3,7 +3,7 @@ import { ZigDOMException } from "./wrappers/DOMException.ts";
 import { Document } from "./wrappers/Document.ts";
 import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
 import { Element } from "./wrappers/Element.ts";
-import { CompositionEvent, CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./wrappers/Event.ts";
+import { CompositionEvent, CustomEvent, Event, EventTargetBase, FocusEvent, InputEvent, KeyboardEvent, MouseEvent, UIEvent, WheelEvent } from "./wrappers/Event.ts";
 import {
   HTMLButtonElement,
   HTMLElement,
@@ -51,8 +51,12 @@ export class GlobalRegistrator {
       Comment,
       DocumentFragment,
       Event,
+      EventTarget: EventTargetBase,
+      UIEvent,
+      FocusEvent,
       CustomEvent,
       MouseEvent,
+      WheelEvent,
       InputEvent,
       CompositionEvent,
       KeyboardEvent,
@@ -66,15 +70,26 @@ export class GlobalRegistrator {
       getSelection: () => window.getSelection(),
       localStorage: window.localStorage,
       sessionStorage: window.sessionStorage,
+      location: window.location,
+      history: window.history,
       customElements: window.customElements,
       getComputedStyle: window.getComputedStyle,
+      requestAnimationFrame: window.requestAnimationFrame,
+      cancelAnimationFrame: window.cancelAnimationFrame,
+      queueMicrotask: window.queueMicrotask,
+      performance: window.performance,
       fetch: window.fetch,
       Headers: window.Headers,
       Request: window.Request,
       Response: window.Response,
       FormData: window.FormData,
       Blob: window.Blob,
-      File: window.File
+      File: window.File,
+      URL: window.URL,
+      URLSearchParams: globalThis.URLSearchParams,
+      AbortController: window.AbortController,
+      AbortSignal: window.AbortSignal,
+      DOMParser: (window as unknown as { DOMParser?: unknown }).DOMParser
     };
 
     for (const [key, value] of Object.entries(assignments)) {

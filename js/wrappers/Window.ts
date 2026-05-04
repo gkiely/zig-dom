@@ -80,6 +80,16 @@ export interface WindowLocation {
   toString(): string;
 }
 
+export interface WindowHistory {
+  readonly length: number;
+  readonly state: unknown;
+  back(): void;
+  forward(): void;
+  go(delta?: number): void;
+  pushState(state: unknown, unused: string, url?: string | URL | null): void;
+  replaceState(state: unknown, unused: string, url?: string | URL | null): void;
+}
+
 type ComputedStyleLike = {
   cssText: string;
   display: string;
@@ -193,6 +203,79 @@ class WindowLocationImpl implements WindowLocation {
   }
 }
 
+class WindowHistoryImpl implements WindowHistory {
+  #entries: Array<{ state: unknown; href: string }>;
+  #index = 0;
+  readonly #window: Window;
+
+  constructor(window: Window) {
+    this.#window = window;
+    this.#entries = [{ state: null, href: this.#window.location.href }];
+  }
+
+  get length(): number {
+    return this.#entries.length;
+  }
+
+  get state(): unknown {
+    return this.#entries[this.#index]?.state ?? null;
+  }
+
+  back(): void {
+    this.go(-1);
+  }
+
+  forward(): void {
+    this.go(1);
+  }
+
+  go(delta = 0): void {
+    if (delta === 0) {
+      return;
+    }
+
+    const nextIndex = this.#index + Number(delta);
+    if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= this.#entries.length) {
+      return;
+    }
+
+    this.#index = nextIndex;
+    const entry = this.#entries[this.#index];
+    this.#window.location.href = entry.href;
+    const event = new Event("popstate");
+    Object.defineProperty(event, "state", {
+      value: entry.state,
+      configurable: true
+    });
+    this.#window.dispatchEvent(event);
+  }
+
+  pushState(state: unknown, _unused: string, url?: string | URL | null): void {
+    const href = this.#resolveHref(url);
+    this.#entries[this.#index] = {
+      state: this.#entries[this.#index]?.state ?? null,
+      href: this.#window.location.href
+    };
+    this.#entries.splice(this.#index + 1);
+    this.#entries.push({ state, href });
+    this.#index = this.#entries.length - 1;
+    this.#window.location.href = href;
+  }
+
+  replaceState(state: unknown, _unused: string, url?: string | URL | null): void {
+    const href = this.#resolveHref(url);
+    this.#entries[this.#index] = { state, href };
+    this.#window.location.href = href;
+  }
+
+  #resolveHref(url?: string | URL | null): string {
+    if (url == null) {
+      return this.#window.location.href;
+    }
+    return new URL(String(url), this.#window.location.href).href;
+  }
+}
+
 function nodeIdFromHandle(handle: number): number {
   return handle >>> 0;
 }
@@ -251,6 +334,7 @@ export class Window extends EventTargetBase {
   readonly XMLDocument = Document;
 
   readonly location: WindowLocation;
+  readonly history: WindowHistory;
   readonly document: Document;
   readonly localStorage = new Storage();
   readonly sessionStorage = new Storage();
@@ -290,6 +374,7 @@ export class Window extends EventTargetBase {
     });
 
     this.location = new WindowLocationImpl(options?.url ?? "http://localhost/");
+    this.history = new WindowHistoryImpl(this);
 
     this.document = this.getNode(this.#documentHandle) as Document;
 
@@ -1214,4 +1299,5 @@ export class Window extends EventTargetBase {
   URL!: typeof globalThis.URL;
   AbortSignal!: typeof globalThis.AbortSignal;
   AbortController!: typeof globalThis.AbortController;
+  performance!: typeof globalThis.performance;
 }
