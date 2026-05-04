@@ -326,12 +326,27 @@ export class Node extends EventTargetBase {
 
   insertBefore<TNode extends Node>(newChild: TNode, referenceChild: Node | null): TNode {
     this._window.assertOpen();
-    validatePreInsertion(this, newChild, referenceChild);
+    if (!(newChild instanceof Node)) {
+      throw new TypeError("Failed to execute 'insertBefore' on 'Node': parameter 1 is not of type 'Node'.");
+    }
+    if (arguments.length < 2) {
+      throw new TypeError("Failed to execute 'insertBefore' on 'Node': 2 arguments required, but only 1 present.");
+    }
+    if (referenceChild !== null && referenceChild !== undefined && !(referenceChild instanceof Node)) {
+      throw new TypeError("Failed to execute 'insertBefore' on 'Node': parameter 2 is not of type 'Node'.");
+    }
+
+    const reference = referenceChild ?? null;
+    validatePreInsertion(this, newChild, reference);
+
+    if (newChild === reference) {
+      return newChild;
+    }
 
     if (newChild instanceof this._window.DocumentFragment) {
       const children = newChild.childNodes.toArray();
       for (const child of children) {
-        this.insertBefore(child, referenceChild);
+        this.insertBefore(child, reference);
       }
       return newChild;
     }
@@ -342,7 +357,7 @@ export class Node extends EventTargetBase {
       } catch {
         newChild = adoptForeignNodeForParent(this, newChild) as TNode;
       }
-      native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+      native.insertBefore(this._handle, newChild._handle, reference?._handle ?? 0);
       this._window.adoptSubtreeWrappers(newChild);
       refreshDocumentElementFlag(this);
       return newChild;
@@ -350,7 +365,7 @@ export class Node extends EventTargetBase {
 
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
-      native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+      native.insertBefore(this._handle, newChild._handle, reference?._handle ?? 0);
       scheduleIFrameLoadIfNeeded(newChild);
       refreshDocumentElementFlag(this);
       return newChild;
@@ -360,7 +375,7 @@ export class Node extends EventTargetBase {
     const previousSibling = trackMutations ? newChild.previousSibling : null;
     const nextSibling = trackMutations ? newChild.nextSibling : null;
     const wasConnected = this._window.isConnectedNode(newChild);
-    native.insertBefore(this._handle, newChild._handle, referenceChild?._handle ?? 0);
+    native.insertBefore(this._handle, newChild._handle, reference?._handle ?? 0);
 
     if (trackMutations) {
       this._window.notifyChildListMutation(this, [newChild], [], newChild.previousSibling, newChild.nextSibling);
@@ -1092,16 +1107,16 @@ function validatePreInsertion(parent: Node, newChild: Node, referenceChild: Node
     throwHierarchyRequestError();
   }
 
-  if (referenceChild && referenceChild.parentNode !== parent) {
-    throw new ZigDOMException("The object can not be found here.", "NotFoundError", 8);
-  }
-
   let ancestor: Node | null = parent;
   while (ancestor) {
     if (ancestor === newChild) {
       throwHierarchyRequestError();
     }
     ancestor = ancestor.parentNode;
+  }
+
+  if (referenceChild && referenceChild.parentNode !== parent) {
+    throw new ZigDOMException("The object can not be found here.", "NotFoundError", 8);
   }
 
   const nodesToInsert = newChild.nodeType === Node.DOCUMENT_FRAGMENT_NODE

@@ -920,7 +920,10 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   const vmGlobalThis = runInContext("globalThis", vmContext) as unknown as Record<string, unknown>;
   (window as unknown as { __scriptContext?: Record<string, unknown> }).__scriptContext = vmGlobalThis;
   const executeScript = (source: string) => {
-    runInContext(source, vmContext, { filename: file });
+    runInContext(source, vmContext, {
+      filename: file,
+      timeout: scriptTimeoutMs > 0 ? scriptTimeoutMs : undefined
+    });
   };
 
   const allScripts: string[] = [];
@@ -996,9 +999,11 @@ const manifestPath = arg("--manifest");
 const expectedPath = arg("--expected");
 const wptRootPath = resolve(optionalArg("--wpt-root") ?? ".wpt-cache/web-platform-tests");
 const entryTimeoutMs = optionalNumberArg("--entry-timeout-ms") ?? 3000;
+const scriptTimeoutMs = optionalNumberArg("--script-timeout-ms") ?? entryTimeoutMs;
 const progressEvery = optionalNumberArg("--progress-every") ?? 25;
 const startEntry = optionalNumberArg("--start-entry") ?? 0;
 const entryCount = optionalNumberArg("--entry-count");
+const jobs = Math.max(1, optionalNumberArg("--jobs") ?? 1);
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
 const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
@@ -1029,10 +1034,12 @@ const selectedEntries = entryCount == null
   ? expandedEntries.slice(startEntry)
   : expandedEntries.slice(startEntry, startEntry + entryCount);
 
-console.log(`RUN_WINDOW selected=${selectedEntries.length} start=${startEntry} total=${expandedEntries.length}`);
+console.log(`RUN_WINDOW selected=${selectedEntries.length} start=${startEntry} total=${expandedEntries.length} jobs=${jobs}`);
 
 const allResults: SubtestResult[] = [];
-for (let index = 0; index < selectedEntries.length; index += 1) {
+let completedEntries = 0;
+
+const runSelectedEntry = async (index: number): Promise<void> => {
   const { entry, variant } = selectedEntries[index];
   const fileId = entryId(entry.file, variant);
   const start = performance.now();
@@ -1054,7 +1061,7 @@ for (let index = 0; index < selectedEntries.length; index += 1) {
       ? await Promise.race([
           entryPromise,
           new Promise<SubtestResult[]>((resolve) => {
-            setTimeout(() => {
+            const timeoutHandle = setTimeout(() => {
               resolve([
                 {
                   file: fileId,
@@ -1065,6 +1072,7 @@ for (let index = 0; index < selectedEntries.length; index += 1) {
                 }
               ]);
             }, entryTimeoutMs);
+            timeoutHandle.unref?.();
           })
         ])
       : await entryPromise;
@@ -1080,12 +1088,24 @@ for (let index = 0; index < selectedEntries.length; index += 1) {
     });
   }
 
-  const processed = index + 1;
-  const absolute = startEntry + processed;
-  if (progressEvery > 0 && (processed % progressEvery === 0 || processed === selectedEntries.length)) {
-    console.log(`PROGRESS entries=${processed}/${selectedEntries.length} absolute=${absolute}/${expandedEntries.length} file=${entry.file}`);
+  completedEntries += 1;
+  const absolute = startEntry + index + 1;
+  if (progressEvery > 0 && (completedEntries % progressEvery === 0 || completedEntries === selectedEntries.length)) {
+    console.log(`PROGRESS entries=${completedEntries}/${selectedEntries.length} absolute=${absolute}/${expandedEntries.length} file=${entry.file}`);
   }
-}
+};
+
+let nextEntryIndex = 0;
+const workerCount = Math.min(jobs, selectedEntries.length);
+const workers = Array.from({ length: workerCount }, async () => {
+  while (nextEntryIndex < selectedEntries.length) {
+    const index = nextEntryIndex;
+    nextEntryIndex += 1;
+    await runSelectedEntry(index);
+  }
+});
+
+await Promise.all(workers);
 
 await new Promise((resolve) => {
   setTimeout(resolve, 10);
