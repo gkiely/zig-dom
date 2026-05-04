@@ -1,8 +1,6 @@
 # zig-dom
 
-A Bun-only DOM implementation backed by Zig, with a JavaScript surface that is intentionally close to `happy-dom`.
-
-`zig-dom` is for tests, tools, experiments, and server-side DOM work where you want a real DOM-like API inside Bun without launching a browser. It ships a prebuilt native library and TypeScript declarations in the npm package.
+Bun-only Zig-backed DOM implementation with a `happy-dom`-compatible surface.
 
 ## Install
 
@@ -10,115 +8,52 @@ A Bun-only DOM implementation backed by Zig, with a JavaScript surface that is i
 bun add zig-dom
 ```
 
-## Requirements
+The current package ships a macOS native library. Linux and Windows builds are not published yet.
 
-- Bun
-- macOS for the currently published native binary
+## React Test Setup
 
-This package is not a browser polyfill for Node.js yet. The current npm package includes `dist/native/libzig_dom.dylib`, so Linux and Windows support will need platform-specific native builds.
+Use a Bun preload file, similar to `react-ts-template`:
 
-## Usage
+```ts
+// preload.ts
+import { GlobalRegistrator } from "zig-dom/global-registrator";
+import * as matchers from "@testing-library/jest-dom/matchers";
+import { afterEach, expect } from "bun:test";
 
-Create an isolated window:
+GlobalRegistrator.register();
+expect.extend(matchers);
+
+const { cleanup } = await import("@testing-library/react");
+afterEach(() => cleanup());
+```
+
+Then run tests with:
+
+```sh
+bun test --preload ./preload.ts
+```
+
+## Direct Usage
 
 ```ts
 import { Window } from "zig-dom";
 
 const window = new Window({ url: "http://localhost/" });
-const { document } = window;
+window.document.body.innerHTML = "<button>Save</button>";
 
-document.body.innerHTML = `
-  <main>
-    <button id="save">Save</button>
-  </main>
-`;
-
-const button = document.querySelector("#save");
-button?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+console.log(window.document.querySelector("button")?.textContent);
 
 window.close();
 ```
 
-Register DOM globals for tests:
-
-```ts
-import { GlobalRegistrator } from "zig-dom/global-registrator";
-
-GlobalRegistrator.register({
-  url: "http://localhost:3000",
-  width: 1024,
-  height: 768
-});
-```
-
-That installs globals such as `window`, `document`, `HTMLElement`, `Event`, `MutationObserver`, `localStorage`, `customElements`, `location`, `fetch`, `FormData`, and timer APIs on `globalThis`.
-
-Clean up when a test suite is done:
-
-```ts
-import { GlobalRegistrator } from "zig-dom/global-registrator";
-
-GlobalRegistrator.unregister();
-```
-
-## Exports
-
-```ts
-import {
-  Window,
-  Document,
-  Element,
-  HTMLElement,
-  Event,
-  CustomEvent,
-  MouseEvent,
-  MutationObserver,
-  Range,
-  Selection,
-  Storage,
-  Browser
-} from "zig-dom";
-```
-
-`Browser`, `BrowserContext`, and `Page` are lightweight happy-dom-style helpers for code that expects that shape.
-
 ## Development
-
-Install dependencies:
 
 ```sh
 bun install
-```
-
-Build the native library and JavaScript output:
-
-```sh
 bun run build
-```
-
-Run the fast verification suite:
-
-```sh
 bun run verify:fast
-```
-
-Run the default test suite:
-
-```sh
-bun test
-```
-
-Run selected WPT subsets:
-
-```sh
-bun run test:wpt:dom
-bun run test:wpt:expanded
 ```
 
 ## Status
 
-This is early software. The goal is a fast Bun-native DOM with broad enough compatibility for React tests, Testing Library workflows, and meaningful Web Platform Test coverage. Some browser APIs are incomplete, and behavior may change quickly while the implementation fills out.
-
-## License
-
-No license has been added yet.
+Early and incomplete, but already useful for Bun-based React and DOM tests.
