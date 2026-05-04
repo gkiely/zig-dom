@@ -9,15 +9,19 @@ import { Element } from "./wrappers/Element.ts";
 import { CompositionEvent, CustomEvent, Event, InputEvent, KeyboardEvent, MouseEvent } from "./wrappers/Event.ts";
 import { HTMLCollection } from "./wrappers/HTMLCollection.ts";
 import {
+  HTMLAnchorElement,
   HTMLButtonElement,
   HTMLElement,
   HTMLFormElement,
   HTMLIFrameElement,
   HTMLInputElement,
   HTMLLabelElement,
+  HTMLLIElement,
+  HTMLOListElement,
   HTMLOptionElement,
   HTMLSelectElement,
-  HTMLTextAreaElement
+  HTMLTextAreaElement,
+  HTMLUListElement
 } from "./wrappers/HTMLElement.ts";
 import { MutationObserver } from "./wrappers/MutationObserver.ts";
 import { Node } from "./wrappers/Node.ts";
@@ -117,6 +121,7 @@ export {
   Element,
   Event,
   GlobalRegistrator,
+  HTMLAnchorElement,
   HTMLButtonElement,
   HTMLCollection,
   HTMLElement,
@@ -124,9 +129,12 @@ export {
   HTMLIFrameElement,
   HTMLInputElement,
   HTMLLabelElement,
+  HTMLLIElement,
+  HTMLOListElement,
   HTMLOptionElement,
   HTMLSelectElement,
   HTMLTextAreaElement,
+  HTMLUListElement,
   InputEvent,
   KeyboardEvent,
   MouseEvent,

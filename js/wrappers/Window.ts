@@ -10,16 +10,20 @@ import { DOMTokenList, Element } from "./Element.ts";
 import { CompositionEvent, CustomEvent, Event, EventTargetBase, FocusEvent, InputEvent, KeyboardEvent, MouseEvent, UIEvent, WheelEvent } from "./Event.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import {
+  HTMLAnchorElement,
   HTMLButtonElement,
   HTMLElement,
   HTMLFormElement,
   HTMLIFrameElement,
   HTMLInputElement,
   HTMLLabelElement,
+  HTMLLIElement,
+  HTMLOListElement,
   HTMLOptionElement,
   HTMLSelectElement,
   HTMLSpanElement,
-  HTMLTextAreaElement
+  HTMLTextAreaElement,
+  HTMLUListElement
 } from "./HTMLElement.ts";
 import { MutationObserver, type InternalMutationRecord } from "./MutationObserver.ts";
 import { Node } from "./Node.ts";
@@ -31,12 +35,46 @@ import { Text } from "./Text.ts";
 class DOMImplementation {}
 class NodeIterator {}
 class TreeWalker {}
-class NodeFilter {}
+class NodeFilter {
+  static readonly FILTER_ACCEPT = 1;
+  static readonly FILTER_REJECT = 2;
+  static readonly FILTER_SKIP = 3;
+  static readonly SHOW_ALL = 0xffffffff;
+  static readonly SHOW_ELEMENT = 0x1;
+  static readonly SHOW_ATTRIBUTE = 0x2;
+  static readonly SHOW_TEXT = 0x4;
+  static readonly SHOW_CDATA_SECTION = 0x8;
+  static readonly SHOW_ENTITY_REFERENCE = 0x10;
+  static readonly SHOW_ENTITY = 0x20;
+  static readonly SHOW_PROCESSING_INSTRUCTION = 0x40;
+  static readonly SHOW_COMMENT = 0x80;
+  static readonly SHOW_DOCUMENT = 0x100;
+  static readonly SHOW_DOCUMENT_TYPE = 0x200;
+  static readonly SHOW_DOCUMENT_FRAGMENT = 0x400;
+  static readonly SHOW_NOTATION = 0x800;
+}
 class ProcessingInstruction {}
 
 const CUSTOM_ELEMENT_UPGRADED = Symbol("zig-dom-custom-element-upgraded");
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+
+function htmlElementConstructorAlias(constructorName: string): typeof HTMLElement {
+  switch (constructorName) {
+    case "HTMLAnchorElement":
+      return HTMLAnchorElement;
+    case "HTMLLIElement":
+      return HTMLLIElement;
+    case "HTMLOListElement":
+      return HTMLOListElement;
+    case "HTMLSpanElement":
+      return HTMLSpanElement;
+    case "HTMLUListElement":
+      return HTMLUListElement;
+    default:
+      return HTMLElement;
+  }
+}
 
 function asciiLowercase(value: string): string {
   if (!/[A-Z]/.test(value)) {
@@ -93,8 +131,10 @@ export interface WindowHistory {
 type ComputedStyleLike = {
   cssText: string;
   display: string;
+  listStyleType: string;
   visibility: string;
   getPropertyValue(name: string): string;
+  [property: string]: string | ((name: string) => string);
 };
 
 class WindowLocationImpl implements WindowLocation {
@@ -529,7 +569,7 @@ export class Window extends EventTargetBase {
     for (const constructorName of htmlElementAliases) {
       if (!(constructorName in selfRecord)) {
         Object.defineProperty(this, constructorName, {
-          value: constructorName === "HTMLSpanElement" ? HTMLSpanElement : HTMLElement,
+          value: htmlElementConstructorAlias(constructorName),
           configurable: true,
           writable: true
         });
@@ -937,6 +977,14 @@ export class Window extends EventTargetBase {
         return new HTMLOptionElement(this, handle, Node.ELEMENT_NODE, skipInitialStyleSync);
       case "textarea":
         return new HTMLTextAreaElement(this, handle, Node.ELEMENT_NODE, skipInitialStyleSync);
+      case "a":
+        return new HTMLAnchorElement(this, handle, Node.ELEMENT_NODE, skipInitialStyleSync);
+      case "li":
+        return new HTMLLIElement(this, handle, Node.ELEMENT_NODE, skipInitialStyleSync);
+      case "ol":
+        return new HTMLOListElement(this, handle, Node.ELEMENT_NODE, skipInitialStyleSync);
+      case "ul":
+        return new HTMLUListElement(this, handle, Node.ELEMENT_NODE, skipInitialStyleSync);
       case "span":
         return new HTMLSpanElement(this, handle, Node.ELEMENT_NODE, skipInitialStyleSync);
       case "iframe":
@@ -1272,14 +1320,23 @@ export class Window extends EventTargetBase {
       }
     }
 
-    return {
+    const computed = {
       cssText: styleText,
       display: declarations.get("display") ?? "block",
+      listStyleType: declarations.get("list-style-type") ?? (element.tagName === "OL" ? "decimal" : "disc"),
       visibility: declarations.get("visibility") ?? "visible",
       getPropertyValue(name: string): string {
         return declarations.get(name.trim().toLowerCase()) ?? "";
       }
     };
+    return new Proxy(computed, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && !(property in target)) {
+          return declarations.get(property.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`)) ?? "";
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
   }
 
   setTimeout!: typeof globalThis.setTimeout;

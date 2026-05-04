@@ -49,6 +49,71 @@ function splitAsciiWhitespace(value: string): string[] {
   return value.match(/[^\t\n\f\r ]+/g) ?? [];
 }
 
+class ElementCSSStyleDeclaration {
+  readonly #onChange: (cssText: string) => void;
+  #values = new Map<string, string>();
+
+  constructor(onChange: (cssText: string) => void) {
+    this.#onChange = onChange;
+
+    return new Proxy(this, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && !(property in target)) {
+          return target.getPropertyValue(cssPropertyName(property));
+        }
+
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+      set(target, property, value, receiver) {
+        if (typeof property === "string" && !(property in target)) {
+          target.setProperty(cssPropertyName(property), String(value));
+          return true;
+        }
+
+        return Reflect.set(target, property, value, target);
+      }
+    });
+  }
+
+  setProperty(name: string, value: string): void {
+    this.#values.set(name, value);
+    this.#onChange(this.cssText);
+  }
+
+  removeProperty(name: string): string {
+    const current = this.#values.get(name) ?? "";
+    this.#values.delete(name);
+    this.#onChange(this.cssText);
+    return current;
+  }
+
+  getPropertyValue(name: string): string {
+    return this.#values.get(name) ?? "";
+  }
+
+  get cssText(): string {
+    return [...this.#values.entries()].map(([name, value]) => `${name}: ${value};`).join(" ");
+  }
+
+  set cssText(value: string) {
+    this.#values.clear();
+    for (const declaration of value.split(";")) {
+      const [rawName, rawValue] = declaration.split(":");
+      const name = rawName?.trim();
+      const nextValue = rawValue?.trim();
+      if (name && nextValue) {
+        this.#values.set(name, nextValue);
+      }
+    }
+    this.#onChange(this.cssText);
+  }
+}
+
+function cssPropertyName(name: string): string {
+  return name.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
+}
+
 function isValidAttributeName(value: string): boolean {
   return value.length > 0 && !/[\0\t\n\f\r />=]/.test(value);
 }
@@ -285,6 +350,8 @@ export class Element extends Node {
   #nonHtmlAttributes: Map<string, string> = EMPTY_NON_HTML_ATTRIBUTE_MAP;
   #plainAttributeNames: Set<string> = EMPTY_PLAIN_ATTRIBUTE_NAME_SET;
   #attributeSerial = 0;
+  #style: ElementCSSStyleDeclaration | null = null;
+  #syncingStyleAttribute = false;
 
   constructor(window: Node["_window"], handle: number, nodeType = Node.ELEMENT_NODE) {
     super(window, handle, nodeType);
@@ -316,6 +383,72 @@ export class Element extends Node {
       this.#plainAttributeNames = new Set();
     }
     return this.#plainAttributeNames;
+  }
+
+  #ensureStyle(): ElementCSSStyleDeclaration {
+    if (this.#style) {
+      return this.#style;
+    }
+
+    this.#style = new ElementCSSStyleDeclaration((cssText) => {
+      if (this.#syncingStyleAttribute) {
+        return;
+      }
+
+      this.#syncingStyleAttribute = true;
+      if (cssText.length === 0) {
+        this.removeAttribute("style");
+      } else {
+        this.setAttribute("style", cssText);
+      }
+      this.#syncingStyleAttribute = false;
+    });
+
+    const inlineStyle = this.getAttribute("style");
+    if (inlineStyle) {
+      this.#syncingStyleAttribute = true;
+      this.#style.cssText = inlineStyle;
+      this.#syncingStyleAttribute = false;
+    }
+
+    return this.#style;
+  }
+
+  get style(): ElementCSSStyleDeclaration {
+    return this.#ensureStyle();
+  }
+
+  getBoundingClientRect(): DOMRect {
+    return {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      toJSON() {
+        return {
+          x: this.x,
+          y: this.y,
+          width: this.width,
+          height: this.height,
+          top: this.top,
+          right: this.right,
+          bottom: this.bottom,
+          left: this.left
+        };
+      }
+    } as DOMRect;
+  }
+
+  getClientRects(): DOMRectList {
+    return {
+      length: 0,
+      item: () => null,
+      [Symbol.iterator]: function*() {}
+    } as DOMRectList;
   }
 
   #attributeKey(name: string): string {
@@ -890,6 +1023,11 @@ export class Element extends Node {
       if (this._window.hasMutationObservers() || this._window.customElements.hasDefinitions) {
         this._window.notifyAttributeChanged(this, key, previousValue, stringValue);
       }
+      if (key === "style" && !this.#syncingStyleAttribute && this.#style) {
+        this.#syncingStyleAttribute = true;
+        this.#style.cssText = stringValue;
+        this.#syncingStyleAttribute = false;
+      }
       return;
     }
 
@@ -922,6 +1060,11 @@ export class Element extends Node {
     this.#attributeCache.set(key, stringValue);
     if (this._window.hasMutationObservers() || this._window.customElements.hasDefinitions) {
       this._window.notifyAttributeChanged(this, key, previousValue, stringValue);
+    }
+    if (key === "style" && !this.#syncingStyleAttribute && this.#style) {
+      this.#syncingStyleAttribute = true;
+      this.#style.cssText = stringValue;
+      this.#syncingStyleAttribute = false;
     }
   }
 
@@ -979,6 +1122,11 @@ export class Element extends Node {
     this.#nonHtmlAttributes.delete(internalName);
     this.#plainAttributeNames.delete(key);
     this._window.notifyAttributeChanged(this, key, previousValue, null);
+    if (key === "style" && !this.#syncingStyleAttribute && this.#style) {
+      this.#syncingStyleAttribute = true;
+      this.#style.cssText = "";
+      this.#syncingStyleAttribute = false;
+    }
   }
 
   removeAttributeNS(namespace: string | null, localName: string): void {

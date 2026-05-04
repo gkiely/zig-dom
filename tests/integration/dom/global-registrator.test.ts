@@ -21,6 +21,11 @@ describe("GlobalRegistrator", () => {
     expect(globalThis.URLSearchParams).toBe(URLSearchParams);
     expect(globalThis.AbortController).toBe(first.AbortController);
     expect(globalThis.AbortSignal).toBe(first.AbortSignal);
+    expect(globalThis.HTMLLIElement).toBe(first.HTMLLIElement);
+    expect(globalThis.HTMLOListElement).toBe(first.HTMLOListElement);
+    expect(first.document.createElement("li")).toBeInstanceOf(globalThis.HTMLLIElement);
+    expect(first.document.createElement("ol")).toBeInstanceOf(globalThis.HTMLOListElement);
+    expect(first.document.createElement("ol")).not.toBeInstanceOf(globalThis.HTMLLIElement);
     expect(globalThis.requestAnimationFrame).toBe(first.requestAnimationFrame);
     expect(globalThis.cancelAnimationFrame).toBe(first.cancelAnimationFrame);
     expect(globalThis.queueMicrotask).toBe(first.queueMicrotask);

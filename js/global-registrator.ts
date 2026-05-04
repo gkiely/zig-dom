@@ -5,15 +5,19 @@ import { DocumentFragment } from "./wrappers/DocumentFragment.ts";
 import { Element } from "./wrappers/Element.ts";
 import { CompositionEvent, CustomEvent, Event, EventTargetBase, FocusEvent, InputEvent, KeyboardEvent, MouseEvent, UIEvent, WheelEvent } from "./wrappers/Event.ts";
 import {
+  HTMLAnchorElement,
   HTMLButtonElement,
   HTMLElement,
   HTMLFormElement,
   HTMLIFrameElement,
   HTMLInputElement,
   HTMLLabelElement,
+  HTMLLIElement,
+  HTMLOListElement,
   HTMLOptionElement,
   HTMLSelectElement,
-  HTMLTextAreaElement
+  HTMLTextAreaElement,
+  HTMLUListElement
 } from "./wrappers/HTMLElement.ts";
 import { MutationObserver } from "./wrappers/MutationObserver.ts";
 import { Node } from "./wrappers/Node.ts";
@@ -37,16 +41,21 @@ export class GlobalRegistrator {
       self: window,
       document: window.document,
       Node,
+      NodeFilter: window.NodeFilter,
       Element,
       HTMLElement,
       HTMLButtonElement,
       HTMLIFrameElement,
       HTMLInputElement,
       HTMLFormElement,
+      HTMLAnchorElement,
       HTMLLabelElement,
+      HTMLLIElement,
+      HTMLOListElement,
       HTMLSelectElement,
       HTMLOptionElement,
       HTMLTextAreaElement,
+      HTMLUListElement,
       Text,
       Comment,
       DocumentFragment,
@@ -91,6 +100,70 @@ export class GlobalRegistrator {
       AbortSignal: window.AbortSignal,
       DOMParser: (window as unknown as { DOMParser?: unknown }).DOMParser
     };
+
+    for (const constructorName of [
+      "HTMLAudioElement",
+      "HTMLAnchorElement",
+      "HTMLAreaElement",
+      "HTMLBaseElement",
+      "HTMLBodyElement",
+      "HTMLBRElement",
+      "HTMLCanvasElement",
+      "HTMLDataElement",
+      "HTMLDataListElement",
+      "HTMLDialogElement",
+      "HTMLDivElement",
+      "HTMLDListElement",
+      "HTMLDirectoryElement",
+      "HTMLEmbedElement",
+      "HTMLFieldSetElement",
+      "HTMLFontElement",
+      "HTMLFrameElement",
+      "HTMLFrameSetElement",
+      "HTMLHeadElement",
+      "HTMLHeadingElement",
+      "HTMLHRElement",
+      "HTMLHtmlElement",
+      "HTMLImageElement",
+      "HTMLLegendElement",
+      "HTMLLIElement",
+      "HTMLLinkElement",
+      "HTMLMenuElement",
+      "HTMLMetaElement",
+      "HTMLMeterElement",
+      "HTMLModElement",
+      "HTMLMapElement",
+      "HTMLOListElement",
+      "HTMLObjectElement",
+      "HTMLOptGroupElement",
+      "HTMLOutputElement",
+      "HTMLParagraphElement",
+      "HTMLParamElement",
+      "HTMLPictureElement",
+      "HTMLPreElement",
+      "HTMLProgressElement",
+      "HTMLQuoteElement",
+      "HTMLScriptElement",
+      "HTMLSlotElement",
+      "HTMLSourceElement",
+      "HTMLSpanElement",
+      "HTMLStyleElement",
+      "HTMLTableCaptionElement",
+      "HTMLTableCellElement",
+      "HTMLTableColElement",
+      "HTMLTableElement",
+      "HTMLTableRowElement",
+      "HTMLTableSectionElement",
+      "HTMLTemplateElement",
+      "HTMLTimeElement",
+      "HTMLTitleElement",
+      "HTMLTrackElement",
+      "HTMLUnknownElement",
+      "HTMLVideoElement",
+      "HTMLUListElement"
+    ]) {
+      assignments[constructorName] = (window as unknown as Record<string, unknown>)[constructorName];
+    }
 
     for (const [key, value] of Object.entries(assignments)) {
       Object.defineProperty(globalThis, key, {

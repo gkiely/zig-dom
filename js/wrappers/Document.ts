@@ -26,6 +26,19 @@ type DOMImplementationShape = {
   hasFeature: (...args: unknown[]) => boolean;
 };
 
+function matchesWhatToShow(node: Node, whatToShow: number): boolean {
+  const bit = 1 << (node.nodeType - 1);
+  return (whatToShow & bit) !== 0;
+}
+
+function acceptsNode(node: Node, filter: ((node: Node) => number) | { acceptNode: (node: Node) => number } | null): boolean {
+  if (!filter) {
+    return true;
+  }
+  const result = typeof filter === "function" ? filter(node) : filter.acceptNode(node);
+  return result === 1;
+}
+
 function asciiLowercase(value: string): string {
   if (!/[A-Z]/.test(value)) {
     return value;
@@ -628,15 +641,34 @@ export class Document extends Node {
     return instruction as unknown as ProcessingInstruction;
   }
 
-  createTreeWalker(root: Node, whatToShow = 0xffffffff, filter: ((node: Node) => number) | null = null): TreeWalker {
+  createTreeWalker(root: Node, whatToShow = 0xffffffff, filter: ((node: Node) => number) | { acceptNode: (node: Node) => number } | null = null): TreeWalker {
     if (arguments.length === 0) {
       throw new TypeError("Failed to execute 'createTreeWalker': 1 argument required, but only 0 present.");
     }
+    const nodes: Node[] = [];
+    const collect = (node: Node): void => {
+      for (const child of node.childNodes.toArray()) {
+        if (matchesWhatToShow(child, whatToShow) && acceptsNode(child, filter)) {
+          nodes.push(child);
+        }
+        collect(child);
+      }
+    };
+    collect(root);
+    let index = -1;
     return {
       root,
       currentNode: root,
       whatToShow,
-      filter
+      filter,
+      nextNode(this: { currentNode: Node }) {
+        index += 1;
+        const next = nodes[index] ?? null;
+        if (next) {
+          this.currentNode = next;
+        }
+        return next;
+      }
     } as unknown as TreeWalker;
   }
 

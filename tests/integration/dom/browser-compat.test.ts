@@ -47,4 +47,57 @@ describe("browser compatibility surface", () => {
 
     browser.close();
   });
+
+  test("computed style exposes common camel-case properties", async () => {
+    const browser = await Browser.create();
+    const page = browser.newPage();
+    const list = page.window.document.createElement("ol");
+
+    expect(page.window.getComputedStyle(list).listStyleType).toBe("decimal");
+
+    list.setAttribute("style", "list-style-type: lower-roman; color: red;");
+    expect(page.window.getComputedStyle(list).listStyleType).toBe("lower-roman");
+    expect(page.window.getComputedStyle(list).color).toBe("red");
+
+    browser.close();
+  });
+
+  test("elements expose zeroed layout rectangles", async () => {
+    const browser = await Browser.create();
+    const page = browser.newPage();
+    const element = page.window.document.createElement("button");
+
+    expect(element.getBoundingClientRect()).toMatchObject({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0
+    });
+    expect(element.getClientRects().length).toBe(0);
+
+    browser.close();
+  });
+
+  test("TreeWalker and NodeFilter can walk text nodes", async () => {
+    const browser = await Browser.create();
+    const page = browser.newPage();
+    const link = page.window.document.createElement("a");
+    link.innerHTML = "Step <span>[[step]]</span>";
+
+    const walker = page.window.document.createTreeWalker(link, page.window.NodeFilter.SHOW_TEXT);
+    const values: string[] = [];
+    let node = walker.nextNode();
+    while (node) {
+      values.push(node.textContent ?? "");
+      node = walker.nextNode();
+    }
+
+    expect(values).toEqual(["Step ", "[[step]]"]);
+
+    browser.close();
+  });
 });

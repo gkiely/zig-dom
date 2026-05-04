@@ -4,48 +4,6 @@ import { Event, FocusEvent } from "./Event.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import type { Window } from "./Window.ts";
 
-class CSSStyleDeclaration {
-  readonly #onChange: (cssText: string) => void;
-  #values = new Map<string, string>();
-
-  constructor(onChange: (cssText: string) => void) {
-    this.#onChange = onChange;
-  }
-
-  setProperty(name: string, value: string): void {
-    this.#values.set(name, value);
-    this.#onChange(this.cssText);
-  }
-
-  removeProperty(name: string): string {
-    const current = this.#values.get(name) ?? "";
-    this.#values.delete(name);
-    this.#onChange(this.cssText);
-    return current;
-  }
-
-  getPropertyValue(name: string): string {
-    return this.#values.get(name) ?? "";
-  }
-
-  get cssText(): string {
-    return [...this.#values.entries()].map(([name, value]) => `${name}: ${value};`).join(" ");
-  }
-
-  set cssText(value: string) {
-    this.#values.clear();
-    for (const declaration of value.split(";")) {
-      const [rawName, rawValue] = declaration.split(":");
-      const name = rawName?.trim();
-      const nextValue = rawValue?.trim();
-      if (name && nextValue) {
-        this.#values.set(name, nextValue);
-      }
-    }
-    this.#onChange(this.cssText);
-  }
-}
-
 type CSSStyleSheetLike = {
   cssRules: Array<{ cssText: string }>;
   insertRule(rule: string, index?: number): number;
@@ -72,47 +30,12 @@ export class HTMLElement extends Element {
   declare onanimationiteration: ((event: Event) => void) | null;
   declare onanimationstart: ((event: Event) => void) | null;
   declare ontransitionend: ((event: Event) => void) | null;
-  #style: CSSStyleDeclaration | null = null;
   #styleSheet: CSSStyleSheetLike | null = null;
-  #syncingStyleAttribute = false;
   #shadowRootValue: DocumentFragment | null = null;
   #shadowRootMode: ShadowRootMode | null = null;
   #templateContent: DocumentFragment | null = null;
   #scrollLeftValue = 0;
   #scrollTopValue = 0;
-
-  #ensureStyle(): CSSStyleDeclaration {
-    if (this.#style) {
-      return this.#style;
-    }
-
-    this.#style = new CSSStyleDeclaration((cssText) => {
-      if (this.#syncingStyleAttribute) {
-        return;
-      }
-
-      this.#syncingStyleAttribute = true;
-      if (cssText.length === 0) {
-        super.removeAttribute("style");
-      } else {
-        super.setAttribute("style", cssText);
-      }
-      this.#syncingStyleAttribute = false;
-    });
-
-    const inlineStyle = this.getAttribute("style");
-    if (inlineStyle) {
-      this.#syncingStyleAttribute = true;
-      this.#style.cssText = inlineStyle;
-      this.#syncingStyleAttribute = false;
-    }
-
-    return this.#style;
-  }
-
-  get style(): CSSStyleDeclaration {
-    return this.#ensureStyle();
-  }
 
   get sheet(): CSSStyleSheetLike | undefined {
     if (this.tagName !== "STYLE") {
@@ -232,11 +155,6 @@ export class HTMLElement extends Element {
       };
     }
 
-    if (normalizedName === "style" && !this.#syncingStyleAttribute && this.#style) {
-      this.#syncingStyleAttribute = true;
-      this.#style.cssText = value;
-      this.#syncingStyleAttribute = false;
-    }
   }
 
   override removeAttribute(name: string): void {
@@ -247,11 +165,6 @@ export class HTMLElement extends Element {
       (this as unknown as Record<string, unknown>)[normalizedName] = null;
     }
 
-    if (normalizedName === "style" && !this.#syncingStyleAttribute && this.#style) {
-      this.#syncingStyleAttribute = true;
-      this.#style.cssText = "";
-      this.#syncingStyleAttribute = false;
-    }
   }
 
   attachShadow(init: ShadowRootInit): DocumentFragment {
@@ -331,6 +244,14 @@ Object.assign(HTMLElement.prototype, {
 });
 
 export class HTMLSpanElement extends HTMLElement {}
+
+export class HTMLAnchorElement extends HTMLElement {}
+
+export class HTMLLIElement extends HTMLElement {}
+
+export class HTMLOListElement extends HTMLElement {}
+
+export class HTMLUListElement extends HTMLElement {}
 
 export class HTMLButtonElement extends HTMLElement {
   get type(): string {
