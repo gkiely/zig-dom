@@ -470,6 +470,16 @@ export class Element extends Node {
           });
         }
       };
+      definePrototypeMethod("values", Array.prototype.values);
+      definePrototypeMethod("keys", Array.prototype.keys);
+      definePrototypeMethod("entries", Array.prototype.entries);
+      if (!(Symbol.iterator in namedNodeMapPrototype)) {
+        Object.defineProperty(namedNodeMapPrototype, Symbol.iterator, {
+          value: Array.prototype[Symbol.iterator],
+          configurable: true,
+          writable: true
+        });
+      }
       definePrototypeMethod("item", function(this: Array<{ name: string; value: string }>, index: number) {
         return this[index] ?? null;
       });
@@ -902,7 +912,7 @@ export class Element extends Node {
 
   querySelectorAll(selector: string): Element[] {
     const snapshot = querySelectorAllInElement(this, selector);
-    return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
+    return new NodeList(() => snapshot as unknown as Node[], { static: true }) as unknown as Element[];
   }
 
   insertAdjacentElement(position: string, element: Element): Element | null {

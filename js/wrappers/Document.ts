@@ -563,7 +563,7 @@ export class Document extends Node {
         .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE))
       : querySelectorAllInDocument(this, selector);
 
-    return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
+    return new NodeList(() => snapshot as unknown as Node[], { static: true }) as unknown as Element[];
   }
 
   getElementsByTagName(tagName: string): HTMLCollection {

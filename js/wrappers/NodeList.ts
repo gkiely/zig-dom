@@ -9,13 +9,27 @@ export class NodeList implements Iterable<Node> {
   declare readonly entries: () => IterableIterator<[number, Node]>;
   declare readonly [Symbol.iterator]: () => Iterator<Node>;
 
-  constructor(getNodes: () => Node[]) {
+  constructor(getNodes: () => Node[], options: { static?: boolean } = {}) {
     Object.defineProperty(this, GET_NODES, {
       value: getNodes,
       configurable: false,
       writable: false,
       enumerable: false
     });
+
+    if (options.static) {
+      const nodes = getNodes();
+      for (let index = 0; index < nodes.length; index += 1) {
+        Object.defineProperty(this, String(index), {
+          value: nodes[index],
+          configurable: true,
+          enumerable: true,
+          writable: false
+        });
+      }
+      return this;
+    }
+
     const readNodes = getNodes;
     return new Proxy(this, {
       get(target, property, receiver) {

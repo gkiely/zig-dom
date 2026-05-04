@@ -3,8 +3,10 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createContext, runInContext } from "node:vm";
 import { Window } from "../js/wrappers/Window";
+import { NodeList } from "../js/wrappers/NodeList";
 
 const globalAsyncErrors: string[] = [];
+const nodeListPrototypeDescriptors = Object.getOwnPropertyDescriptors(NodeList.prototype);
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -315,7 +317,18 @@ function assignNamedElementGlobals(context: Record<string, unknown>, window: Win
   }
 }
 
+function restoreSharedPrototypeState(): void {
+  const prototype = NodeList.prototype as Record<PropertyKey, unknown>;
+  for (const key of Reflect.ownKeys(prototype)) {
+    if (!(key in nodeListPrototypeDescriptors)) {
+      Reflect.deleteProperty(prototype, key);
+    }
+  }
+  Object.defineProperties(NodeList.prototype, nodeListPrototypeDescriptors);
+}
+
 async function runHtmlEntry(file: string, wptRootPath: string, variant?: string): Promise<SubtestResult[]> {
+  restoreSharedPrototypeState();
   const html = readText(file);
   const assert = createAssert();
   const pendingTests: Promise<void>[] = [];
@@ -951,8 +964,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       }
     ];
   } finally {
-    // Intentionally keep the entry window alive so delayed async callbacks from
-    // the harness do not observe a torn-down DOM and emit spurious global errors.
+    restoreSharedPrototypeState();
   }
 }
 
