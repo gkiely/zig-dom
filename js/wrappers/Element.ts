@@ -739,9 +739,7 @@ export class Element extends Node {
   }
 
   set innerHTML(value: string) {
-    while (this.firstChild) {
-      this.removeChild(this.firstChild);
-    }
+    this.replaceChildren();
     parseHtmlInto(this, value);
   }
 

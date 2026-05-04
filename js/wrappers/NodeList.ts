@@ -2,6 +2,7 @@ import type { Node } from "./Node.ts";
 
 const GET_NODES = Symbol("getNodes");
 const STATIC_LENGTH = Symbol("staticLength");
+const EAGER_STATIC_INDEX_LIMIT = 256;
 
 export class NodeList implements Iterable<Node> {
   declare readonly forEach: (callback: (value: Node, index: number, parent: NodeList) => void, thisArg?: unknown) => void;
@@ -29,51 +30,21 @@ export class NodeList implements Iterable<Node> {
         writable: false,
         enumerable: false
       });
-      for (let index = 0; index < nodes.length; index += 1) {
-        Object.defineProperty(this, String(index), {
-          value: nodes[index],
-          configurable: true,
-          enumerable: true,
-          writable: false
-        });
+      if (nodes.length <= EAGER_STATIC_INDEX_LIMIT) {
+        for (let index = 0; index < nodes.length; index += 1) {
+          Object.defineProperty(this, String(index), {
+            value: nodes[index],
+            configurable: true,
+            enumerable: true,
+            writable: false
+          });
+        }
+        return this;
       }
-      return this;
+      return createIndexedNodeListProxy(this, readNodes);
     }
 
-    return new Proxy(this, {
-      get(target, property, receiver) {
-        if (typeof property === "string" && /^\d+$/.test(property)) {
-          return readNodes()[Number(property)];
-        }
-        return Reflect.get(target, property, receiver);
-      },
-      has(target, property) {
-        if (typeof property === "string" && /^\d+$/.test(property)) {
-          return Number(property) < readNodes().length;
-        }
-        return Reflect.has(target, property);
-      },
-      ownKeys(target) {
-        const keys = Reflect.ownKeys(target);
-        const numeric = readNodes().map((_, index) => String(index));
-        return [...keys, ...numeric];
-      },
-      getOwnPropertyDescriptor(target, property) {
-        if (typeof property === "string" && /^\d+$/.test(property)) {
-          const index = Number(property);
-          const nodes = readNodes();
-          if (index < nodes.length) {
-            return {
-              configurable: true,
-              enumerable: true,
-              writable: false,
-              value: nodes[index]
-            };
-          }
-        }
-        return Reflect.getOwnPropertyDescriptor(target, property);
-      }
-    });
+    return createIndexedNodeListProxy(this, readNodes);
   }
 
   get length(): number {
@@ -91,6 +62,47 @@ export class NodeList implements Iterable<Node> {
   toArray(): Node[] {
     return (this as unknown as { [GET_NODES]: () => Node[] })[GET_NODES]();
   }
+}
+
+function isArrayIndex(property: PropertyKey): property is string {
+  return typeof property === "string" && /^\d+$/.test(property);
+}
+
+function createIndexedNodeListProxy(target: NodeList, readNodes: () => Node[]): NodeList {
+  return new Proxy(target, {
+    get(target, property, receiver) {
+      if (isArrayIndex(property)) {
+        return readNodes()[Number(property)];
+      }
+      return Reflect.get(target, property, receiver);
+    },
+    has(target, property) {
+      if (isArrayIndex(property)) {
+        return Number(property) < readNodes().length;
+      }
+      return Reflect.has(target, property);
+    },
+    ownKeys(target) {
+      const keys = Reflect.ownKeys(target);
+      const numeric = readNodes().map((_, index) => String(index));
+      return [...keys, ...numeric];
+    },
+    getOwnPropertyDescriptor(target, property) {
+      if (isArrayIndex(property)) {
+        const index = Number(property);
+        const nodes = readNodes();
+        if (index < nodes.length) {
+          return {
+            configurable: true,
+            enumerable: true,
+            writable: false,
+            value: nodes[index]
+          };
+        }
+      }
+      return Reflect.getOwnPropertyDescriptor(target, property);
+    }
+  });
 }
 
 Object.defineProperty(NodeList.prototype, "forEach", {

@@ -371,7 +371,7 @@ export class Node extends EventTargetBase {
         node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE
       );
     if (canUseDetachedBatchReplace) {
-      native.replaceChildren(this._handle, insertionNodes.map((node) => node._handle));
+      native.replaceChildrenFromNodes(this._handle, insertionNodes);
       for (const node of insertionNodes) {
         if (isIFrameElement(node)) {
           scheduleIFrameLoad(node);

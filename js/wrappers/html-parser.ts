@@ -133,7 +133,5 @@ export function parseHtmlInto(parent: Element | DocumentFragment, html: string):
     }
   }
 
-  while (fragment.firstChild) {
-    parent.appendChild(fragment.firstChild);
-  }
+  parent.appendChild(fragment);
 }

@@ -185,6 +185,16 @@ function writeHandleArray(handles: number[]): BigUint64Array {
   return HANDLE_ARRAY_SCRATCH.subarray(0, handles.length);
 }
 
+function writeNodeHandleArray(nodes: ArrayLike<{ _handle: number }>): BigUint64Array {
+  if (HANDLE_ARRAY_SCRATCH.length < nodes.length) {
+    HANDLE_ARRAY_SCRATCH = new BigUint64Array(nodes.length);
+  }
+  for (let index = 0; index < nodes.length; index += 1) {
+    HANDLE_ARRAY_SCRATCH[index] = BigInt(nodes[index]?._handle ?? 0);
+  }
+  return HANDLE_ARRAY_SCRATCH;
+}
+
 function readHandleArrayFromOutParams(addressRef: BigUint64Array, lengthRef: BigUint64Array): number[] {
   const address = Number(addressRef[0]);
   const length = Number(lengthRef[0]);
@@ -302,6 +312,15 @@ export const native = {
       parent,
       ptr(handles.length === 0 ? HANDLE_OUT_SCRATCH : handles),
       handles.length
+    );
+    assertStatus(status, "zig_dom_node_replace_children");
+  },
+  replaceChildrenFromNodes(parent: number, children: ArrayLike<{ _handle: number }>): void {
+    const handles = writeNodeHandleArray(children);
+    const status = nativeLibrary.symbols.zig_dom_node_replace_children(
+      parent,
+      ptr(children.length === 0 ? HANDLE_OUT_SCRATCH : handles),
+      children.length
     );
     assertStatus(status, "zig_dom_node_replace_children");
   },
