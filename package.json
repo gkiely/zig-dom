@@ -31,6 +31,7 @@
     "verify:fast": "bun run verify:ffi && bun run verify:dom && bun run verify:react",
     "benchmark:dom": "bun run build && bun run scripts/benchmark-dom.ts",
     "test": "bun run build && bun test tests/unit tests/integration/dom tests/integration/react",
+    "test:wpt": " bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/upstream-dom.json --expected wpt/expected/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --entry-timeout-ms 5000 --script-timeout-ms 1000 --progress-every 374 | rg -a '^(FAIL|UNEXPECTED_PASS|SUMMARY|SKIP)'",
     "test:wpt:dom": "bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json",
     "test:wpt:expanded": "bun run verify:wpt:selectors && bun run verify:wpt:events && bun run verify:wpt:parser && bun run verify:wpt:forms && bun run verify:wpt:custom-elements-shadow",
     "test:react": "bun run build && bun test tests/integration/react"
