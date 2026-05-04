@@ -48,7 +48,7 @@ const CREATE_SAMPLE_COUNT = 7;
 const WORKFLOW_SAMPLE_COUNT = 5;
 const QUERY_SAMPLE_COUNT = 7;
 const REACT_SAMPLE_COUNT = 7;
-const REACT_ROW_COUNT = 1_000;
+const REACT_ROW_COUNT = 10_000;
 const COMMON_HTML = `
   <main class="layout" data-x="1">
     <header><button class="primary" data-x="save">Save</button></header>
@@ -592,11 +592,11 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
     results.react_render_smoke_ms = null;
   }
 
-  await withEnv("react_render_1k_rows_ms", async (env) => {
+  await withEnv("react_render_10k_rows_ms", async (env) => {
     return measureReactRows(env);
   });
 
-  await withEnv("react_update_1k_rows_ms", async (env) => {
+  await withEnv("react_update_10k_rows_ms", async (env) => {
     return measureReactRowsUpdate(env);
   });
 
