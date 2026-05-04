@@ -16,6 +16,7 @@ describe("selector engine", () => {
     expect(document.querySelector("h1 + p")?.className).toBe("lead");
     expect(document.querySelectorAll("h1 ~ p").length).toBe(2);
     expect(document.querySelectorAll("#title, .body").length).toBe(2);
+    expect(document.querySelectorAll("[class~='lead'], section > h1").length).toBe(2);
   });
 
   test("supports attribute operators and pseudo-classes", () => {
@@ -32,6 +33,7 @@ describe("selector engine", () => {
     expect(document.querySelectorAll("[data-kind*='pha']").length).toBe(2);
     expect(document.querySelectorAll("[data-kind|='alpha']").length).toBe(2);
     expect(document.querySelectorAll("[data-tags~='primary']").length).toBe(1);
+    expect(document.querySelectorAll("*[data-tags~='chip'], [data-kind='beta']").length).toBe(2);
 
     expect(document.querySelector("#items > li:first-child")?.textContent).toBe("a");
     expect(document.querySelector("#items > li:last-child")?.textContent).toBe("c");

@@ -81,15 +81,15 @@ export function createElementMatcher(selector: string, scopeRoot: Element): (ele
     return (element) => element.id === simpleId;
   }
 
-  const simpleSelectorList = parseFastSimpleSelectorList(selector);
+  const simpleSelectorList = parseFastSelectorList(selector);
   if (simpleSelectorList) {
-    const prepared = simpleSelectorList.map((simpleSelector) => ({
-      selector: simpleSelector,
-      selectorTagName: simpleSelector.kind === "tag" ? asciiLowercase(simpleSelector.value) : "",
-      attributeName: simpleSelector.kind === "attribute" ? asciiLowercase(simpleSelector.value) : "",
+    const prepared = simpleSelectorList.map((fastSelector) => ({
+      selector: fastSelector,
+      selectorTagName: fastSelector.kind === "simple" && fastSelector.value.kind === "tag" ? asciiLowercase(fastSelector.value.value) : "",
+      attributeName: fastSelector.kind === "simple" && fastSelector.value.kind === "attribute" ? asciiLowercase(fastSelector.value.value) : "",
     }));
     return (element) => prepared.some(({ selector, selectorTagName, attributeName }) =>
-      matchesFastSimpleSelector(element, selector, selectorTagName, attributeName)
+      matchesFastSelector(element, selector, selectorTagName, attributeName)
     );
   }
 
@@ -125,6 +125,11 @@ function queryFromRoots(roots: Node[], selector: string, scopeRoot: Element | nu
   const simpleSelector = parseFastSimpleSelector(selector);
   if (simpleSelector) {
     return queryFastSimpleSelectorFromRoots(roots, simpleSelector, includeRoot);
+  }
+
+  const fastSelectorList = parseFastSelectorList(selector);
+  if (fastSelectorList) {
+    return queryFastSelectorListFromRoots(roots, fastSelectorList, includeRoot);
   }
 
   const selectors = parseSelectorList(selector);
@@ -181,22 +186,44 @@ function queryFromRoots(roots: Node[], selector: string, scopeRoot: Element | nu
 type FastSimpleSelector =
   | { kind: "tag"; value: string }
   | { kind: "class"; value: string }
-  | { kind: "attribute"; value: string; attributeValue?: string };
+  | { kind: "attribute"; value: string; attributeValue?: string; attributeOperator?: "=" | "~=" };
 
-function parseFastSimpleSelectorList(selector: string): FastSimpleSelector[] | null {
+type FastSelector =
+  | { kind: "simple"; value: FastSimpleSelector }
+  | { kind: "child"; parent: FastSimpleSelector; child: FastSimpleSelector };
+
+function parseFastSelectorList(selector: string): FastSelector[] | null {
   if (!selector.includes(",")) {
     return null;
   }
 
-  const selectors: FastSimpleSelector[] = [];
+  const selectors: FastSelector[] = [];
   for (const part of selector.split(",")) {
-    const simpleSelector = parseFastSimpleSelector(trimAsciiWhitespace(part));
-    if (!simpleSelector) {
+    const fastSelector = parseFastSelector(trimAsciiWhitespace(part));
+    if (!fastSelector) {
       return null;
     }
-    selectors.push(simpleSelector);
+    selectors.push(fastSelector);
   }
   return selectors.length > 0 ? selectors : null;
+}
+
+function parseFastSelector(selector: string): FastSelector | null {
+  const simpleSelector = parseFastSimpleSelector(selector);
+  if (simpleSelector) {
+    return { kind: "simple", value: simpleSelector };
+  }
+
+  const childParts = selector.split(">");
+  if (childParts.length === 2) {
+    const parent = parseFastSimpleSelector(trimAsciiWhitespace(childParts[0] ?? ""));
+    const child = parseFastSimpleSelector(trimAsciiWhitespace(childParts[1] ?? ""));
+    if (parent && child) {
+      return { kind: "child", parent, child };
+    }
+  }
+
+  return null;
 }
 
 function parseFastSimpleSelector(selector: string): FastSimpleSelector | null {
@@ -206,13 +233,18 @@ function parseFastSimpleSelector(selector: string): FastSimpleSelector | null {
   if (/^\.[A-Za-z_][A-Za-z0-9_-]*$/.test(selector)) {
     return { kind: "class", value: selector.slice(1) };
   }
-  const attributeMatch = selector.match(/^\[([A-Za-z_][A-Za-z0-9_:-]*)\]$/);
+  const attributeMatch = selector.match(/^(?:\*)?\[([A-Za-z_][A-Za-z0-9_:-]*)\]$/);
   if (attributeMatch?.[1]) {
     return { kind: "attribute", value: attributeMatch[1] };
   }
-  const attributeValueMatch = selector.match(/^\[([A-Za-z_][A-Za-z0-9_:-]*)=(?:"([^"]*)"|([A-Za-z0-9_-]+))\]$/);
+  const attributeValueMatch = selector.match(/^(?:\*)?\[([A-Za-z_][A-Za-z0-9_:-]*)(=|~=)(?:"([^"]*)"|([A-Za-z0-9_-]+))\]$/);
   if (attributeValueMatch?.[1]) {
-    return { kind: "attribute", value: attributeValueMatch[1], attributeValue: attributeValueMatch[2] ?? attributeValueMatch[3] ?? "" };
+    return {
+      kind: "attribute",
+      value: attributeValueMatch[1],
+      attributeOperator: attributeValueMatch[2] as "=" | "~=",
+      attributeValue: attributeValueMatch[3] ?? attributeValueMatch[4] ?? ""
+    };
   }
   return null;
 }
@@ -265,6 +297,74 @@ function queryFastSimpleSelectorFromRoots(roots: Node[], selector: FastSimpleSel
   return matches;
 }
 
+function queryFastSelectorListFromRoots(roots: Node[], selectors: FastSelector[], includeRoot: boolean): Element[] {
+  const matches: Element[] = [];
+  const seen = new Set<number>();
+  const prepared = selectors.map((selector) => ({
+    selector,
+    selectorTagName: selector.kind === "simple" && selector.value.kind === "tag" ? asciiLowercase(selector.value.value) : "",
+    attributeName: selector.kind === "simple" && selector.value.kind === "attribute" ? asciiLowercase(selector.value.value) : "",
+  }));
+
+  for (const root of roots) {
+    const stack: Node[] = [];
+    if (includeRoot) {
+      stack.push(root);
+    } else {
+      const children = root.childNodes.toArray();
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child) {
+          stack.push(child);
+        }
+      }
+    }
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) {
+        continue;
+      }
+
+      if (current.nodeType === Node.ELEMENT_NODE) {
+        const element = current as unknown as Element;
+        if (
+          prepared.some(({ selector, selectorTagName, attributeName }) =>
+            matchesFastSelector(element, selector, selectorTagName, attributeName)
+          ) &&
+          !seen.has(element._handle)
+        ) {
+          seen.add(element._handle);
+          matches.push(element);
+        }
+      }
+
+      const children = current.childNodes.toArray();
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child) {
+          stack.push(child);
+        }
+      }
+    }
+  }
+
+  return matches;
+}
+
+function matchesFastSelector(element: Element, selector: FastSelector, selectorTagName = "", attributeName = ""): boolean {
+  if (selector.kind === "simple") {
+    return matchesFastSimpleSelector(element, selector.value, selectorTagName, attributeName);
+  }
+
+  if (!matchesFastSimpleSelector(element, selector.child)) {
+    return false;
+  }
+
+  const parent = element.parentElement;
+  return parent != null && matchesFastSimpleSelector(parent, selector.parent);
+}
+
 function matchesFastSimpleSelector(element: Element, selector: FastSimpleSelector, selectorTagName = "", attributeName = ""): boolean {
   if (selector.kind === "tag") {
     const expectedTagName = selectorTagName || asciiLowercase(selector.value);
@@ -278,6 +378,9 @@ function matchesFastSimpleSelector(element: Element, selector: FastSimpleSelecto
   const actual = element.getAttribute(isHtmlElement(element) ? expectedAttributeName : selector.value);
   if (selector.attributeValue === undefined) {
     return actual != null;
+  }
+  if (selector.attributeOperator === "~=") {
+    return actual != null && classNameContains(actual, selector.attributeValue);
   }
   return actual === selector.attributeValue;
 }
