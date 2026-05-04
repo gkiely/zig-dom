@@ -41,7 +41,6 @@ type MetricRow = {
 };
 
 const ELEMENT_COUNT = 10_000;
-const SMALL_ELEMENT_COUNT = 1_000;
 const RESET_COUNT = 500;
 const APPEND_SAMPLE_COUNT = 7;
 const CREATE_SAMPLE_COUNT = 7;
@@ -466,10 +465,10 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
     }, QUERY_SAMPLE_COUNT);
   });
 
-  await withEnv("mixed_dom_workflow_1k_ms", async (env) => {
+  await withEnv("mixed_dom_workflow_10k_ms", async (env) => {
     return medianSample(() => measureMetric(() => {
       const container = env.document.createElement("section");
-      for (let i = 0; i < SMALL_ELEMENT_COUNT; i += 1) {
+      for (let i = 0; i < ELEMENT_COUNT; i += 1) {
         const child = env.document.createElement(i % 5 === 0 ? "button" : "div");
         child.className = i % 2 === 0 ? "even item" : "odd item";
         child.setAttribute("data-index", String(i));
@@ -483,7 +482,7 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
     }), WORKFLOW_SAMPLE_COUNT);
   });
 
-  await withEnv("custom_elements_create_append_1k_ms", async (env) => {
+  await withEnv("custom_elements_create_append_10k_ms", async (env) => {
     if (!env.window.customElements || !env.window.HTMLElement) {
       return NaN;
     }
@@ -494,14 +493,14 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
 
     return medianSample(() => measureMetric(() => {
       const container = env.document.createElement("div");
-      for (let i = 0; i < SMALL_ELEMENT_COUNT; i += 1) {
+      for (let i = 0; i < ELEMENT_COUNT; i += 1) {
         container.appendChild(env.document.createElement(name));
       }
       env.document.body.appendChild(container);
     }), WORKFLOW_SAMPLE_COUNT);
   });
 
-  await withEnv("mutation_observer_append_1k_ms", async (env) => {
+  await withEnv("mutation_observer_append_10k_ms", async (env) => {
     const MutationObserverCtor = (env.window as AnyWindow & { MutationObserver?: typeof MutationObserver }).MutationObserver;
     if (!MutationObserverCtor) {
       return NaN;
@@ -514,7 +513,7 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
       observer.observe(container, { childList: true });
 
       return measureMetric(() => {
-        for (let i = 0; i < SMALL_ELEMENT_COUNT; i += 1) {
+        for (let i = 0; i < ELEMENT_COUNT; i += 1) {
           container.appendChild(env.document.createElement("div"));
         }
         observer.disconnect();
