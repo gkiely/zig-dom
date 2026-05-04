@@ -69,13 +69,9 @@ export class HTMLElement extends Element {
   onchange: ((event: Event) => void) | null = null;
   oninput: ((event: Event) => void) | null = null;
   onanimationend: ((event: Event) => void) | null = null;
-  onwebkitanimationend: ((event: Event) => void) | null = null;
   onanimationiteration: ((event: Event) => void) | null = null;
-  onwebkitanimationiteration: ((event: Event) => void) | null = null;
   onanimationstart: ((event: Event) => void) | null = null;
-  onwebkitanimationstart: ((event: Event) => void) | null = null;
   ontransitionend: ((event: Event) => void) | null = null;
-  onwebkittransitionend: ((event: Event) => void) | null = null;
   #style: CSSStyleDeclaration | null = null;
   #styleSheet: CSSStyleSheetLike | null = null;
   #syncingStyleAttribute = false;

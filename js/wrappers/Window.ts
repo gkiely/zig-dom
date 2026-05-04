@@ -245,13 +245,9 @@ export class Window extends EventTargetBase {
   readonly sessionStorage = new Storage();
   readonly customElements: CustomElementRegistry;
   onanimationend: ((event: Event) => void) | null = null;
-  onwebkitanimationend: ((event: Event) => void) | null = null;
   onanimationiteration: ((event: Event) => void) | null = null;
-  onwebkitanimationiteration: ((event: Event) => void) | null = null;
   onanimationstart: ((event: Event) => void) | null = null;
-  onwebkitanimationstart: ((event: Event) => void) | null = null;
   ontransitionend: ((event: Event) => void) | null = null;
-  onwebkittransitionend: ((event: Event) => void) | null = null;
 
   readonly happyDOM: {
     reset: () => void;
@@ -570,26 +566,6 @@ export class Window extends EventTargetBase {
         configurable: true,
         writable: true
       });
-    }
-
-    for (const constructorName of [
-      "BeforeUnloadEvent",
-      "DeviceMotionEvent",
-      "DeviceOrientationEvent",
-      "DragEvent",
-      "HashChangeEvent",
-      "MessageEvent",
-      "PageTransitionEvent",
-      "PopStateEvent",
-      "StorageEvent"
-    ]) {
-      if (!(constructorName in selfRecord)) {
-        Object.defineProperty(this, constructorName, {
-          value: Event,
-          configurable: true,
-          writable: true
-        });
-      }
     }
 
     class DOMParserImpl {

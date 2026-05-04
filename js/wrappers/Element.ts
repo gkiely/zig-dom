@@ -980,10 +980,6 @@ export class Element extends Node {
     return elementMatchesSelector(this, String(selector));
   }
 
-  webkitMatchesSelector(selector: string): boolean {
-    return this.matches(selector);
-  }
-
   closest(selector: string): Element | null {
     if (arguments.length === 0) {
       throw new TypeError("Failed to execute 'closest': 1 argument required, but only 0 present.");

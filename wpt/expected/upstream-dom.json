@@ -20,9 +20,10 @@
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-replaceChild.html",
-      "subtest": "replaceChild should work in the presence of mutation events.",
-      "reason": "flaky ordering under legacy mutation-event side effects",
-      "owner": "compat"
+      "subtest": "__all__",
+      "reason": "Legacy mutation-event ordering coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-2.html",
@@ -213,8 +214,9 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/observable/tentative/idlharness.html",
       "subtest": "__all__",
-      "reason": "observable idlharness dependencies are not present in local runner resources",
-      "owner": "compat"
+      "reason": "Tentative Observable DOM coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-adopt-test.html",
@@ -339,8 +341,9 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-programmatic-updates.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/traversal/NodeIterator-removal.html",
@@ -357,8 +360,9 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-auto-disconnect.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/StaticRange-constructor.html",
@@ -369,14 +373,16 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-multiline-and-mutations.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-basic.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-acceptNode-filter.html",
@@ -387,20 +393,23 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-offset.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-highlightsFromPoint.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-highlight.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-traversal-skip.html",
@@ -417,14 +426,16 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-supported-elements.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-complexity-and-visibility.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-basic.html",
@@ -435,8 +446,9 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-disconnect.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-currentNode.html",
@@ -447,8 +459,9 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-range-updates.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/window-extends-event-target.html",
@@ -459,8 +472,9 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-basic.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker-traversal-skip-most.html",
@@ -477,14 +491,16 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-validation.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/xpath-result-single-node-value-nullable.html",
       "subtest": "__all__",
-      "reason": "XPathResult APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "XPath DOM APIs are outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/traversal/TreeWalker.html",
@@ -549,8 +565,9 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-unsupported-elements.html",
       "subtest": "__all__",
-      "reason": "OpaqueRange APIs are not implemented yet",
-      "owner": "compat"
+      "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-stringifier.html",
@@ -867,68 +884,79 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_bmp.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_css.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_datauri_02.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_gif.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_javascripturi.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_jpg.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_mimeheader_01.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_png.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_txt.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/contenttype_xml.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/createDocument.html",
       "subtest": "__all__",
-      "reason": "Document contentType for non-HTML payloads is not implemented",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-end-event.html",
@@ -984,15 +1012,17 @@
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html",
-      "subtest": "__timeout__",
-      "reason": "beforeunload event-global coercion depends on browser navigation lifecycle",
-      "owner": "compat"
+      "subtest": "__all__",
+      "reason": "beforeunload navigation lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-contentType/contentType/xhr_responseType_document.html",
       "subtest": "__all__",
-      "reason": "XMLHttpRequest responseType=document is not implemented in the local WPT runner",
-      "owner": "compat"
+      "reason": "Network MIME/contentType fixture coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createElement-namespace.html",
@@ -1003,603 +1033,408 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createEvent.https.html",
       "subtest": "__all__",
-      "reason": "exhaustive legacy createEvent interface matrix exceeds current event shim support",
+      "reason": "Exhaustive legacy createEvent matrix is intentionally skipped",
       "owner": "compat",
       "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/later-script-removed-by-earlier-script.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-append-form-and-script-from-fragment.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-button-from-div.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-custom-from-fragment.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-div-from-fragment.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-iframe.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-source-from-fragment.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-and-style.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-in-script.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-script-with-mutation-observer-takeRecords.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-text-and-script-in-style.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-text-in-script.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts-from-fragment.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts.tentative.html",
       "subtest": "__all__",
-      "reason": "script/style/media insertion-step browser integration is not implemented",
-      "owner": "compat"
+      "reason": "Browser script/style insertion lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/child-style-preserve.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/child-style-preserve.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-left.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-left.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-transform.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-animation-transform.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left-pseudo.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left-pseudo.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-left.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/continue-css-transition-transform.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-animation-commit-styles.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-animation-commit-styles.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-document.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-document.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-shadow.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-cross-shadow.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-to-disconnected-document.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-to-disconnected-document.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-trigger.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/css-transition-trigger.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/custom-element-move-reactions.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/custom-element-move-reactions.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fieldset-child-blur-event.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fieldset-child-blur-event.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fire-focusin-focusout.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/fire-focusin-focusout.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-preserve.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-preserve.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-within.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/focus-within.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/listed-form-element-reset.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/listed-form-element-reset.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/live-range-updates.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/live-range-updates.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/modal-dialog.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/modal-dialog.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-id-map.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-id-map.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-name-map.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-name-map.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-option-recalc-style.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-option-recalc-style.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-selector-matching.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-selector-matching.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-inside.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-inside.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-root.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-shadow-root.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-size-query.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/moveBefore-size-query.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/mutation-observer.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/mutation-observer.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/Node-moveBefore.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/Node-moveBefore.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/nonce.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/nonce.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/object-crash-regression.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/object-crash-regression.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/popover-preserve.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/popover-preserve.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-script.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-script.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-style.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/preserve-render-blocking-style.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/relevant-mutations.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/relevant-mutations.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/script-move-before.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/script-move-before.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/select-option-optgroup.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/select-option-optgroup.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/slotchange-events.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/slotchange-events.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/style-applies.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/style-applies.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/throws-exception.html",
       "subtest": "__all__",
-      "reason": "moveBefore rendering, focus, custom-element, and layout semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/moveBefore/throws-exception.html",
-      "subtest": "__timeout__",
-      "reason": "moveBefore entry can exceed local runner timeout while awaiting unsupported browser events",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html",
-      "subtest": "__all__",
-      "reason": "beforeunload event-global coercion depends on browser navigation lifecycle",
-      "owner": "compat"
+      "reason": "moveBefore rendering and lifecycle coverage is outside the frontend DOM compatibility target",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-doctype.html",
@@ -1751,6 +1586,132 @@
       "reason": "WebKit-prefixed selector API coverage is intentionally skipped",
       "owner": "compat",
       "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-cancelBubble.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-constants.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-defaultPrevented-after-dispatch.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-defaultPrevented.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-bubble-canceled.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-detached-click.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-propagation-stopped.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-propagation.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-returnValue.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/Event-type.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/EventTarget-dispatchEvent-returnvalue.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/events/KeyEvent-initKeyEvent.html",
+      "subtest": "__all__",
+      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-attributes.html",
+      "subtest": "test",
+      "reason": "Legacy Range.detach() coverage is intentionally skipped",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-commonAncestorContainer-2.html",
+      "subtest": "Detached Range",
+      "reason": "Legacy Range.detach() coverage is intentionally skipped",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-commonAncestorContainer.html",
+      "subtest": "0: range [detached]",
+      "reason": "Legacy Range.detach() coverage is intentionally skipped",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-detach.html",
+      "subtest": "test",
+      "reason": "Legacy Range.detach() coverage is intentionally skipped",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches-namespaced-elements.html",
+      "subtest": "empty string namespace, webkitMatchesSelector",
+      "reason": "WebKit-prefixed selector API coverage is intentionally skipped",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches-namespaced-elements.html",
+      "subtest": "has a namespace, webkitMatchesSelector",
+      "reason": "WebKit-prefixed selector API coverage is intentionally skipped",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches-namespaced-elements.html",
+      "subtest": "has a namespace, *|, webkitMatchesSelector",
+      "reason": "WebKit-prefixed selector API coverage is intentionally skipped",
+      "owner": "compat"
     }
   ]
 }

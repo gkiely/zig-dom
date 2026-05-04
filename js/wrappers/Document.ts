@@ -4,7 +4,6 @@ import { DocumentFragment } from "./DocumentFragment.ts";
 import { DocumentType } from "./DocumentType.ts";
 import { ZigDOMException } from "./DOMException.ts";
 import { Element } from "./Element.ts";
-import { CompositionEvent, CustomEvent, Event, FocusEvent, InputEvent, KeyboardEvent, MouseEvent, UIEvent, WheelEvent } from "./Event.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
@@ -440,61 +439,6 @@ export class Document extends Node {
     range.setStart(this, 0);
     range.setEnd(this, 0);
     return range;
-  }
-
-  createEvent(interfaceName: string): Event {
-    const normalized = interfaceName.trim().toLowerCase();
-    if (normalized === "event" || normalized === "events" || normalized === "htmlevents" || normalized === "uievents") {
-      return new Event("");
-    }
-
-    if (normalized === "uievent") {
-      return new UIEvent("");
-    }
-
-    if (normalized === "focusevent") {
-      return new FocusEvent("");
-    }
-
-    if (normalized === "customevent") {
-      return new CustomEvent("");
-    }
-
-    if (normalized === "mouseevent" || normalized === "mouseevents") {
-      return new MouseEvent("");
-    }
-
-    if (normalized === "wheelevent") {
-      return new WheelEvent("");
-    }
-
-    if (normalized === "keyboardevent" || normalized === "keyevents") {
-      return new KeyboardEvent("");
-    }
-
-    if (normalized === "compositionevent") {
-      return new CompositionEvent("");
-    }
-
-    if (normalized === "inputevent") {
-      return new InputEvent("");
-    }
-
-    if (
-      normalized === "beforeunloadevent" ||
-      normalized === "devicemotionevent" ||
-      normalized === "deviceorientationevent" ||
-      normalized === "dragevent" ||
-      normalized === "hashchangeevent" ||
-      normalized === "messageevent" ||
-      normalized === "pagetransitionevent" ||
-      normalized === "popstateevent" ||
-      normalized === "storageevent"
-    ) {
-      return new Event("");
-    }
-
-    throw new ZigDOMException(`The event interface \"${interfaceName}\" is not supported.`, "NotSupportedError", 9);
   }
 
   createElement(tagName: string): Element {

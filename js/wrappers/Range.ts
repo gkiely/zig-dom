@@ -227,10 +227,6 @@ export class Range {
     return true;
   }
 
-  detach(): void {
-    // Historical no-op retained for legacy APIs.
-  }
-
   toString(): string {
     if (!this.#startContainer || !this.#endContainer) {
       return "";
