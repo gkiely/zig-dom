@@ -216,8 +216,11 @@ export class Element extends Node {
   }
 
   get namespaceURI(): string | null {
-    const value = (this as unknown as { __namespaceURI?: string | null }).__namespaceURI;
-    return value ?? "http://www.w3.org/1999/xhtml";
+    const metadata = this as unknown as { __namespaceURI?: string | null };
+    if ("__namespaceURI" in metadata) {
+      return metadata.__namespaceURI ?? null;
+    }
+    return "http://www.w3.org/1999/xhtml";
   }
 
   get prefix(): string | null {
@@ -842,9 +845,10 @@ export class Element extends Node {
   }
 
   getElementsByTagNameNS(namespace: string | null, localName: string): HTMLCollection {
+    const expectedNamespace = namespace === "" ? null : namespace;
     const expectedLocalName = localName === "*" ? null : localName;
     return new HTMLCollection(() => collectDescendantElements(this).filter((element) => {
-      const namespaceMatches = namespace === "*" || element.namespaceURI === namespace;
+      const namespaceMatches = expectedNamespace === "*" || element.namespaceURI === expectedNamespace;
       const localNameMatches = expectedLocalName == null || element.localName === expectedLocalName;
       return namespaceMatches && localNameMatches;
     }));

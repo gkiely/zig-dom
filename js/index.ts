@@ -39,7 +39,7 @@ class Page {
   }
 
   get content(): string {
-    return this.window.document.documentElement.outerHTML;
+    return this.window.document.documentElement?.outerHTML ?? "";
   }
 
   set content(value: string) {

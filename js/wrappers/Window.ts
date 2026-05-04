@@ -538,8 +538,13 @@ export class Window extends EventTargetBase {
           const rootMatch = source.match(/<\s*([A-Za-z_][A-Za-z0-9._:-]*)[^>]*\/?\s*>/);
           const rootName = rootMatch?.[1];
           if (rootName) {
+            const rootSource = rootMatch?.[0] ?? "";
+            const namespaceMatch = rootSource.match(/\sxmlns=(?:"([^"]*)"|'([^']*)')/);
+            const namespaceURI = namespaceMatch ? namespaceMatch[1] ?? namespaceMatch[2] ?? null : null;
             const root = parsedDocument.createElement(rootName);
-            (root as unknown as { __namespaceURI?: string | null }).__namespaceURI = null;
+            const metadata = root as unknown as { __namespaceURI?: string | null; __isXMLNode?: boolean };
+            metadata.__namespaceURI = namespaceURI;
+            metadata.__isXMLNode = true;
             Object.defineProperty(parsedDocument, "documentElement", {
               value: root,
               configurable: true,

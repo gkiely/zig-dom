@@ -15,6 +15,9 @@ import type { Window } from "./Window.ts";
 
 const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
 const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+const MATHML_NAMESPACE = "http://www.w3.org/1998/Math/MathML";
 
 function asciiLowercase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
@@ -26,6 +29,39 @@ function splitAsciiWhitespace(value: string): string[] {
 
 function isValidXmlName(value: string): boolean {
   return value.length > 0;
+}
+
+function validateQualifiedName(namespace: string | null, qualifiedName: string): void {
+  if (!isValidXmlName(qualifiedName) || qualifiedName.endsWith(":")) {
+    throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+  }
+
+  const separator = qualifiedName.indexOf(":");
+  const prefix = separator >= 0 ? qualifiedName.slice(0, separator) : null;
+  const localName = separator >= 0 ? qualifiedName.slice(separator + 1) : qualifiedName;
+  if (qualifiedName.startsWith(":")) {
+    throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+  }
+  if (separator >= 0 && namespace == null) {
+    throw new ZigDOMException("The namespace is invalid.", "NamespaceError", 14);
+  }
+  const first = separator >= 0 ? localName[0] ?? "" : qualifiedName[0] ?? "";
+  const invalidFirst = separator >= 0 ? /^[0-9.-]$/.test(first) : /^[0-9.:-]$/.test(first);
+  if (invalidFirst || /^[}:<]|\s|\^|>/.test(qualifiedName)) {
+    throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+  }
+  if (separator >= 0 && /[{}~'!@#$%&*()+=[\]\\/;`<>, "\t\n\f\r]/.test(localName)) {
+    throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+  }
+  if (prefix === "xml" && namespace !== XML_NAMESPACE) {
+    throw new ZigDOMException("The namespace is invalid.", "NamespaceError", 14);
+  }
+  if ((prefix === "xmlns" || qualifiedName === "xmlns") && namespace !== XMLNS_NAMESPACE) {
+    throw new ZigDOMException("The namespace is invalid.", "NamespaceError", 14);
+  }
+  if (namespace === XMLNS_NAMESPACE && (prefix !== "xmlns" && qualifiedName !== "xmlns")) {
+    throw new ZigDOMException("The namespace is invalid.", "NamespaceError", 14);
+  }
 }
 
 function createSyntheticAttr(document: Document, name: string, namespaceURI: string | null): Attr {
@@ -120,10 +156,14 @@ export class Document extends Node {
     return this._window;
   }
 
-  get documentElement(): Element {
+  get documentElement(): Element | null {
     this._window.assertOpen();
     if (this.#documentElementCache) {
       return this.#documentElementCache;
+    }
+
+    if ((this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument) {
+      return null;
     }
 
     const handle = native.windowDocumentElement(this._window._nativeWindowHandle);
@@ -175,12 +215,23 @@ export class Document extends Node {
     return null;
   }
 
-  get scrollingElement(): Element {
+  get scrollingElement(): Element | null {
     return this.documentElement;
   }
 
   get URL(): string {
+    if ((this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument) {
+      return "about:blank";
+    }
     return this._window.location.href;
+  }
+
+  get documentURI(): string {
+    return this.URL;
+  }
+
+  get location(): Location | null {
+    return (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument ? null : this._window.location as unknown as Location;
   }
 
   get charset(): string {
@@ -196,6 +247,11 @@ export class Document extends Node {
   }
 
   get contentType(): string {
+    const explicitContentType = (this as unknown as { __contentType?: string }).__contentType;
+    if (explicitContentType) {
+      return explicitContentType;
+    }
+
     const root = this.childNodes.toArray().find((node) => node.nodeType === Node.ELEMENT_NODE) as Element | undefined;
     if (root?.localName === "html") {
       return "text/html";
@@ -243,30 +299,45 @@ export class Document extends Node {
     createHTMLDocument: (title?: string) => Document;
     createDocumentType: (qualifiedName: string, publicId?: string, systemId?: string) => DocumentType;
   } {
-    const createDocument = (namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null): Document => {
-      const XMLDocumentCtor = (this._window as unknown as {
+    const ownerDocument = this;
+    const createDocument = function(namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null): Document {
+      if (arguments.length < 2) {
+        throw new TypeError("createDocument requires namespace and qualifiedName arguments.");
+      }
+
+      const normalizedNamespace = namespace == null || namespace === "" ? null : String(namespace);
+      const rawQualifiedName = arguments[1] === null ? null : String(arguments[1]);
+      if (rawQualifiedName && rawQualifiedName.length > 0) {
+        validateQualifiedName(normalizedNamespace, rawQualifiedName);
+      }
+
+      if (doctype != null && (!(doctype as unknown as { nodeType?: number }) || (doctype as unknown as { nodeType?: number }).nodeType !== Node.DOCUMENT_TYPE_NODE)) {
+        throw new TypeError("doctype must be a DocumentType or null.");
+      }
+
+      const XMLDocumentCtor = (ownerDocument._window as unknown as {
         XMLDocument: new () => Document;
       }).XMLDocument;
       const nextDocument = new XMLDocumentCtor();
       Object.setPrototypeOf(nextDocument, XMLDocumentCtor.prototype);
-      (nextDocument as unknown as { __isXMLDocument?: boolean }).__isXMLDocument = true;
+      const metadata = nextDocument as unknown as { __isXMLDocument?: boolean; __contentType?: string };
+      metadata.__isXMLDocument = true;
+      metadata.__contentType = normalizedNamespace === HTML_NAMESPACE
+        ? "application/xhtml+xml"
+        : normalizedNamespace === SVG_NAMESPACE
+          ? "image/svg+xml"
+          : "application/xml";
 
       if (doctype) {
-        const source = doctype as unknown as { name?: string; publicId?: string; systemId?: string };
-        nextDocument.#doctypeCache = createSyntheticDocumentType(
-          nextDocument,
-          source.name ?? "html",
-          source.publicId ?? "",
-          source.systemId ?? ""
-        );
-        nextDocument.appendChild(nextDocument.#doctypeCache);
+        nextDocument.#doctypeCache = doctype;
+        nextDocument.appendChild(doctype as unknown as Node);
       }
 
-      if (qualifiedName) {
-        const root = nextDocument.createElementNS(namespace, qualifiedName);
+      if (rawQualifiedName && rawQualifiedName.length > 0) {
+        const root = nextDocument.createElementNS(normalizedNamespace, rawQualifiedName);
         nextDocument.appendChild(root);
         nextDocument.#documentElementCache = root;
-        if (namespace === "http://www.w3.org/1999/xhtml" && root.localName === "html") {
+        if (normalizedNamespace === HTML_NAMESPACE && root.localName === "html") {
           root.textContent = "";
         }
       }
@@ -275,7 +346,11 @@ export class Document extends Node {
     };
 
     const createDocumentType = (qualifiedName: string, publicId = "", systemId = ""): DocumentType => {
-      return createSyntheticDocumentType(this, qualifiedName, publicId, systemId);
+      const name = String(qualifiedName);
+      if (/>|\s/.test(name)) {
+        throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+      }
+      return createSyntheticDocumentType(this, name, String(publicId), String(systemId));
     };
 
     return {
@@ -361,7 +436,9 @@ export class Document extends Node {
 
   createElement(tagName: string): Element {
     this._window.assertOpen();
-    const normalizedTagName = asciiLowercase(tagName);
+    const normalizedTagName = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument
+      ? String(tagName)
+      : asciiLowercase(String(tagName));
     const handle = native.createElement(this._handle, normalizedTagName);
     const element = this._window.createKnownNode(handle, Node.ELEMENT_NODE, {
       tagName: normalizedTagName,
@@ -372,7 +449,7 @@ export class Document extends Node {
       __prefix?: string | null;
       __localName?: string;
     };
-    mutable.__namespaceURI = "http://www.w3.org/1999/xhtml";
+    mutable.__namespaceURI = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument ? null : HTML_NAMESPACE;
     mutable.__prefix = null;
     mutable.__localName = normalizedTagName;
     this._window.upgradeElementInstance(element, normalizedTagName);
@@ -380,9 +457,12 @@ export class Document extends Node {
   }
 
   createElementNS(namespace: string | null, qualifiedName: string): Element {
-    const separator = qualifiedName.indexOf(":");
-    const prefix = separator >= 0 ? qualifiedName.slice(0, separator) : null;
-    const localName = separator >= 0 ? qualifiedName.slice(separator + 1) : qualifiedName;
+    const normalizedNamespace = namespace == null || namespace === "" ? null : String(namespace);
+    const name = String(qualifiedName);
+    validateQualifiedName(normalizedNamespace, name);
+    const separator = name.indexOf(":");
+    const prefix = separator >= 0 ? name.slice(0, separator) : null;
+    const localName = separator >= 0 ? name.slice(separator + 1) : name;
     const element = this.createElement(localName);
     const mutable = element as unknown as {
       __namespaceURI?: string | null;
@@ -390,7 +470,7 @@ export class Document extends Node {
       __localName?: string;
       __isXMLNode?: boolean;
     };
-    mutable.__namespaceURI = namespace;
+    mutable.__namespaceURI = normalizedNamespace;
     mutable.__prefix = prefix;
     mutable.__localName = localName;
     mutable.__isXMLNode = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument === true;
