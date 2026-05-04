@@ -5,10 +5,22 @@
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
-    "./global-registrator": "./dist/global-registrator.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./global-registrator": {
+      "types": "./dist/global-registrator.d.ts",
+      "default": "./dist/global-registrator.js"
+    }
   },
+  "files": [
+    "dist",
+    "build.zig",
+    "build.zig.zon"
+  ],
   "scripts": {
     "build:native": "bun run scripts/build-native.ts",
     "build:js": "bunx tsc -p tsconfig.json",
