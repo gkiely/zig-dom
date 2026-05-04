@@ -600,7 +600,7 @@ export class Document extends Node {
     this._window.assertOpen();
     const text = String(data);
     const handle = native.createTextNode(this._handle, text);
-    const node = this._window.createKnownNode(handle, Node.TEXT_NODE) as Text;
+    const node = this._window.createFreshTextNode(handle);
     (node as unknown as { __textContentOverride?: string }).__textContentOverride = text;
     return node;
   }
