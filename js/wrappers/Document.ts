@@ -26,6 +26,9 @@ type DOMImplementationShape = {
 };
 
 function asciiLowercase(value: string): string {
+  if (!/[A-Z]/.test(value)) {
+    return value;
+  }
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
@@ -36,6 +39,10 @@ function splitAsciiWhitespace(value: string): string[] {
 function isValidElementName(value: string): boolean {
   if (value.length === 0) {
     return false;
+  }
+
+  if (/^[a-z][a-z0-9._:-]*$/.test(value)) {
+    return true;
   }
 
     const first = value.codePointAt(0);
@@ -443,7 +450,8 @@ export class Document extends Node {
 
   createElement(tagName: string): Element {
     this._window.assertOpen();
-    const normalizedTagName = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument
+    const isXMLDocument = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument === true;
+    const normalizedTagName = isXMLDocument
       ? String(tagName)
       : asciiLowercase(String(tagName));
     if (!isValidElementName(normalizedTagName)) {
@@ -460,15 +468,15 @@ export class Document extends Node {
       __localName?: string;
       __isXMLNode?: boolean;
     };
-    mutable.__namespaceURI = this.contentType === "application/xhtml+xml"
-      ? HTML_NAMESPACE
-      : (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument
-        ? null
-        : HTML_NAMESPACE;
-    mutable.__prefix = null;
     mutable.__localName = normalizedTagName;
-    mutable.__isXMLNode = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument === true;
-    this._window.upgradeElementInstance(element, normalizedTagName);
+    if (isXMLDocument) {
+      mutable.__namespaceURI = (this as unknown as { __contentType?: string }).__contentType === "application/xhtml+xml" ? HTML_NAMESPACE : null;
+      mutable.__prefix = null;
+      mutable.__isXMLNode = true;
+    }
+    if (this._window.customElements.hasDefinitions) {
+      this._window.upgradeElementInstance(element, normalizedTagName);
+    }
     return element;
   }
 

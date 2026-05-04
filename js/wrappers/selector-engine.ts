@@ -38,8 +38,9 @@ type ComplexSelector = {
 };
 
 export function canUseNativeSelector(selector: string): boolean {
-  void selector;
-  return false;
+  return /^[A-Za-z][A-Za-z0-9_-]*$/.test(selector)
+    || /^\.[A-Za-z_][A-Za-z0-9_-]*$/.test(selector)
+    || /^\[[A-Za-z_][A-Za-z0-9_:-]*\]$/.test(selector);
 }
 
 export function querySelectorAllInDocument(document: Document, selector: string): Element[] {
@@ -81,6 +82,11 @@ function queryFromRoots(roots: Node[], selector: string, scopeRoot: Element | nu
     return querySimpleIdFromRoots(roots, simpleId, includeRoot);
   }
 
+  const simpleSelector = parseFastSimpleSelector(selector);
+  if (simpleSelector) {
+    return queryFastSimpleSelectorFromRoots(roots, simpleSelector, includeRoot);
+  }
+
   const selectors = parseSelectorList(selector);
   if (selectors.length === 0) {
     return [];
@@ -116,6 +122,79 @@ function queryFromRoots(roots: Node[], selector: string, scopeRoot: Element | nu
             seen.add(element._handle);
             matches.push(element);
           }
+        }
+      }
+
+      const children = current.childNodes.toArray();
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child) {
+          stack.push(child);
+        }
+      }
+    }
+  }
+
+  return matches;
+}
+
+type FastSimpleSelector =
+  | { kind: "tag"; value: string }
+  | { kind: "class"; value: string }
+  | { kind: "attribute"; value: string };
+
+function parseFastSimpleSelector(selector: string): FastSimpleSelector | null {
+  if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(selector)) {
+    return { kind: "tag", value: selector.toLowerCase() };
+  }
+  if (/^\.[A-Za-z_][A-Za-z0-9_-]*$/.test(selector)) {
+    return { kind: "class", value: selector.slice(1) };
+  }
+  const attributeMatch = selector.match(/^\[([A-Za-z_][A-Za-z0-9_:-]*)\]$/);
+  if (attributeMatch?.[1]) {
+    return { kind: "attribute", value: attributeMatch[1].toLowerCase() };
+  }
+  return null;
+}
+
+function queryFastSimpleSelectorFromRoots(roots: Node[], selector: FastSimpleSelector, includeRoot: boolean): Element[] {
+  const matches: Element[] = [];
+  const seen = new Set<number>();
+
+  for (const root of roots) {
+    const stack: Node[] = [];
+    if (includeRoot) {
+      stack.push(root);
+    } else {
+      const children = root.childNodes.toArray();
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child) {
+          stack.push(child);
+        }
+      }
+    }
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) {
+        continue;
+      }
+
+      if (current.nodeType === Node.ELEMENT_NODE) {
+        const element = current as unknown as Element;
+        let matched = false;
+        if (selector.kind === "tag") {
+          matched = element.localName === selector.value;
+        } else if (selector.kind === "class") {
+          const className = element.getAttribute("class");
+          matched = className != null && className.split(/[\t\n\f\r ]+/).includes(selector.value);
+        } else {
+          matched = element.getAttribute(selector.value) != null;
+        }
+        if (matched && !seen.has(element._handle)) {
+          seen.add(element._handle);
+          matches.push(element);
         }
       }
 

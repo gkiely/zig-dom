@@ -900,17 +900,19 @@ export class Window extends EventTargetBase {
       return;
     }
 
-    this.emitMutationRecord({
-      type: "attributes",
-      target: element,
-      addedNodes: [],
-      removedNodes: [],
-      previousSibling: null,
-      nextSibling: null,
-      attributeName: name,
-      attributeNamespace: null,
-      oldValue
-    });
+    if (this.#mutationObservers.size > 0) {
+      this.emitMutationRecord({
+        type: "attributes",
+        target: element,
+        addedNodes: [],
+        removedNodes: [],
+        previousSibling: null,
+        nextSibling: null,
+        attributeName: name,
+        attributeNamespace: null,
+        oldValue
+      });
+    }
 
     if (!this.customElements.hasDefinitions) {
       return;
@@ -931,17 +933,19 @@ export class Window extends EventTargetBase {
   }
 
   notifyChildListMutation(target: Node, addedNodes: Node[], removedNodes: Node[], previousSibling: Node | null, nextSibling: Node | null): void {
-    this.emitMutationRecord({
-      type: "childList",
-      target,
-      addedNodes,
-      removedNodes,
-      previousSibling,
-      nextSibling,
-      attributeName: null,
-      attributeNamespace: null,
-      oldValue: null
-    });
+    if (this.#mutationObservers.size > 0) {
+      this.emitMutationRecord({
+        type: "childList",
+        target,
+        addedNodes,
+        removedNodes,
+        previousSibling,
+        nextSibling,
+        attributeName: null,
+        attributeNamespace: null,
+        oldValue: null
+      });
+    }
   }
 
   notifyCharacterDataChanged(target: Node, oldValue: string): void {

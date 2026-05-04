@@ -65,13 +65,13 @@ function retargetFocusRelatedTarget(target: unknown): unknown {
 }
 
 export class HTMLElement extends Element {
-  onclick: ((event: Event) => void) | null = null;
-  onchange: ((event: Event) => void) | null = null;
-  oninput: ((event: Event) => void) | null = null;
-  onanimationend: ((event: Event) => void) | null = null;
-  onanimationiteration: ((event: Event) => void) | null = null;
-  onanimationstart: ((event: Event) => void) | null = null;
-  ontransitionend: ((event: Event) => void) | null = null;
+  declare onclick: ((event: Event) => void) | null;
+  declare onchange: ((event: Event) => void) | null;
+  declare oninput: ((event: Event) => void) | null;
+  declare onanimationend: ((event: Event) => void) | null;
+  declare onanimationiteration: ((event: Event) => void) | null;
+  declare onanimationstart: ((event: Event) => void) | null;
+  declare ontransitionend: ((event: Event) => void) | null;
   #style: CSSStyleDeclaration | null = null;
   #styleSheet: CSSStyleSheetLike | null = null;
   #syncingStyleAttribute = false;
@@ -319,6 +319,16 @@ export class HTMLElement extends Element {
     }
   }
 }
+
+Object.assign(HTMLElement.prototype, {
+  onclick: null,
+  onchange: null,
+  oninput: null,
+  onanimationend: null,
+  onanimationiteration: null,
+  onanimationstart: null,
+  ontransitionend: null
+});
 
 export class HTMLSpanElement extends HTMLElement {}
 

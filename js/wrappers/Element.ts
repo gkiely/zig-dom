@@ -698,16 +698,13 @@ export class Element extends Node {
 
   getAttribute(name: string): string | null {
     const key = this.#attributeKey(name);
+    if (this.#attributeCache?.has(key)) {
+      return this.#attributeCache.get(key) ?? null;
+    }
+
     if (this.#plainAttributeNames.has(key)) {
       const value = native.getAttribute(this._handle, key);
       if (value != null) {
-        const cachedValue = this.#attributeCache?.get(key);
-        if (cachedValue != null && cachedValue !== value) {
-          return cachedValue;
-        }
-        if (value === "" && cachedValue) {
-          return cachedValue;
-        }
         return value === "\u0000" ? "" : value;
       }
     }
@@ -722,10 +719,6 @@ export class Element extends Node {
       if (this.#nonHtmlAttributes.size > 0) {
         return null;
       }
-    }
-
-    if (this.#attributeCache?.has(key)) {
-      return this.#attributeCache.get(key) ?? null;
     }
 
     const value = native.getAttribute(this._handle, key);
@@ -794,22 +787,25 @@ export class Element extends Node {
     if (!isValidAttributeName(key)) {
       throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
     }
-    const previousValue = this.getAttribute(key);
-    native.setAttribute(this._handle, key, value);
+    const stringValue = String(value);
+    const previousValue = this.#attributeCache?.has(key) || this.#plainAttributeNames.has(key) || this.#nonHtmlAttributes.size > 0
+      ? this.getAttribute(key)
+      : null;
+    native.setAttribute(this._handle, key, stringValue);
     const existingInternalName = this.#findAttributeByQualifiedName(key);
     if (existingInternalName && this.#nonHtmlAttributes.has(existingInternalName)) {
-      this.#nonHtmlAttributes.set(existingInternalName, value);
+      this.#nonHtmlAttributes.set(existingInternalName, stringValue);
       if (!this.#attributeCache) {
         this.#attributeCache = new Map();
       }
-      this.#attributeCache.set(key, value);
-      this._window.notifyAttributeChanged(this, key, previousValue, value);
+      this.#attributeCache.set(key, stringValue);
+      this._window.notifyAttributeChanged(this, key, previousValue, stringValue);
       return;
     }
     if (!this.#isHtmlElement()) {
-      this.#nonHtmlAttributes.set(key, value);
+      this.#nonHtmlAttributes.set(key, stringValue);
     } else if (key !== name.toLowerCase()) {
-      this.#nonHtmlAttributes.set(key, value);
+      this.#nonHtmlAttributes.set(key, stringValue);
     }
     if (!this.#attributeNamespaces.has(key)) {
       this.#attributeNamespaces.set(key, attributeNamespace(name));
@@ -818,8 +814,8 @@ export class Element extends Node {
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
-    this.#attributeCache.set(key, value);
-    this._window.notifyAttributeChanged(this, key, previousValue, value);
+    this.#attributeCache.set(key, stringValue);
+    this._window.notifyAttributeChanged(this, key, previousValue, stringValue);
   }
 
   setAttributeNS(namespace: string | null, qualifiedName: string, value: string): void {

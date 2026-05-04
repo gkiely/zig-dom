@@ -223,15 +223,7 @@ export class Node extends EventTargetBase {
     }
 
     if (child._window !== this._window) {
-      try {
-        native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, child._handle);
-      } catch {
-        child = adoptForeignNodeForParent(this, child) as TNode;
-        native.appendChild(this._handle, child._handle);
-      }
-      this._window.adoptSubtreeWrappers(child);
-      refreshDocumentElementFlag(this);
-      return child;
+      throwHierarchyRequestError();
     }
 
     const trackMutations = this._window.hasMutationObservers();
@@ -400,15 +392,7 @@ export class Node extends EventTargetBase {
     }
 
     if (newChild._window !== this._window) {
-      try {
-        native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, newChild._handle);
-      } catch {
-        newChild = adoptForeignNodeForParent(this, newChild) as TNode;
-      }
-      native.insertBefore(this._handle, newChild._handle, reference?._handle ?? 0);
-      this._window.adoptSubtreeWrappers(newChild);
-      refreshDocumentElementFlag(this);
-      return newChild;
+      throwHierarchyRequestError();
     }
 
     const trackMutations = this._window.hasMutationObservers();
@@ -621,15 +605,7 @@ export class Node extends EventTargetBase {
     }
 
     if ((newChild as Node)._window !== this._window) {
-      try {
-        native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, newChild._handle);
-      } catch {
-        newChild = adoptForeignNodeForParent(this, newChild as Node);
-      }
-      native.replaceChild(this._handle, newChild._handle, oldChild._handle);
-      this._window.adoptSubtreeWrappers(newChild as Node);
-      refreshDocumentElementFlag(this);
-      return oldChild;
+      throwHierarchyRequestError();
     }
 
     const trackMutations = this._window.hasMutationObservers();
