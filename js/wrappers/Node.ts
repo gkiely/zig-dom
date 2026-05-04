@@ -1345,6 +1345,7 @@ function scheduleIFrameLoadIfNeeded(node: Node): void {
     if (!node.isConnected) {
       return;
     }
+    (node._window as unknown as { __loadFrameDocument?: (frame: unknown) => void }).__loadFrameDocument?.(node);
     elementLike.dispatchEvent?.(new Event("load"));
   });
 }

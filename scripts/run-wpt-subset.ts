@@ -323,6 +323,21 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   const fileId = entryId(file, variant);
 
   const window = new Window({ url: testUrl(file, variant) });
+  (window as unknown as { __loadFrameDocument?: (frame: { getAttribute(name: string): string | null; contentDocument?: Window["document"] }) => void }).__loadFrameDocument = (frame) => {
+    const src = frame.getAttribute("src");
+    const frameDocument = frame.contentDocument;
+    if (!src || !frameDocument) {
+      return;
+    }
+    const framePath = resolveScriptPath(file, src, wptRootPath);
+    if (!existsSync(framePath)) {
+      return;
+    }
+    const frameMarkup = extractHeadAndBodyMarkup(readText(framePath));
+    frameDocument.head.innerHTML = frameMarkup.head;
+    applyAttributeMarkup(frameDocument.body, frameMarkup.bodyAttributes);
+    frameDocument.body.innerHTML = frameMarkup.body;
+  };
   const initialMarkup = extractHeadAndBodyMarkup(html);
   window.document.head.innerHTML = initialMarkup.head;
   applyAttributeMarkup(window.document.body, initialMarkup.bodyAttributes);

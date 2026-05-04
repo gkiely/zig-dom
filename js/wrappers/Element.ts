@@ -325,6 +325,14 @@ export class Element extends Node {
     this.setAttribute("href", String(value));
   }
 
+  get src(): string {
+    return this.getAttribute("src") ?? "";
+  }
+
+  set src(value: string) {
+    this.setAttribute("src", String(value));
+  }
+
   override get nodeName(): string {
     return this.tagName;
   }
@@ -613,6 +621,10 @@ export class Element extends Node {
     if (this.#plainAttributeNames.has(key)) {
       const value = native.getAttribute(this._handle, key);
       if (value != null) {
+        const cachedValue = this.#attributeCache?.get(key);
+        if (value === "" && cachedValue) {
+          return cachedValue;
+        }
         return value === "\u0000" ? "" : value;
       }
     }
