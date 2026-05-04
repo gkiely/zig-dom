@@ -84,6 +84,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_node_append_child: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_append_fragment: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_replace_children: { returns: "u32", args: ["u64", "ptr", "usize"] },
+  zig_dom_node_set_inner_html: { returns: "u32", args: ["u64", "ptr", "usize"] },
   zig_dom_window_append_child: { returns: "u32", args: ["u64", "u64", "u64"] },
   zig_dom_node_insert_before: { returns: "u32", args: ["u64", "u64", "u64"] },
   zig_dom_node_remove_child: { returns: "u32", args: ["u64", "u64"] },
@@ -323,6 +324,11 @@ export const native = {
       children.length
     );
     assertStatus(status, "zig_dom_node_replace_children");
+  },
+  setInnerHTML(parent: number, html: string): void {
+    const bytes = encode(html, false);
+    const status = nativeLibrary.symbols.zig_dom_node_set_inner_html(parent, ptr(bytes), bytes.length);
+    assertStatus(status, "zig_dom_node_set_inner_html");
   },
   appendChildInWindow(window: number, parent: number, child: number): void {
     const status = nativeLibrary.symbols.zig_dom_window_append_child(window, parent, child);

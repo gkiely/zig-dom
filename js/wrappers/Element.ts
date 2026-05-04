@@ -739,6 +739,10 @@ export class Element extends Node {
   }
 
   set innerHTML(value: string) {
+    if (!this._window._hasMutationObservers && !this._window._hasCustomElementDefinitions) {
+      native.setInnerHTML(this._handle, String(value));
+      return;
+    }
     this.replaceChildren();
     parseHtmlInto(this, value);
   }

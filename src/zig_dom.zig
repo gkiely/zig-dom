@@ -479,6 +479,242 @@ fn getAttribute(node: *Node, name: []const u8) ?[]const u8 {
     return node.attributes.items[idx].value;
 }
 
+fn trimAsciiWhitespace(input: []const u8) []const u8 {
+    return std.mem.trim(u8, input, " \t\n\r\x0c");
+}
+
+fn asciiLowerSliceAlloc(input: []const u8) ![]u8 {
+    const copy = try c_allocator.dupe(u8, input);
+    for (copy) |*ch| {
+        ch.* = std.ascii.toLower(ch.*);
+    }
+    return copy;
+}
+
+fn isAsciiWhitespace(ch: u8) bool {
+    return ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r' or ch == 0x0c;
+}
+
+fn decodeHtmlEntitiesAlloc(input: []const u8) ![]u8 {
+    if (std.mem.indexOfScalar(u8, input, '&') == null) {
+        return try makeOwned(input);
+    }
+
+    var output: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer output.deinit(c_allocator);
+
+    var index: usize = 0;
+    while (index < input.len) {
+        if (input[index] != '&') {
+            try output.append(c_allocator, input[index]);
+            index += 1;
+            continue;
+        }
+
+        const entity_start = index + 1;
+        const remaining = input[entity_start..];
+        const semicolon_offset = std.mem.indexOfScalar(u8, remaining, ';') orelse {
+            try output.append(c_allocator, input[index]);
+            index += 1;
+            continue;
+        };
+        const entity = remaining[0..semicolon_offset];
+        const replacement: ?[]const u8 = if (std.mem.eql(u8, entity, "amp"))
+            "&"
+        else if (std.mem.eql(u8, entity, "lt"))
+            "<"
+        else if (std.mem.eql(u8, entity, "gt"))
+            ">"
+        else if (std.mem.eql(u8, entity, "quot"))
+            "\""
+        else if (std.mem.eql(u8, entity, "apos"))
+            "'"
+        else if (std.mem.eql(u8, entity, "nbsp"))
+            "\xc2\xa0"
+        else
+            null;
+
+        if (replacement) |value| {
+            try output.appendSlice(c_allocator, value);
+            index = entity_start + semicolon_offset + 1;
+            continue;
+        }
+
+        if (entity.len > 1 and entity[0] == '#') {
+            const base: u8 = if (entity.len > 2 and (entity[1] == 'x' or entity[1] == 'X')) 16 else 10;
+            const digits = if (base == 16) entity[2..] else entity[1..];
+            if (digits.len > 0) {
+                const codepoint = std.fmt.parseInt(u21, digits, base) catch null;
+                if (codepoint) |cp| {
+                    var buffer: [4]u8 = undefined;
+                    const encoded = std.unicode.utf8Encode(cp, &buffer) catch null;
+                    if (encoded) |len| {
+                        try output.appendSlice(c_allocator, buffer[0..len]);
+                        index = entity_start + semicolon_offset + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        try output.append(c_allocator, input[index]);
+        index += 1;
+    }
+
+    if (output.items.len == 0) {
+        output.deinit(c_allocator);
+        return EMPTY_U8_SLICE;
+    }
+    return try output.toOwnedSlice(c_allocator);
+}
+
+fn parseAttributesInto(node: *Node, source: []const u8) !void {
+    var index: usize = 0;
+    while (index < source.len) {
+        while (index < source.len and isAsciiWhitespace(source[index])) : (index += 1) {}
+        if (index >= source.len) break;
+
+        const name_start = index;
+        while (index < source.len and
+            !isAsciiWhitespace(source[index]) and
+            source[index] != '=' and
+            source[index] != '/' and
+            source[index] != '>') : (index += 1) {}
+        if (index == name_start) {
+            index += 1;
+            continue;
+        }
+        const raw_name = source[name_start..index];
+
+        while (index < source.len and isAsciiWhitespace(source[index])) : (index += 1) {}
+
+        var raw_value: []const u8 = "";
+        if (index < source.len and source[index] == '=') {
+            index += 1;
+            while (index < source.len and isAsciiWhitespace(source[index])) : (index += 1) {}
+
+            if (index < source.len and (source[index] == '"' or source[index] == '\'')) {
+                const quote = source[index];
+                index += 1;
+                const value_start = index;
+                while (index < source.len and source[index] != quote) : (index += 1) {}
+                raw_value = source[value_start..index];
+                if (index < source.len) index += 1;
+            } else {
+                const value_start = index;
+                while (index < source.len and
+                    !isAsciiWhitespace(source[index]) and
+                    source[index] != '"' and
+                    source[index] != '\'' and
+                    source[index] != '>') : (index += 1) {}
+                raw_value = source[value_start..index];
+            }
+        }
+
+        const decoded_value = try decodeHtmlEntitiesAlloc(raw_value);
+        defer freeOwned(decoded_value);
+        try setAttribute(node, raw_name, decoded_value);
+    }
+}
+
+fn nativeParseHtmlInto(window: *Window, parent_handle: u64, html: []const u8) api.Status {
+    const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
+    if (parent.kind != .element and parent.kind != .document_fragment) return .invalid_argument;
+
+    const clear_status = clearChildrenResolved(window, parent);
+    if (clear_status != .ok) return clear_status;
+
+    var stack: std.ArrayListUnmanaged(u64) = .empty;
+    defer stack.deinit(c_allocator);
+    stack.append(c_allocator, parent_handle) catch return .out_of_memory;
+
+    var index: usize = 0;
+    while (index < html.len) {
+        if (html[index] != '<') {
+            const text_start = index;
+            while (index < html.len and html[index] != '<') : (index += 1) {}
+            const decoded_text = decodeHtmlEntitiesAlloc(html[text_start..index]) catch return .out_of_memory;
+            defer freeOwned(decoded_text);
+            if (decoded_text.len > 0) {
+                const text_handle = createNode(window, .text, "#text", decoded_text, parent.owner_document, false) catch return .out_of_memory;
+                const current_parent = stack.items[stack.items.len - 1];
+                const status = appendChild(window, current_parent, text_handle);
+                if (status != .ok) return status;
+            }
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, html[index..], "<!--")) {
+            const comment_start = index + 4;
+            const comment_end_offset = std.mem.indexOf(u8, html[comment_start..], "-->") orelse {
+                index = html.len;
+                break;
+            };
+            const comment = html[comment_start .. comment_start + comment_end_offset];
+            const comment_handle = createNode(window, .comment, "#comment", comment, parent.owner_document, false) catch return .out_of_memory;
+            const current_parent = stack.items[stack.items.len - 1];
+            const status = appendChild(window, current_parent, comment_handle);
+            if (status != .ok) return status;
+            index = comment_start + comment_end_offset + 3;
+            continue;
+        }
+
+        const tag_end_offset = std.mem.indexOfScalar(u8, html[index..], '>') orelse {
+            const decoded_text = decodeHtmlEntitiesAlloc(html[index..]) catch return .out_of_memory;
+            defer freeOwned(decoded_text);
+            if (decoded_text.len > 0) {
+                const text_handle = createNode(window, .text, "#text", decoded_text, parent.owner_document, false) catch return .out_of_memory;
+                const current_parent = stack.items[stack.items.len - 1];
+                const status = appendChild(window, current_parent, text_handle);
+                if (status != .ok) return status;
+            }
+            break;
+        };
+        const token = html[index + 1 .. index + tag_end_offset];
+        index += tag_end_offset + 1;
+
+        const trimmed_token = trimAsciiWhitespace(token);
+        if (trimmed_token.len == 0) continue;
+
+        if (trimmed_token[0] == '/') {
+            const close_name_raw = trimAsciiWhitespace(trimmed_token[1..]);
+            const close_name = asciiLowerSliceAlloc(close_name_raw) catch return .out_of_memory;
+            defer c_allocator.free(close_name);
+            while (stack.items.len > 1) {
+                const current_handle = stack.pop().?;
+                const current = resolveNode(window, current_handle) orelse return .invalid_handle;
+                if (std.mem.eql(u8, current.name, close_name)) break;
+            }
+            continue;
+        }
+
+        const self_closing = trimmed_token[trimmed_token.len - 1] == '/';
+        const inner = if (self_closing) trimAsciiWhitespace(trimmed_token[0 .. trimmed_token.len - 1]) else trimmed_token;
+        if (inner.len == 0) continue;
+
+        var name_end: usize = 0;
+        while (name_end < inner.len and !isAsciiWhitespace(inner[name_end])) : (name_end += 1) {}
+        const raw_tag_name = inner[0..name_end];
+        const tag_name = asciiLowerSliceAlloc(raw_tag_name) catch return .out_of_memory;
+        defer c_allocator.free(tag_name);
+        const attr_source = if (name_end < inner.len) inner[name_end + 1 ..] else "";
+
+        const element_handle = createNode(window, .element, tag_name, "", parent.owner_document, false) catch return .out_of_memory;
+        const element = resolveNode(window, element_handle) orelse return .invalid_handle;
+        parseAttributesInto(element, attr_source) catch return .out_of_memory;
+
+        const current_parent = stack.items[stack.items.len - 1];
+        const append_status = appendChild(window, current_parent, element_handle);
+        if (append_status != .ok) return append_status;
+
+        if (!self_closing and !isVoidElement(tag_name)) {
+            stack.append(c_allocator, element_handle) catch return .out_of_memory;
+        }
+    }
+
+    return .ok;
+}
+
 fn appendTextContent(window: *Window, node_handle: u64, output: *std.ArrayListUnmanaged(u8)) !void {
     const node = resolveNode(window, node_handle) orelse return;
 
@@ -1092,6 +1328,12 @@ pub export fn zig_dom_node_replace_children(parent: u64, children_ptr: [*]const 
     }
 
     return @intFromEnum(replaceChildrenWithDetached(window, parent, children));
+}
+
+pub export fn zig_dom_node_set_inner_html(parent: u64, html_ptr: [*]const u8, html_len: usize) u32 {
+
+    const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
+    return @intFromEnum(nativeParseHtmlInto(window, parent, html_ptr[0..html_len]));
 }
 
 pub export fn zig_dom_window_append_child(window: u64, parent: u64, child: u64) u32 {

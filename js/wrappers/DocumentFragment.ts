@@ -1,3 +1,4 @@
+import { native } from "../ffi.ts";
 import type { Element } from "./Element.ts";
 import { parseHtmlInto } from "./html-parser.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
@@ -23,6 +24,10 @@ export class DocumentFragment extends Node {
   }
 
   set innerHTML(value: string) {
+    if (!this._window._hasMutationObservers && !this._window._hasCustomElementDefinitions) {
+      native.setInnerHTML(this._handle, String(value));
+      return;
+    }
     this.replaceChildren();
     parseHtmlInto(this, value);
   }
