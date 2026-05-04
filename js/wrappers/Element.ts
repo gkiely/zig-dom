@@ -679,6 +679,7 @@ export class Element extends Node {
       value,
       ownerElement: this,
       ownerDocument: this.ownerDocument,
+      baseURI: this.ownerDocument?.URL ?? this._window.location.href,
       namespaceURI: metadata?.namespaceURI ?? this.#attributeNamespaces.get(key) ?? null,
       prefix: metadata?.prefix ?? null,
       localName: metadata?.localName ?? reflectedName

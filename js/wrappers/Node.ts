@@ -111,6 +111,13 @@ export class Node extends EventTargetBase {
     return this._window.getNode(documentHandle) as Document | null;
   }
 
+  get baseURI(): string {
+    if (this.nodeType === Node.DOCUMENT_NODE) {
+      return (this as unknown as Document).URL;
+    }
+    return this.ownerDocument?.URL ?? this._window.location.href;
+  }
+
   get childNodes(): NodeList {
     this._window.assertOpen();
     if (!this.#childNodesCache) {

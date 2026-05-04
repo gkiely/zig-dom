@@ -932,6 +932,13 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   const vmContext = createContext(context);
   const vmGlobalThis = runInContext("globalThis", vmContext) as unknown as Record<string, unknown>;
   (window as unknown as { __scriptContext?: Record<string, unknown> }).__scriptContext = vmGlobalThis;
+  runInContext(`
+    Object.defineProperty(NodeList.prototype, "forEach", { value: Array.prototype.forEach, configurable: true, writable: true });
+    Object.defineProperty(NodeList.prototype, "keys", { value: Array.prototype.keys, configurable: true, writable: true });
+    Object.defineProperty(NodeList.prototype, "values", { value: Array.prototype.values, configurable: true, writable: true });
+    Object.defineProperty(NodeList.prototype, "entries", { value: Array.prototype.entries, configurable: true, writable: true });
+    Object.defineProperty(NodeList.prototype, Symbol.iterator, { value: Array.prototype[Symbol.iterator], configurable: true, writable: true });
+  `, vmContext, { filename: `${file}#realm-setup` });
   const executeScript = (source: string) => {
     runInContext(source, vmContext, {
       filename: file,

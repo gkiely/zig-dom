@@ -84,6 +84,7 @@ function createSyntheticAttr(document: Document, name: string, namespaceURI: str
     localName,
     ownerElement: null as Element | null,
     ownerDocument: document,
+    baseURI: document.URL,
     parentNode: null,
     parentElement: null,
     get nodeValue() {
