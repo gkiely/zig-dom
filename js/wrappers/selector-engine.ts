@@ -97,6 +97,11 @@ export function createElementMatcher(selector: string, scopeRoot: Element): (ele
     );
   }
 
+  const compoundSelector = parseFastCompoundSelector(selector);
+  if (compoundSelector) {
+    return (element) => matchesFastCompoundSelector(element, compoundSelector);
+  }
+
   const simpleSelector = parseFastSimpleSelector(selector);
   if (simpleSelector) {
     const selectorTagName = simpleSelector.kind === "tag" ? asciiLowercase(simpleSelector.value) : "";
@@ -192,8 +197,21 @@ type FastSimpleSelector =
   | { kind: "class"; value: string }
   | { kind: "attribute"; value: string; attributeValue?: string; attributeOperator?: "=" | "~=" };
 
+type FastAttributeCondition = {
+  name: string;
+  operator: "exists" | "equals" | "not-exists" | "not-equals";
+  value?: string;
+};
+
+type FastCompoundSelector = {
+  tagName: string;
+  htmlTagName: string;
+  attributes: FastAttributeCondition[];
+};
+
 type FastSelector =
   | { kind: "simple"; value: FastSimpleSelector }
+  | { kind: "compound"; value: FastCompoundSelector }
   | { kind: "child"; parent: FastSimpleSelector; child: FastSimpleSelector };
 
 function parseFastSelectorList(selector: string): FastSelector[] | null {
@@ -218,6 +236,11 @@ function parseFastSelector(selector: string): FastSelector | null {
     return { kind: "simple", value: simpleSelector };
   }
 
+  const compoundSelector = parseFastCompoundSelector(selector);
+  if (compoundSelector) {
+    return { kind: "compound", value: compoundSelector };
+  }
+
   const childParts = selector.split(">");
   if (childParts.length === 2) {
     const parent = parseFastSimpleSelector(trimAsciiWhitespace(childParts[0] ?? ""));
@@ -228,6 +251,48 @@ function parseFastSelector(selector: string): FastSelector | null {
   }
 
   return null;
+}
+
+function parseFastCompoundSelector(selector: string): FastCompoundSelector | null {
+  if (selector.includes("\\") || selector.includes(">") || selector.includes("+") || selector.includes("~")) {
+    return null;
+  }
+
+  const tagMatch = selector.match(/^([A-Za-z][A-Za-z0-9_-]*)/);
+  if (!tagMatch?.[1]) {
+    return null;
+  }
+
+  const attributes: FastAttributeCondition[] = [];
+  let cursor = tagMatch[1].length;
+  while (cursor < selector.length) {
+    const rest = selector.slice(cursor);
+    let match = rest.match(/^\[([A-Za-z_][A-Za-z0-9_:-]*)(?:=(?:"([^"]*)"|([A-Za-z0-9_-]+)))?\]/);
+    if (match?.[1]) {
+      attributes.push({
+        name: match[1],
+        operator: match[2] == null && match[3] == null ? "exists" : "equals",
+        value: match[2] ?? match[3] ?? ""
+      });
+      cursor += match[0].length;
+      continue;
+    }
+
+    match = rest.match(/^:not\(\[([A-Za-z_][A-Za-z0-9_:-]*)(?:=(?:"([^"]*)"|([A-Za-z0-9_-]+)))?\]\)/);
+    if (match?.[1]) {
+      attributes.push({
+        name: match[1],
+        operator: match[2] == null && match[3] == null ? "not-exists" : "not-equals",
+        value: match[2] ?? match[3] ?? ""
+      });
+      cursor += match[0].length;
+      continue;
+    }
+
+    return null;
+  }
+
+  return attributes.length > 0 ? { tagName: tagMatch[1], htmlTagName: asciiLowercase(tagMatch[1]), attributes } : null;
 }
 
 function parseFastSimpleSelector(selector: string): FastSimpleSelector | null {
@@ -365,6 +430,10 @@ function matchesFastSelector(element: Element, selector: FastSelector, selectorT
     return matchesFastSimpleSelector(element, selector.value, selectorTagName, attributeName);
   }
 
+  if (selector.kind === "compound") {
+    return matchesFastCompoundSelector(element, selector.value);
+  }
+
   if (!matchesFastSimpleSelector(element, selector.child)) {
     return false;
   }
@@ -391,6 +460,42 @@ function matchesFastSimpleSelector(element: Element, selector: FastSimpleSelecto
     return actual != null && classNameContains(actual, selector.attributeValue);
   }
   return actual === selector.attributeValue;
+}
+
+function matchesFastCompoundSelector(element: Element, selector: FastCompoundSelector): boolean {
+  const htmlElement = isHtmlElement(element);
+  if (element.localName !== (htmlElement ? selector.htmlTagName : selector.tagName)) {
+    return false;
+  }
+
+  for (const condition of selector.attributes) {
+    const attributeName = htmlElement ? asciiLowercase(condition.name) : condition.name;
+    const actual = element.getAttribute(attributeName);
+    switch (condition.operator) {
+      case "exists":
+        if (actual == null) {
+          return false;
+        }
+        break;
+      case "equals":
+        if (actual !== condition.value) {
+          return false;
+        }
+        break;
+      case "not-exists":
+        if (actual != null) {
+          return false;
+        }
+        break;
+      case "not-equals":
+        if (actual === condition.value) {
+          return false;
+        }
+        break;
+    }
+  }
+
+  return true;
 }
 
 function querySimpleIdFromRoots(roots: Node[], id: string, includeRoot: boolean): Element[] {

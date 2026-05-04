@@ -31,12 +31,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-and-adopt-thcrash.html",
-      "subtest": "Check that removing a node and then adopting its parent into a different window/document doesn't crash.",
-      "reason": "cross-document adoption identity tracking is incomplete",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/svg-template-querySelector.html",
       "subtest": "__all__",
       "reason": "SVG template content/querySelector coverage is incomplete",

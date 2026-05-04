@@ -104,11 +104,10 @@ export class Node extends EventTargetBase {
 
   get ownerDocument(): Document | null {
     this._window.assertOpen();
-    if (this.nodeType === Node.DOCUMENT_NODE) {
+    if (this.#nodeType === Node.DOCUMENT_NODE) {
       return null;
     }
-    const documentHandle = native.nodeOwnerDocument(this._handle);
-    return this._window.getNode(documentHandle) as Document | null;
+    return this._window.document;
   }
 
   get baseURI(): string {

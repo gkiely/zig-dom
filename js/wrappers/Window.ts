@@ -1061,6 +1061,7 @@ export class Window extends EventTargetBase {
 
   createFreshElementNode(handle: number, tagName: string, skipInitialStyleSync = false): Element {
     const wrapped = this.#createElementNode(handle, tagName, skipInitialStyleSync);
+    (wrapped as unknown as { __localName?: string }).__localName = tagName;
     if (this.customElements.hasDefinitions) {
       this.upgradeElementInstance(wrapped, tagName);
     }
@@ -1103,6 +1104,7 @@ export class Window extends EventTargetBase {
         const tagName = tagNameHint ?? asciiLowercase(native.nodeName(handle));
         elementTagName = tagName;
         wrapped = this.#createElementNode(handle, tagName, skipInitialStyleSync);
+        (wrapped as unknown as { __localName?: string }).__localName = tagName;
         break;
       }
       case Node.TEXT_NODE:
