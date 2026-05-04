@@ -214,20 +214,49 @@ type FastSelector =
   | { kind: "compound"; value: FastCompoundSelector }
   | { kind: "child"; parent: FastSimpleSelector; child: FastSimpleSelector };
 
+type PreparedFastSelector = {
+  selector: FastSelector;
+  selectorTagName: string;
+  attributeName: string;
+};
+
+const FAST_SELECTOR_LIST_CACHE = new Map<string, FastSelector[] | null>();
+const FAST_SELECTOR_CACHE_LIMIT = 128;
+
+function cacheFastSelectorList(selector: string, parsed: FastSelector[] | null): FastSelector[] | null {
+  if (FAST_SELECTOR_LIST_CACHE.size >= FAST_SELECTOR_CACHE_LIMIT) {
+    FAST_SELECTOR_LIST_CACHE.delete(FAST_SELECTOR_LIST_CACHE.keys().next().value as string);
+  }
+  FAST_SELECTOR_LIST_CACHE.set(selector, parsed);
+  return parsed;
+}
+
+function prepareFastSelector(selector: FastSelector): PreparedFastSelector {
+  return {
+    selector,
+    selectorTagName: selector.kind === "simple" && selector.value.kind === "tag" ? asciiLowercase(selector.value.value) : "",
+    attributeName: selector.kind === "simple" && selector.value.kind === "attribute" ? asciiLowercase(selector.value.value) : "",
+  };
+}
+
 function parseFastSelectorList(selector: string): FastSelector[] | null {
+  if (FAST_SELECTOR_LIST_CACHE.has(selector)) {
+    return FAST_SELECTOR_LIST_CACHE.get(selector) ?? null;
+  }
+
   if (!selector.includes(",")) {
-    return null;
+    return cacheFastSelectorList(selector, null);
   }
 
   const selectors: FastSelector[] = [];
   for (const part of selector.split(",")) {
     const fastSelector = parseFastSelector(trimAsciiWhitespace(part));
     if (!fastSelector) {
-      return null;
+      return cacheFastSelectorList(selector, null);
     }
     selectors.push(fastSelector);
   }
-  return selectors.length > 0 ? selectors : null;
+  return cacheFastSelectorList(selector, selectors.length > 0 ? selectors : null);
 }
 
 function parseFastSelector(selector: string): FastSelector | null {
@@ -373,11 +402,7 @@ function queryFastSimpleSelectorFromRoots(roots: Node[], selector: FastSimpleSel
 function queryFastSelectorListFromRoots(roots: Node[], selectors: FastSelector[], includeRoot: boolean): Element[] {
   const matches: Element[] = [];
   const seen = new Set<number>();
-  const prepared = selectors.map((selector) => ({
-    selector,
-    selectorTagName: selector.kind === "simple" && selector.value.kind === "tag" ? asciiLowercase(selector.value.value) : "",
-    attributeName: selector.kind === "simple" && selector.value.kind === "attribute" ? asciiLowercase(selector.value.value) : "",
-  }));
+  const prepared = selectors.map(prepareFastSelector);
 
   for (const root of roots) {
     const stack: Node[] = [];
@@ -401,12 +426,15 @@ function queryFastSelectorListFromRoots(roots: Node[], selectors: FastSelector[]
 
       if (current.nodeType === Node.ELEMENT_NODE) {
         const element = current as unknown as Element;
-        if (
-          prepared.some(({ selector, selectorTagName, attributeName }) =>
-            matchesFastSelector(element, selector, selectorTagName, attributeName)
-          ) &&
-          !seen.has(element._handle)
-        ) {
+        let matched = false;
+        for (let index = 0; index < prepared.length; index += 1) {
+          const { selector, selectorTagName, attributeName } = prepared[index]!;
+          if (matchesFastSelector(element, selector, selectorTagName, attributeName)) {
+            matched = true;
+            break;
+          }
+        }
+        if (matched && !seen.has(element._handle)) {
           seen.add(element._handle);
           matches.push(element);
         }

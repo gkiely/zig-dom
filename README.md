@@ -71,18 +71,18 @@ Run with:
 bun run benchmark:dom
 ```
 
-Latest local run: 2026-05-04 13:35:24 UTC on `darwin-arm64`, after `bun run build`.
+Latest local run: 2026-05-04 15:03:55 UTC on `darwin-arm64`, after `bun run build`.
 
 | Metric | zig-dom | happy-dom | jsdom | vs happy-dom |
 | --- | ---: | ---: | ---: | --- |
-| Append 10k children | 0.94 ms | 3.05 ms | 8.75 ms | zig-dom: 3.2x faster |
-| Create 10k elements | 2.31 ms | 3.13 ms | 8.83 ms | zig-dom: 1.4x faster |
-| Query `.class` across 10k nodes | 1.49 ms | 15.45 ms | 18.90 ms | zig-dom: 10.4x faster |
-| Query `[attr]` across 10k nodes | 1.38 ms | 6.53 ms | 12.44 ms | zig-dom: 4.7x faster |
-| Parse `innerHTML` | 0.51 ms | 17.94 ms | 24.79 ms | zig-dom: 35.1x faster |
-| Serialize `outerHTML` | 0.13 ms | 2.23 ms | 2.11 ms | zig-dom: 16.9x faster |
-| Mixed DOM workflow, 1k ops | 2.44 ms | 8.80 ms | 10.87 ms | zig-dom: 3.6x faster |
-| Mutation observer append, 1k nodes | 1.51 ms | 1.62 ms | 4.26 ms | zig-dom: 1.1x faster |
-| React render, 10k rows | 48.14 ms | 86.25 ms | 125.68 ms | zig-dom: 1.8x faster |
-| React update, 10k rows | 30.45 ms | 41.30 ms | 48.42 ms | zig-dom: 1.4x faster |
-| Import time | 40.83 ms | 68.19 ms | 447.44 ms | zig-dom: 1.7x faster |
+| Append 10k children | 0.74 ms | 3.99 ms | 8.94 ms | zig-dom is 5.4x faster |
+| Create 10k elements | 1.92 ms | 3.36 ms | 6.45 ms | zig-dom is 1.8x faster |
+| Query `.class` across 10k nodes | 1.52 ms | 13.45 ms | 14.33 ms | zig-dom is 8.9x faster |
+| Query `[attr]` across 10k nodes | 1.38 ms | 5.87 ms | 12.09 ms | zig-dom is 4.2x faster |
+| Parse `innerHTML` | 0.42 ms | 11.68 ms | 23.97 ms | zig-dom is 28.0x faster |
+| Serialize `outerHTML` | 0.21 ms | 2.42 ms | 2.78 ms | zig-dom is 11.8x faster |
+| Mixed DOM workflow, 1k ops | 2.36 ms | 8.05 ms | 10.45 ms | zig-dom is 3.4x faster |
+| Mutation observer append, 1k nodes | 1.50 ms | 1.75 ms | 4.34 ms | zig-dom is 1.2x faster |
+| React render, 10k rows | 46.58 ms | 97.46 ms | 124.01 ms | zig-dom is 2.1x faster |
+| React update, 10k rows | 28.70 ms | 37.25 ms | 49.66 ms | zig-dom is 1.3x faster |
+| Import time | 44.22 ms | 75.58 ms | 420.75 ms | zig-dom is 1.7x faster |
