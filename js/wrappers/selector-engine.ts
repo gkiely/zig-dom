@@ -52,6 +52,10 @@ export function canUseNativeSelector(selector: string): boolean {
 }
 
 function canUseNativeSelectorPart(selector: string): boolean {
+  if (selector.includes("\\")) {
+    return false;
+  }
+
   return selector.length > 0 && (
     selector === "*"
     || /^(?:[A-Za-z][A-Za-z0-9_-]*)?(?:#[A-Za-z_][A-Za-z0-9_-]*)?(?:\.[A-Za-z_][A-Za-z0-9_-]*)?(?:\[[A-Za-z_][A-Za-z0-9_:-]*(?:=(?:"[^"]*"|[A-Za-z0-9_-]+))?\])?$/.test(selector)
@@ -227,6 +231,10 @@ function parseFastSelector(selector: string): FastSelector | null {
 }
 
 function parseFastSimpleSelector(selector: string): FastSimpleSelector | null {
+  if (selector.includes("\\")) {
+    return null;
+  }
+
   if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(selector)) {
     return { kind: "tag", value: selector };
   }

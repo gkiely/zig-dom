@@ -137,16 +137,16 @@ export class Node extends EventTargetBase {
       return null as unknown as string;
     }
 
+    const cachedOverride = (this as unknown as { __textContentOverride?: string }).__textContentOverride;
+    if (typeof cachedOverride === "string") {
+      return cachedOverride;
+    }
+
     const value = native.nodeTextContent(this._handle);
 
     // Native returns a NUL sentinel for empty character data.
     if (value === "\u0000") {
       return "";
-    }
-
-    const cachedOverride = (this as unknown as { __textContentOverride?: string }).__textContentOverride;
-    if (typeof cachedOverride === "string") {
-      return cachedOverride;
     }
 
     return value;
