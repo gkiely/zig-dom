@@ -1065,6 +1065,16 @@ fn collectElements(window: *Window, root_handle: u64, selectors: []const SimpleS
     }
 }
 
+fn collectDescendantElements(window: *Window, root_handle: u64, selectors: []const SimpleSelector, output: *std.ArrayListUnmanaged(u64)) !void {
+    const root = resolveNode(window, root_handle) orelse return;
+    var cursor = root.first_child;
+    while (cursor != 0) {
+        try collectElements(window, cursor, selectors, output);
+        const child = resolveNode(window, cursor) orelse break;
+        cursor = child.next_sibling;
+    }
+}
+
 fn parseSelectorList(query: []const u8, output: *std.ArrayListUnmanaged(SimpleSelector)) !void {
     var token_iter = std.mem.tokenizeAny(u8, query, " \t\n\r");
     while (token_iter.next()) |token| {
@@ -1274,6 +1284,24 @@ pub export fn zig_dom_node_previous_sibling(node: u64) u64 {
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
     return record.prev_sibling;
+}
+
+pub export fn zig_dom_node_child_handles(node: u64, out_ptr: *[*c]u64, out_len: *usize) u32 {
+
+    const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
+    const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
+
+    var handles: std.ArrayListUnmanaged(u64) = .empty;
+    defer handles.deinit(c_allocator);
+
+    var cursor = record.first_child;
+    while (cursor != 0) {
+        handles.append(c_allocator, cursor) catch return STATUS_OOM;
+        const child = resolveNode(window, cursor) orelse return STATUS_INVALID_HANDLE;
+        cursor = child.next_sibling;
+    }
+
+    return outputHandleArray(handles.items, out_ptr, out_len);
 }
 
 pub export fn zig_dom_node_contains(ancestor: u64, node: u64) u32 {
@@ -1694,6 +1722,25 @@ pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [
         const child = resolveNode(window, cursor) orelse break;
         cursor = child.next_sibling;
     }
+
+    return outputHandleArray(matches.items, out_ptr, out_len);
+}
+
+pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const u8, selector_len: usize, out_ptr: *[*c]u64, out_len: *usize) u32 {
+
+    const window = resolveNodeWindow(root) orelse return STATUS_INVALID_HANDLE;
+    const root_node = resolveNode(window, root) orelse return STATUS_INVALID_HANDLE;
+    if (root_node.kind != .element and root_node.kind != .document_fragment and root_node.kind != .document) {
+        return STATUS_INVALID_ARGUMENT;
+    }
+
+    var selectors: std.ArrayListUnmanaged(SimpleSelector) = .empty;
+    defer selectors.deinit(c_allocator);
+    parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
+
+    var matches: std.ArrayListUnmanaged(u64) = .empty;
+    defer matches.deinit(c_allocator);
+    collectDescendantElements(window, root, selectors.items, &matches) catch return STATUS_OOM;
 
     return outputHandleArray(matches.items, out_ptr, out_len);
 }

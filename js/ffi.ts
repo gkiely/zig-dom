@@ -78,6 +78,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_node_last_child: { returns: "u64", args: ["u64"] },
   zig_dom_node_next_sibling: { returns: "u64", args: ["u64"] },
   zig_dom_node_previous_sibling: { returns: "u64", args: ["u64"] },
+  zig_dom_node_child_handles: { returns: "u32", args: ["u64", "ptr", "ptr"] },
   zig_dom_node_contains: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_compare_document_position: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_name: { returns: "u32", args: ["u64", "ptr", "ptr"] },
@@ -108,6 +109,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_document_get_element_by_id: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_query_selector: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_query_selector_all: { returns: "u32", args: ["u64", "ptr", "usize", "ptr", "ptr"] },
+  zig_dom_node_query_selector_all: { returns: "u32", args: ["u64", "ptr", "usize", "ptr", "ptr"] },
   zig_dom_document_reset: { returns: "u32", args: ["u64"] },
   zig_dom_free_string: { returns: "void", args: ["ptr", "usize"] },
   zig_dom_free_handle_array: { returns: "void", args: ["ptr", "usize"] },
@@ -285,6 +287,13 @@ export const native = {
   },
   nodePreviousSibling(handle: number): number {
     return Number(nativeLibrary.symbols.zig_dom_node_previous_sibling(handle));
+  },
+  nodeChildHandles(handle: number): number[] {
+    const outPtr = new BigUint64Array(1);
+    const outLen = new BigUint64Array(1);
+    const status = nativeLibrary.symbols.zig_dom_node_child_handles(handle, ptr(outPtr), ptr(outLen));
+    assertStatus(status, "zig_dom_node_child_handles");
+    return readHandleArrayFromOutParams(outPtr, outLen);
   },
   nodeContains(ancestorHandle: number, nodeHandle: number): boolean {
     return nativeLibrary.symbols.zig_dom_node_contains(ancestorHandle, nodeHandle) === 1;
@@ -480,6 +489,14 @@ export const native = {
     const outLen = new BigUint64Array(1);
     const status = nativeLibrary.symbols.zig_dom_document_query_selector_all(documentHandle, ptr(data), data.length, ptr(outPtr), ptr(outLen));
     assertStatus(status, "zig_dom_document_query_selector_all");
+    return readHandleArrayFromOutParams(outPtr, outLen);
+  },
+  nodeQuerySelectorAll(rootHandle: number, selector: string): number[] {
+    const data = encode(selector);
+    const outPtr = new BigUint64Array(1);
+    const outLen = new BigUint64Array(1);
+    const status = nativeLibrary.symbols.zig_dom_node_query_selector_all(rootHandle, ptr(data), data.length, ptr(outPtr), ptr(outLen));
+    assertStatus(status, "zig_dom_node_query_selector_all");
     return readHandleArrayFromOutParams(outPtr, outLen);
   },
   documentReset(documentHandle: number): void {

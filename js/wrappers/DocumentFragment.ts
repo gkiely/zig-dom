@@ -4,7 +4,7 @@ import { parseHtmlInto } from "./html-parser.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
-import { querySelectorAllInSubtree } from "./selector-engine.ts";
+import { canUseNativeSelector, querySelectorAllInSubtree } from "./selector-engine.ts";
 import type { Window } from "./Window.ts";
 
 export class DocumentFragment extends Node {
@@ -43,7 +43,12 @@ export class DocumentFragment extends Node {
     if (arguments.length === 0) {
       throw new TypeError("Failed to execute 'querySelectorAll': 1 argument required, but only 0 present.");
     }
-    const snapshot = querySelectorAllInSubtree(this, String(selector));
+    const normalizedSelector = String(selector);
+    const snapshot = canUseNativeSelector(normalizedSelector)
+      ? native.nodeQuerySelectorAll(this._handle, normalizedSelector)
+        .map((handle) => this._window.getNode(handle))
+        .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE))
+      : querySelectorAllInSubtree(this, normalizedSelector);
     return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
   }
 

@@ -1076,16 +1076,15 @@ export class Window extends EventTargetBase {
   collectChildren(parentHandle: number): Node[] {
     this.assertOpen();
 
-    const result: Node[] = [];
-    let cursor = native.nodeFirstChild(parentHandle);
-    while (cursor) {
-      const node = this.getNode(cursor);
+    const handles = native.nodeChildHandles(parentHandle);
+    const nodes: Node[] = [];
+    for (let index = 0; index < handles.length; index += 1) {
+      const node = this.getNode(handles[index] ?? 0);
       if (node) {
-        result.push(node);
+        nodes.push(node);
       }
-      cursor = native.nodeNextSibling(cursor);
     }
-    return result;
+    return nodes;
   }
 
   adoptSubtreeWrappers(root: Node): void {

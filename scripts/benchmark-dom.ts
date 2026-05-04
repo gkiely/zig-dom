@@ -552,6 +552,30 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
     }, QUERY_SAMPLE_COUNT);
   });
 
+  await withEnv("element_query_all_class_10k_ms", async (env) => {
+    return medianSample(() => {
+      env.reset();
+      const container = buildSelectorFixture(env.document);
+      return measureMetric(() => {
+        container.querySelectorAll(".item");
+      });
+    }, QUERY_SAMPLE_COUNT);
+  });
+
+  await withEnv("child_nodes_iterate_1k_ms", async (env) => {
+    return medianSample(() => {
+      env.reset();
+      const container = env.document.createElement("div");
+      for (let i = 0; i < SMALL_ELEMENT_COUNT; i += 1) {
+        container.appendChild(env.document.createElement("span"));
+      }
+      env.document.body.appendChild(container);
+      return measureMetric(() => {
+        Array.from(container.childNodes);
+      });
+    }, QUERY_SAMPLE_COUNT);
+  });
+
   await withEnv("inner_html_parse_ms", async (env) => {
     const container = env.document.createElement("div");
     env.document.body.appendChild(container);

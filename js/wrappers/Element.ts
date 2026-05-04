@@ -6,7 +6,7 @@ import { parseHtmlInto } from "./html-parser.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
-import { elementMatchesSelector, querySelectorAllInElement } from "./selector-engine.ts";
+import { canUseNativeSelector, elementMatchesSelector, querySelectorAllInElement } from "./selector-engine.ts";
 
 type AttributeEntry = { name: string; value: string };
 type AttributeMetadata = { namespaceURI: string | null; prefix: string | null; localName: string; qualifiedName: string };
@@ -1083,7 +1083,12 @@ export class Element extends Node {
     if (arguments.length === 0) {
       throw new TypeError("Failed to execute 'querySelectorAll': 1 argument required, but only 0 present.");
     }
-    const snapshot = querySelectorAllInElement(this, String(selector));
+    const normalizedSelector = String(selector);
+    const snapshot = canUseNativeSelector(normalizedSelector)
+      ? native.nodeQuerySelectorAll(this._handle, normalizedSelector)
+        .map((handle) => this._window.getNode(handle))
+        .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE))
+      : querySelectorAllInElement(this, normalizedSelector);
     return new NodeList(() => snapshot as unknown as Node[], { static: true }) as unknown as Element[];
   }
 

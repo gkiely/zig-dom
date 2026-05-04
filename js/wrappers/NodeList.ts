@@ -106,31 +106,41 @@ function createIndexedNodeListProxy(target: NodeList, readNodes: () => Node[]): 
 }
 
 Object.defineProperty(NodeList.prototype, "forEach", {
-  value: Array.prototype.forEach,
+  value: function(callback: (value: Node, index: number, parent: NodeList) => void, thisArg?: unknown): void {
+    this.toArray().forEach((value: Node, index: number) => callback.call(thisArg, value, index, this));
+  },
   configurable: true,
   writable: true
 });
 
 Object.defineProperty(NodeList.prototype, "keys", {
-  value: Array.prototype.keys,
+  value: function(): IterableIterator<number> {
+    return this.toArray().keys();
+  },
   configurable: true,
   writable: true
 });
 
 Object.defineProperty(NodeList.prototype, "values", {
-  value: Array.prototype.values,
+  value: function(): IterableIterator<Node> {
+    return this.toArray().values();
+  },
   configurable: true,
   writable: true
 });
 
 Object.defineProperty(NodeList.prototype, "entries", {
-  value: Array.prototype.entries,
+  value: function(): IterableIterator<[number, Node]> {
+    return this.toArray().entries();
+  },
   configurable: true,
   writable: true
 });
 
 Object.defineProperty(NodeList.prototype, Symbol.iterator, {
-  value: Array.prototype[Symbol.iterator],
+  value: function(): Iterator<Node> {
+    return this.values();
+  },
   configurable: true,
   writable: true
 });
