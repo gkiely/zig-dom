@@ -1183,7 +1183,8 @@ export class Element extends Node {
 
   removeAttribute(name: string): void {
     const key = this.#attributeKey(name);
-    const previousValue = this.getAttribute(key);
+    const shouldNotify = this._window.hasMutationObservers() || this._window.customElements.hasDefinitions;
+    const previousValue = shouldNotify ? this.getAttribute(key) : null;
     const removingPlainAttribute = this.#plainAttributeNames.has(key);
     const internalName = removingPlainAttribute ? key : this.#findAttributeByQualifiedName(key) ?? key;
     const displayName = this.#attributeDisplayName(internalName);
@@ -1202,7 +1203,9 @@ export class Element extends Node {
     this.#nonHtmlAttributes.delete(name);
     this.#nonHtmlAttributes.delete(internalName);
     this.#plainAttributeNames.delete(key);
-    this._window.notifyAttributeChanged(this, key, previousValue, null);
+    if (shouldNotify) {
+      this._window.notifyAttributeChanged(this, key, previousValue, null);
+    }
     if (key === "style" && !this.#syncingStyleAttribute && this.#style) {
       this.#syncingStyleAttribute = true;
       this.#style.cssText = "";
