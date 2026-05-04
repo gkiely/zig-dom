@@ -14,6 +14,11 @@ type DatasetShape = Record<string, string>;
 
 const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
 const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const EMPTY_ATTRIBUTE_NAMESPACE_MAP = new Map<string, string | null>();
+const EMPTY_ATTRIBUTE_METADATA_MAP = new Map<string, AttributeMetadata>();
+const EMPTY_NON_HTML_ATTRIBUTE_MAP = new Map<string, string>();
+const EMPTY_PLAIN_ATTRIBUTE_NAME_SET = new Set<string>();
 
 function dataAttributeToProperty(name: string): string {
   return name
@@ -26,6 +31,9 @@ function propertyToDataAttribute(name: string): string {
 }
 
 function asciiLowercase(value: string): string {
+  if (!/[A-Z]/.test(value)) {
+    return value;
+  }
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
@@ -268,14 +276,42 @@ export class Element extends Node {
   #classList: DOMTokenList | null = null;
   #datasetProxy: DatasetShape | null = null;
   #attributeCache: Map<string, string | null> | null = null;
-  #attributeNamespaces: Map<string, string | null> = new Map();
-  #attributeMetadata: Map<string, AttributeMetadata> = new Map();
-  #nonHtmlAttributes: Map<string, string> = new Map();
-  #plainAttributeNames: Set<string> = new Set();
+  #attributeNamespaces: Map<string, string | null> = EMPTY_ATTRIBUTE_NAMESPACE_MAP;
+  #attributeMetadata: Map<string, AttributeMetadata> = EMPTY_ATTRIBUTE_METADATA_MAP;
+  #nonHtmlAttributes: Map<string, string> = EMPTY_NON_HTML_ATTRIBUTE_MAP;
+  #plainAttributeNames: Set<string> = EMPTY_PLAIN_ATTRIBUTE_NAME_SET;
   #attributeSerial = 0;
 
   constructor(window: Node["_window"], handle: number, nodeType = Node.ELEMENT_NODE) {
     super(window, handle, nodeType);
+  }
+
+  #mutableAttributeNamespaces(): Map<string, string | null> {
+    if (this.#attributeNamespaces === EMPTY_ATTRIBUTE_NAMESPACE_MAP) {
+      this.#attributeNamespaces = new Map();
+    }
+    return this.#attributeNamespaces;
+  }
+
+  #mutableAttributeMetadata(): Map<string, AttributeMetadata> {
+    if (this.#attributeMetadata === EMPTY_ATTRIBUTE_METADATA_MAP) {
+      this.#attributeMetadata = new Map();
+    }
+    return this.#attributeMetadata;
+  }
+
+  #mutableNonHtmlAttributes(): Map<string, string> {
+    if (this.#nonHtmlAttributes === EMPTY_NON_HTML_ATTRIBUTE_MAP) {
+      this.#nonHtmlAttributes = new Map();
+    }
+    return this.#nonHtmlAttributes;
+  }
+
+  #mutablePlainAttributeNames(): Set<string> {
+    if (this.#plainAttributeNames === EMPTY_PLAIN_ATTRIBUTE_NAME_SET) {
+      this.#plainAttributeNames = new Set();
+    }
+    return this.#plainAttributeNames;
   }
 
   #attributeKey(name: string): string {
@@ -286,7 +322,11 @@ export class Element extends Node {
   }
 
   #isHtmlElement(): boolean {
-    return this.namespaceURI === "http://www.w3.org/1999/xhtml";
+    const metadata = this as unknown as { __namespaceURI?: string | null };
+    if (!("__namespaceURI" in metadata)) {
+      return true;
+    }
+    return metadata.__namespaceURI === HTML_NAMESPACE;
   }
 
   #attributeDisplayName(internalName: string): string {
@@ -787,14 +827,37 @@ export class Element extends Node {
     if (!isValidAttributeName(key)) {
       throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
     }
+
+    const canUsePlainHtmlFastPath =
+      this.#isHtmlElement() &&
+      this.#attributeMetadata.size === 0 &&
+      this.#nonHtmlAttributes.size === 0;
+
     const stringValue = String(value);
+
+    if (canUsePlainHtmlFastPath) {
+      const previousValue = this.#attributeCache?.has(key)
+        ? this.#attributeCache.get(key) ?? null
+        : null;
+      native.setAttribute(this._handle, key, stringValue);
+      this.#mutablePlainAttributeNames().add(key);
+      if (!this.#attributeCache) {
+        this.#attributeCache = new Map();
+      }
+      this.#attributeCache.set(key, stringValue);
+      if (this._window.hasMutationObservers() || this._window.customElements.hasDefinitions) {
+        this._window.notifyAttributeChanged(this, key, previousValue, stringValue);
+      }
+      return;
+    }
+
     const previousValue = this.#attributeCache?.has(key) || this.#plainAttributeNames.has(key) || this.#nonHtmlAttributes.size > 0
       ? this.getAttribute(key)
       : null;
     native.setAttribute(this._handle, key, stringValue);
     const existingInternalName = this.#findAttributeByQualifiedName(key);
     if (existingInternalName && this.#nonHtmlAttributes.has(existingInternalName)) {
-      this.#nonHtmlAttributes.set(existingInternalName, stringValue);
+      this.#mutableNonHtmlAttributes().set(existingInternalName, stringValue);
       if (!this.#attributeCache) {
         this.#attributeCache = new Map();
       }
@@ -803,19 +866,21 @@ export class Element extends Node {
       return;
     }
     if (!this.#isHtmlElement()) {
-      this.#nonHtmlAttributes.set(key, stringValue);
+      this.#mutableNonHtmlAttributes().set(key, stringValue);
     } else if (key !== name.toLowerCase()) {
-      this.#nonHtmlAttributes.set(key, stringValue);
+      this.#mutableNonHtmlAttributes().set(key, stringValue);
     }
     if (!this.#attributeNamespaces.has(key)) {
-      this.#attributeNamespaces.set(key, attributeNamespace(name));
+      this.#mutableAttributeNamespaces().set(key, attributeNamespace(name));
     }
-    this.#plainAttributeNames.add(key);
+    this.#mutablePlainAttributeNames().add(key);
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
     this.#attributeCache.set(key, stringValue);
-    this._window.notifyAttributeChanged(this, key, previousValue, stringValue);
+    if (this._window.hasMutationObservers() || this._window.customElements.hasDefinitions) {
+      this._window.notifyAttributeChanged(this, key, previousValue, stringValue);
+    }
   }
 
   setAttributeNS(namespace: string | null, qualifiedName: string, value: string): void {
@@ -835,9 +900,9 @@ export class Element extends Node {
     if (!this.#plainAttributeNames.has(this.#attributeKey(qualifiedName))) {
       native.setAttribute(this._handle, qualifiedName, value);
     }
-    this.#nonHtmlAttributes.set(key, value);
-    this.#attributeNamespaces.set(key, normalizedNamespace);
-    this.#attributeMetadata.set(key, {
+    this.#mutableNonHtmlAttributes().set(key, value);
+    this.#mutableAttributeNamespaces().set(key, normalizedNamespace);
+    this.#mutableAttributeMetadata().set(key, {
       qualifiedName,
       namespaceURI: normalizedNamespace,
       prefix: attributePrefix(qualifiedName),

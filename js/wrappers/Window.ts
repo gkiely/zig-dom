@@ -186,6 +186,10 @@ class WindowLocationImpl implements WindowLocation {
   }
 }
 
+function nodeIdFromHandle(handle: number): number {
+  return handle >>> 0;
+}
+
 export class Window extends EventTargetBase {
   readonly _nativeWindowHandle: number;
   readonly #documentHandle: number;
@@ -706,7 +710,7 @@ export class Window extends EventTargetBase {
     if (!handle) return null;
     this.assertOpen();
 
-    const nodeId = handle % 0x1_0000_0000;
+    const nodeId = nodeIdFromHandle(handle);
     const existing = this.#nodeCache[nodeId];
     if (existing) {
       return existing;
@@ -717,17 +721,28 @@ export class Window extends EventTargetBase {
     return this.#createNode(handle, kind, tagName, false);
   }
 
-  createKnownNode(handle: number, kind: number, options?: { tagName?: string; skipInitialStyleSync?: boolean }): Node | null {
+  createKnownNode(handle: number, kind: number, tagNameOrOptions?: string | { tagName?: string; skipInitialStyleSync?: boolean }, skipInitialStyleSync = false): Node | null {
     if (!handle) return null;
     this.assertOpen();
 
-    const nodeId = handle % 0x1_0000_0000;
+    const nodeId = nodeIdFromHandle(handle);
     const existing = this.#nodeCache[nodeId];
     if (existing) {
       return existing;
     }
 
-    return this.#createNode(handle, kind, options?.tagName, options?.skipInitialStyleSync ?? false);
+    const tagNameHint = typeof tagNameOrOptions === "string"
+      ? tagNameOrOptions
+      : tagNameOrOptions?.tagName;
+    const skipStyleSync = typeof tagNameOrOptions === "string"
+      ? skipInitialStyleSync
+      : tagNameOrOptions?.skipInitialStyleSync ?? false;
+
+    return this.#createNode(handle, kind, tagNameHint, skipStyleSync);
+  }
+
+  createFreshElementNode(handle: number, tagName: string, skipInitialStyleSync = false): Element {
+    return this.#createNode(handle, Node.ELEMENT_NODE, tagName, skipInitialStyleSync) as Element;
   }
 
   #createNode(handle: number, kind: number, tagNameHint: string | undefined, skipInitialStyleSync: boolean): Node {
@@ -740,26 +755,37 @@ export class Window extends EventTargetBase {
       case Node.ELEMENT_NODE: {
         const tagName = tagNameHint ?? native.nodeName(handle).toLowerCase();
         elementTagName = tagName;
-        if (tagName === "input") {
-          wrapped = new HTMLInputElement(this, handle, kind, skipInitialStyleSync);
-        } else if (tagName === "button") {
-          wrapped = new HTMLButtonElement(this, handle, kind, skipInitialStyleSync);
-        } else if (tagName === "form") {
-          wrapped = new HTMLFormElement(this, handle, kind, skipInitialStyleSync);
-        } else if (tagName === "label") {
-          wrapped = new HTMLLabelElement(this, handle, kind, skipInitialStyleSync);
-        } else if (tagName === "select") {
-          wrapped = new HTMLSelectElement(this, handle, kind, skipInitialStyleSync);
-        } else if (tagName === "option") {
-          wrapped = new HTMLOptionElement(this, handle, kind, skipInitialStyleSync);
-        } else if (tagName === "textarea") {
-          wrapped = new HTMLTextAreaElement(this, handle, kind, skipInitialStyleSync);
-        } else if (tagName === "span") {
-          wrapped = new HTMLSpanElement(this, handle, kind, skipInitialStyleSync);
-        } else if (tagName === "iframe") {
-          wrapped = new HTMLIFrameElement(this, handle, kind, skipInitialStyleSync);
-        } else {
-          wrapped = new HTMLElement(this, handle, kind, skipInitialStyleSync);
+        switch (tagName) {
+          case "input":
+            wrapped = new HTMLInputElement(this, handle, kind, skipInitialStyleSync);
+            break;
+          case "button":
+            wrapped = new HTMLButtonElement(this, handle, kind, skipInitialStyleSync);
+            break;
+          case "form":
+            wrapped = new HTMLFormElement(this, handle, kind, skipInitialStyleSync);
+            break;
+          case "label":
+            wrapped = new HTMLLabelElement(this, handle, kind, skipInitialStyleSync);
+            break;
+          case "select":
+            wrapped = new HTMLSelectElement(this, handle, kind, skipInitialStyleSync);
+            break;
+          case "option":
+            wrapped = new HTMLOptionElement(this, handle, kind, skipInitialStyleSync);
+            break;
+          case "textarea":
+            wrapped = new HTMLTextAreaElement(this, handle, kind, skipInitialStyleSync);
+            break;
+          case "span":
+            wrapped = new HTMLSpanElement(this, handle, kind, skipInitialStyleSync);
+            break;
+          case "iframe":
+            wrapped = new HTMLIFrameElement(this, handle, kind, skipInitialStyleSync);
+            break;
+          default:
+            wrapped = new HTMLElement(this, handle, kind, skipInitialStyleSync);
+            break;
         }
         break;
       }
@@ -783,7 +809,7 @@ export class Window extends EventTargetBase {
       this.upgradeElementInstance(wrapped as Element, elementTagName);
     }
 
-    const nodeId = handle % 0x1_0000_0000;
+    const nodeId = nodeIdFromHandle(handle);
     this.#nodeCache[nodeId] = wrapped;
     return wrapped;
   }

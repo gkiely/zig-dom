@@ -117,10 +117,18 @@ const EMPTY_BYTES = new Uint8Array(1);
 const ENCODE_CACHE_LIMIT = 256;
 const ENCODE_CACHE_MAX_INPUT_LENGTH = 64;
 const encodeCache = new Map<string, Uint8Array>();
+const HANDLE_OUT_SCRATCH = new BigUint64Array(1);
+const GET_ATTR_OUT_PTR = new BigUint64Array(1);
+const GET_ATTR_OUT_LEN = new BigUint64Array(1);
+const GET_ATTR_OUT_EXISTS = new Uint8Array(1);
 
-function encode(input: string): Uint8Array {
+function encode(input: string, shouldCache = true): Uint8Array {
   if (input.length === 0) {
     return EMPTY_BYTES;
+  }
+
+  if (!shouldCache) {
+    return encoder.encode(input);
   }
 
   const cached = encodeCache.get(input);
@@ -153,7 +161,8 @@ function readStringFromOutParams(addressRef: BigUint64Array, lengthRef: BigUint6
 }
 
 function createHandleOut(): BigUint64Array {
-  return new BigUint64Array(1);
+  HANDLE_OUT_SCRATCH[0] = 0n;
+  return HANDLE_OUT_SCRATCH;
 }
 
 function readHandle(out: BigUint64Array): number {
@@ -314,22 +323,22 @@ export const native = {
   },
   getAttribute(elementHandle: number, name: string): string | null {
     const key = encode(name);
-    const outPtr = new BigUint64Array(1);
-    const outLen = new BigUint64Array(1);
-    const outExists = new Uint8Array(1);
+    GET_ATTR_OUT_PTR[0] = 0n;
+    GET_ATTR_OUT_LEN[0] = 0n;
+    GET_ATTR_OUT_EXISTS[0] = 0;
     const status = nativeLibrary.symbols.zig_dom_element_get_attribute_ref(
       elementHandle,
       ptr(key),
       key.length,
-      ptr(outPtr),
-      ptr(outLen),
-      ptr(outExists)
+      ptr(GET_ATTR_OUT_PTR),
+      ptr(GET_ATTR_OUT_LEN),
+      ptr(GET_ATTR_OUT_EXISTS)
     );
     assertStatus(status, "zig_dom_element_get_attribute_ref");
-    if (outExists[0] === 0) return null;
+    if (GET_ATTR_OUT_EXISTS[0] === 0) return null;
 
-    const address = Number(outPtr[0]);
-    const length = Number(outLen[0]);
+    const address = Number(GET_ATTR_OUT_PTR[0]);
+    const length = Number(GET_ATTR_OUT_LEN[0]);
     if (address === 0 || length === 0) {
       return "";
     }
@@ -339,7 +348,7 @@ export const native = {
   },
   setAttribute(elementHandle: number, name: string, value: string): void {
     const key = encode(name);
-    const val = encode(value);
+    const val = encode(value, false);
     const status = nativeLibrary.symbols.zig_dom_element_set_attribute(elementHandle, ptr(key), key.length, ptr(val), val.length);
     assertStatus(status, "zig_dom_element_set_attribute");
   },

@@ -22,11 +22,11 @@ const Node = struct {
     attributes: std.ArrayListUnmanaged(Attribute),
 
     fn deinit(self: *Node) void {
-        c_allocator.free(self.name);
-        c_allocator.free(self.data);
+        freeOwned(self.name);
+        freeOwned(self.data);
         for (self.attributes.items) |attr| {
-            c_allocator.free(attr.name);
-            c_allocator.free(attr.value);
+            freeOwned(attr.name);
+            freeOwned(attr.value);
         }
         self.attributes.deinit(c_allocator);
     }
@@ -92,12 +92,27 @@ const DOC_POS_CONTAINED_BY: u32 = 0x10;
 const DOC_POS_IMPLEMENTATION_SPECIFIC: u32 = 0x20;
 
 const VERSION = "0.1.0\x00";
+const EMPTY_U8_STORAGE = [_]u8{};
+const EMPTY_U8_SLICE: []u8 = @constCast(EMPTY_U8_STORAGE[0..]);
+
+fn freeOwned(bytes: []u8) void {
+    if (bytes.len == 0 and bytes.ptr == EMPTY_U8_SLICE.ptr) {
+        return;
+    }
+    c_allocator.free(bytes);
+}
 
 fn makeOwned(bytes: []const u8) ![]u8 {
+    if (bytes.len == 0) {
+        return EMPTY_U8_SLICE;
+    }
     return try c_allocator.dupe(u8, bytes);
 }
 
 fn makeOwnedLower(bytes: []const u8) ![]u8 {
+    if (bytes.len == 0) {
+        return EMPTY_U8_SLICE;
+    }
     const copy = try c_allocator.dupe(u8, bytes);
     var needs_lower = false;
     for (copy) |item| {
@@ -346,7 +361,7 @@ fn replaceChild(window: *Window, parent_handle: u64, new_child_handle: u64, old_
 }
 
 fn setNodeData(node: *Node, data: []const u8) !void {
-    c_allocator.free(node.data);
+    freeOwned(node.data);
     node.data = try makeOwned(data);
 }
 
@@ -361,7 +376,7 @@ fn attributeIndex(node: *Node, name: []const u8) ?usize {
 
 fn setAttribute(node: *Node, name: []const u8, value: []const u8) !void {
     if (attributeIndex(node, name)) |idx| {
-        c_allocator.free(node.attributes.items[idx].value);
+        freeOwned(node.attributes.items[idx].value);
         node.attributes.items[idx].value = try makeOwned(value);
         return;
     }
@@ -375,8 +390,8 @@ fn setAttribute(node: *Node, name: []const u8, value: []const u8) !void {
 fn removeAttribute(node: *Node, name: []const u8) bool {
     const idx = attributeIndex(node, name) orelse return false;
     const attr = node.attributes.items[idx];
-    c_allocator.free(attr.name);
-    c_allocator.free(attr.value);
+    freeOwned(attr.name);
+    freeOwned(attr.value);
     _ = node.attributes.swapRemove(idx);
     return true;
 }
@@ -1018,10 +1033,8 @@ pub export fn zig_dom_node_replace_child(parent: u64, new_child: u64, old_child:
 pub export fn zig_dom_document_create_element(document: u64, name_ptr: [*]const u8, name_len: usize, out_handle: *u64) u32 {
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
-    const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
-    if (record.kind != .document) return STATUS_INVALID_ARGUMENT;
 
-    out_handle.* = createNode(window, .element, name_ptr[0..name_len], "", document, true) catch return STATUS_OOM;
+    out_handle.* = createNode(window, .element, name_ptr[0..name_len], "", document, false) catch return STATUS_OOM;
     return STATUS_OK;
 }
 

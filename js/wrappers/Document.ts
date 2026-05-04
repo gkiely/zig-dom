@@ -16,7 +16,8 @@ const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
 const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-const MATHML_NAMESPACE = "http://www.w3.org/1998/Math/MathML";
+const ELEMENT_NAME_VALIDATION_CACHE_LIMIT = 256;
+const elementNameValidationCache = new Map<string, boolean>();
 
 type DOMImplementationShape = {
   createDocument: (namespace: string | null, qualifiedName?: string | null, doctype?: DocumentType | null) => Document;
@@ -61,6 +62,28 @@ function isValidElementName(value: string): boolean {
     }
     index += codePoint > 0xffff ? 2 : 1;
   }
+  return true;
+}
+
+function isFastAsciiElementName(value: string): boolean {
+  if (value.length === 0) {
+    return false;
+  }
+
+  const first = value.charCodeAt(0);
+  if (first < 0x61 || first > 0x7a) {
+    return false;
+  }
+
+  for (let index = 1; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    const isLower = code >= 0x61 && code <= 0x7a;
+    const isDigit = code >= 0x30 && code <= 0x39;
+    if (!isLower && !isDigit && code !== 0x2e && code !== 0x5f && code !== 0x3a && code !== 0x2d) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -451,25 +474,38 @@ export class Document extends Node {
   createElement(tagName: string): Element {
     this._window.assertOpen();
     const isXMLDocument = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument === true;
+    const inputTagName = typeof tagName === "string" ? tagName : String(tagName);
     const normalizedTagName = isXMLDocument
-      ? String(tagName)
-      : asciiLowercase(String(tagName));
-    if (!isValidElementName(normalizedTagName)) {
+      ? inputTagName
+      : asciiLowercase(inputTagName);
+    let isValid = false;
+    if (!isXMLDocument && isFastAsciiElementName(normalizedTagName)) {
+      isValid = true;
+    } else {
+      const cached = elementNameValidationCache.get(normalizedTagName);
+      if (cached != null) {
+        isValid = cached;
+      } else {
+        isValid = isValidElementName(normalizedTagName);
+        if (elementNameValidationCache.size >= ELEMENT_NAME_VALIDATION_CACHE_LIMIT) {
+          elementNameValidationCache.clear();
+        }
+        elementNameValidationCache.set(normalizedTagName, isValid);
+      }
+    }
+    if (!isValid) {
       throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
     }
     const handle = native.createElement(this._handle, normalizedTagName);
-    const element = this._window.createKnownNode(handle, Node.ELEMENT_NODE, {
-      tagName: normalizedTagName,
-      skipInitialStyleSync: true
-    }) as Element;
-    const mutable = element as unknown as {
-      __namespaceURI?: string | null;
-      __prefix?: string | null;
-      __localName?: string;
-      __isXMLNode?: boolean;
-    };
-    mutable.__localName = normalizedTagName;
+    const element = this._window.createFreshElementNode(handle, normalizedTagName, true) as Element;
     if (isXMLDocument) {
+      const mutable = element as unknown as {
+        __namespaceURI?: string | null;
+        __prefix?: string | null;
+        __localName?: string;
+        __isXMLNode?: boolean;
+      };
+      mutable.__localName = normalizedTagName;
       mutable.__namespaceURI = (this as unknown as { __contentType?: string }).__contentType === "application/xhtml+xml" ? HTML_NAMESPACE : null;
       mutable.__prefix = null;
       mutable.__isXMLNode = true;

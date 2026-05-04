@@ -32,25 +32,25 @@ export class Node extends EventTargetBase {
   readonly #nodeType: number;
   #childNodesCache: NodeList | null = null;
 
-  readonly ELEMENT_NODE = Node.ELEMENT_NODE;
-  readonly ATTRIBUTE_NODE = Node.ATTRIBUTE_NODE;
-  readonly TEXT_NODE = Node.TEXT_NODE;
-  readonly CDATA_SECTION_NODE = Node.CDATA_SECTION_NODE;
-  readonly ENTITY_REFERENCE_NODE = Node.ENTITY_REFERENCE_NODE;
-  readonly ENTITY_NODE = Node.ENTITY_NODE;
-  readonly PROCESSING_INSTRUCTION_NODE = Node.PROCESSING_INSTRUCTION_NODE;
-  readonly COMMENT_NODE = Node.COMMENT_NODE;
-  readonly DOCUMENT_NODE = Node.DOCUMENT_NODE;
-  readonly DOCUMENT_TYPE_NODE = Node.DOCUMENT_TYPE_NODE;
-  readonly DOCUMENT_FRAGMENT_NODE = Node.DOCUMENT_FRAGMENT_NODE;
-  readonly NOTATION_NODE = Node.NOTATION_NODE;
+  declare readonly ELEMENT_NODE: number;
+  declare readonly ATTRIBUTE_NODE: number;
+  declare readonly TEXT_NODE: number;
+  declare readonly CDATA_SECTION_NODE: number;
+  declare readonly ENTITY_REFERENCE_NODE: number;
+  declare readonly ENTITY_NODE: number;
+  declare readonly PROCESSING_INSTRUCTION_NODE: number;
+  declare readonly COMMENT_NODE: number;
+  declare readonly DOCUMENT_NODE: number;
+  declare readonly DOCUMENT_TYPE_NODE: number;
+  declare readonly DOCUMENT_FRAGMENT_NODE: number;
+  declare readonly NOTATION_NODE: number;
 
-  readonly DOCUMENT_POSITION_DISCONNECTED = Node.DOCUMENT_POSITION_DISCONNECTED;
-  readonly DOCUMENT_POSITION_PRECEDING = Node.DOCUMENT_POSITION_PRECEDING;
-  readonly DOCUMENT_POSITION_FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
-  readonly DOCUMENT_POSITION_CONTAINS = Node.DOCUMENT_POSITION_CONTAINS;
-  readonly DOCUMENT_POSITION_CONTAINED_BY = Node.DOCUMENT_POSITION_CONTAINED_BY;
-  readonly DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC;
+  declare readonly DOCUMENT_POSITION_DISCONNECTED: number;
+  declare readonly DOCUMENT_POSITION_PRECEDING: number;
+  declare readonly DOCUMENT_POSITION_FOLLOWING: number;
+  declare readonly DOCUMENT_POSITION_CONTAINS: number;
+  declare readonly DOCUMENT_POSITION_CONTAINED_BY: number;
+  declare readonly DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: number;
 
   constructor(window: Window, handle: number, nodeType?: number) {
     super();
@@ -213,7 +213,13 @@ export class Node extends EventTargetBase {
 
   appendChild<TNode extends Node>(child: TNode): TNode {
     this._window.assertOpen();
-    validatePreInsertion(this, child, null);
+    const canSkipPreInsertionValidation =
+      this.#nodeType === Node.ELEMENT_NODE &&
+      child.#nodeType === Node.ELEMENT_NODE &&
+      child._window === this._window;
+    if (!canSkipPreInsertionValidation) {
+      validatePreInsertion(this, child, null);
+    }
 
     if (child.#nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
       while (child.firstChild) {
@@ -227,10 +233,15 @@ export class Node extends EventTargetBase {
     }
 
     const trackMutations = this._window.hasMutationObservers();
-    if (!trackMutations && !this._window.customElements.hasDefinitions) {
+    const hasCustomElements = this._window.customElements.hasDefinitions;
+    if (!trackMutations && !hasCustomElements) {
       native.appendChild(this._handle, child._handle);
-      scheduleIFrameLoadIfNeeded(child);
-      refreshDocumentElementFlag(this);
+      if (child instanceof this._window.HTMLIFrameElement) {
+        scheduleIFrameLoadIfNeeded(child);
+      }
+      if (this.#nodeType === Node.DOCUMENT_NODE) {
+        refreshDocumentElementFlag(this);
+      }
       return child;
     }
 
@@ -247,9 +258,13 @@ export class Node extends EventTargetBase {
       }
     }
 
-    if (!this._window.customElements.hasDefinitions) {
-      scheduleIFrameLoadIfNeeded(child);
-      refreshDocumentElementFlag(this);
+    if (!hasCustomElements) {
+      if (child instanceof this._window.HTMLIFrameElement) {
+        scheduleIFrameLoadIfNeeded(child);
+      }
+      if (this.#nodeType === Node.DOCUMENT_NODE) {
+        refreshDocumentElementFlag(this);
+      }
       return child;
     }
 
@@ -263,8 +278,12 @@ export class Node extends EventTargetBase {
       this._window.notifyConnectedSubtree(child);
     }
 
-    scheduleIFrameLoadIfNeeded(child);
-    refreshDocumentElementFlag(this);
+    if (child instanceof this._window.HTMLIFrameElement) {
+      scheduleIFrameLoadIfNeeded(child);
+    }
+    if (this.#nodeType === Node.DOCUMENT_NODE) {
+      refreshDocumentElementFlag(this);
+    }
     return child;
   }
 
@@ -1410,21 +1429,16 @@ function isEqualDocumentNode(left: Node, right: Node): boolean {
 }
 
 function scheduleIFrameLoadIfNeeded(node: Node): void {
-  if (node.nodeType !== Node.ELEMENT_NODE) {
+  if (!(node instanceof node._window.HTMLIFrameElement)) {
     return;
   }
 
   const elementLike = node as unknown as {
-    tagName?: string;
     dispatchEvent?: (event: Event) => boolean;
     onload?: ((event: Event) => void) | null;
     hasAttribute?: (name: string) => boolean;
     __pendingInitialLoadEvent?: boolean;
   };
-
-  if ((elementLike.tagName ?? "").toLowerCase() !== "iframe") {
-    return;
-  }
 
   if (elementLike.__pendingInitialLoadEvent) {
     return;
