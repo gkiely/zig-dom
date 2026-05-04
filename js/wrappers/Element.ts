@@ -32,6 +32,14 @@ function splitAsciiWhitespace(value: string): string[] {
   return value.match(/[^\t\n\f\r ]+/g) ?? [];
 }
 
+function isValidAttributeName(value: string): boolean {
+  return value.length > 0 && !/[\0\t\n\f\r />=]/.test(value);
+}
+
+function isValidNamespacePrefix(value: string): boolean {
+  return value.length > 0 && !/[\0\t\n\f\r />:]/.test(value);
+}
+
 class DOMTokenList {
   constructor(private readonly element: Element, private readonly attributeName: string) {
     return new Proxy(this, {
@@ -718,6 +726,9 @@ export class Element extends Node {
 
   setAttribute(name: string, value: string): void {
     const key = this.#attributeKey(name);
+    if (!isValidAttributeName(key)) {
+      throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+    }
     const previousValue = this.getAttribute(key);
     native.setAttribute(this._handle, key, value);
     const existingInternalName = this.#findAttributeByQualifiedName(key);
@@ -747,6 +758,12 @@ export class Element extends Node {
   }
 
   setAttributeNS(namespace: string | null, qualifiedName: string, value: string): void {
+    const separator = qualifiedName.indexOf(":");
+    const prefix = separator >= 0 ? qualifiedName.slice(0, separator) : null;
+    const validationLocalName = separator >= 0 ? qualifiedName.slice(separator + 1) : qualifiedName;
+    if (!isValidAttributeName(validationLocalName) || qualifiedName.endsWith(":") || (separator >= 0 && !isValidNamespacePrefix(prefix ?? ""))) {
+      throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+    }
     const normalizedNamespace = namespace === "" ? null : namespace;
     const localName = attributeLocalName(qualifiedName);
     const previousValue = this.getAttributeNS(normalizedNamespace, localName);
@@ -873,6 +890,9 @@ export class Element extends Node {
   }
 
   toggleAttribute(name: string, force?: boolean): boolean {
+    if (!isValidAttributeName(this.#attributeKey(name))) {
+      throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+    }
     const exists = this.hasAttribute(name);
     if (force === true || (!exists && force !== false)) {
       this.setAttribute(name, "");

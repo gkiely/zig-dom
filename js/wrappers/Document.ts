@@ -27,30 +27,57 @@ function splitAsciiWhitespace(value: string): string[] {
   return value.match(/[^\t\n\f\r ]+/g) ?? [];
 }
 
-function isValidXmlName(value: string): boolean {
-  return value.length > 0;
+function isValidElementName(value: string): boolean {
+  if (value.length === 0) {
+    return false;
+  }
+
+    const first = value.codePointAt(0);
+    if (!(first != null && ((first >= 0x41 && first <= 0x5a) || (first >= 0x61 && first <= 0x7a) || first === 0x3a || first === 0x5f || first >= 0x80))) {
+      return false;
+    }
+
+  if (first >= 0x41 && first <= 0x7a && (first <= 0x5a || first >= 0x61)) {
+    return !/[^\s\S]|\0|[\t\n\f\r />]/.test(value);
+  }
+
+  for (let index = first > 0xffff ? 2 : 1; index < value.length;) {
+    const codePoint = value.codePointAt(index);
+    if (codePoint == null || !((codePoint >= 0x41 && codePoint <= 0x5a) || (codePoint >= 0x61 && codePoint <= 0x7a) || (codePoint >= 0x30 && codePoint <= 0x39) || codePoint === 0x2d || codePoint === 0x2e || codePoint === 0x3a || codePoint === 0x5f || codePoint >= 0x80)) {
+      return false;
+    }
+    index += codePoint > 0xffff ? 2 : 1;
+  }
+  return true;
+}
+
+function isValidAttributeName(value: string): boolean {
+  return value.length > 0 && !/[\0\t\n\f\r />=]/.test(value);
+}
+
+function isValidNamespacePrefix(value: string): boolean {
+  return value.length > 0 && !/[\0\t\n\f\r />:]/.test(value);
+}
+
+function isValidDoctypeName(value: string): boolean {
+  return !/[\0\t\n\f\r >]/.test(value);
 }
 
 function validateQualifiedName(namespace: string | null, qualifiedName: string): void {
-  if (!isValidXmlName(qualifiedName) || qualifiedName.endsWith(":")) {
+  if (qualifiedName.length === 0 || qualifiedName.endsWith(":")) {
     throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
   }
 
   const separator = qualifiedName.indexOf(":");
   const prefix = separator >= 0 ? qualifiedName.slice(0, separator) : null;
   const localName = separator >= 0 ? qualifiedName.slice(separator + 1) : qualifiedName;
-  if (qualifiedName.startsWith(":")) {
+  if (separator < 0 && !isValidElementName(qualifiedName)) {
     throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
   }
   if (separator >= 0 && namespace == null) {
     throw new ZigDOMException("The namespace is invalid.", "NamespaceError", 14);
   }
-  const first = separator >= 0 ? localName[0] ?? "" : qualifiedName[0] ?? "";
-  const invalidFirst = separator >= 0 ? /^[0-9.-]$/.test(first) : /^[0-9.:-]$/.test(first);
-  if (invalidFirst || /^[}:<]|\s|\^|>/.test(qualifiedName)) {
-    throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
-  }
-  if (separator >= 0 && /[{}~'!@#$%&*()+=[\]\\/;`<>, "\t\n\f\r]/.test(localName)) {
+  if (separator >= 0 && (!isValidNamespacePrefix(prefix ?? "") || !isValidElementName(localName))) {
     throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
   }
   if (prefix === "xml" && namespace !== XML_NAMESPACE) {
@@ -350,9 +377,9 @@ export class Document extends Node {
 
     const createDocumentType = (qualifiedName: string, publicId = "", systemId = ""): DocumentType => {
       const name = String(qualifiedName);
-      if (/>|\s/.test(name)) {
-        throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
-      }
+    if (!isValidDoctypeName(name)) {
+      throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+    }
       return createSyntheticDocumentType(ownerDocument, name, String(publicId), String(systemId));
     };
 
@@ -444,6 +471,9 @@ export class Document extends Node {
     const normalizedTagName = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument
       ? String(tagName)
       : asciiLowercase(String(tagName));
+    if (!isValidElementName(normalizedTagName)) {
+      throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
+    }
     const handle = native.createElement(this._handle, normalizedTagName);
     const element = this._window.createKnownNode(handle, Node.ELEMENT_NODE, {
       tagName: normalizedTagName,
@@ -484,7 +514,7 @@ export class Document extends Node {
 
   createAttribute(name: string): Attr {
     const qualifiedName = this.contentType === "text/html" ? asciiLowercase(String(name)) : String(name);
-    if (!isValidXmlName(qualifiedName)) {
+    if (!isValidAttributeName(qualifiedName)) {
       throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
     }
     return createSyntheticAttr(this, qualifiedName, null);
@@ -492,7 +522,10 @@ export class Document extends Node {
 
   createAttributeNS(namespace: string | null, qualifiedName: string): Attr {
     const name = String(qualifiedName);
-    if (!isValidXmlName(name) || name.endsWith(":")) {
+    const separator = name.indexOf(":");
+    const prefix = separator >= 0 ? name.slice(0, separator) : null;
+    const localName = separator >= 0 ? name.slice(separator + 1) : name;
+    if (!isValidAttributeName(localName) || name.endsWith(":") || (separator >= 0 && !isValidNamespacePrefix(prefix ?? ""))) {
       throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
     }
     return createSyntheticAttr(this, name, namespace === "" ? null : namespace);
