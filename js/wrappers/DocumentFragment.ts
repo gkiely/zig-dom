@@ -16,6 +16,22 @@ export class DocumentFragment extends Node {
     return new HTMLCollection(() => this.childNodes.toArray().filter((node) => node.nodeType === Node.ELEMENT_NODE) as Element[]);
   }
 
+  get firstElementChild(): Element | null {
+    return this.children.item(0);
+  }
+
+  get lastElementChild(): Element | null {
+    const children = this.children;
+    if (children.length === 0) {
+      return null;
+    }
+    return children.item(children.length - 1);
+  }
+
+  get childElementCount(): number {
+    return this.children.length;
+  }
+
   get innerHTML(): string {
     return this.childNodes
       .toArray()
@@ -24,10 +40,6 @@ export class DocumentFragment extends Node {
   }
 
   set innerHTML(value: string) {
-    if (!this._window._hasMutationObservers && !this._window._hasCustomElementDefinitions) {
-      native.setInnerHTML(this._handle, String(value));
-      return;
-    }
     this.replaceChildren();
     parseHtmlInto(this, value);
   }

@@ -1,6 +1,7 @@
 import { CharacterData } from "./CharacterData.ts";
 import { ZigDOMException } from "./DOMException.ts";
 import { Node } from "./Node.ts";
+import { notifySplitTextMutation } from "./Range.ts";
 import type { Window } from "./Window.ts";
 
 export class Text extends CharacterData {
@@ -14,9 +15,12 @@ export class Text extends CharacterData {
     }
 
     const original = this.data;
+    const originalLength = original.length;
     const head = original.slice(0, offset);
     const tail = original.slice(offset);
-    this.data = head;
+    const parent = this.parentNode;
+    const oldIndex = parent ? parent.childNodes.toArray().indexOf(this) : -1;
+    this._setTextContentWithoutRangeNotification(head);
 
     const document = this.ownerDocument;
     if (!document) {
@@ -24,9 +28,11 @@ export class Text extends CharacterData {
     }
 
     const sibling = document.createTextNode(tail) as Text;
-    if (this.parentNode) {
-      this.parentNode.insertBefore(sibling, this.nextSibling);
+    if (parent) {
+      parent.insertBefore(sibling, this.nextSibling);
     }
+
+    notifySplitTextMutation(this, sibling, offset, originalLength, parent, oldIndex);
 
     return sibling;
   }

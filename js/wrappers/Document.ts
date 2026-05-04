@@ -516,10 +516,7 @@ export class Document extends Node {
   }
 
   createRange(): Range {
-    const range = new Range();
-    range.setStart(this, 0);
-    range.setEnd(this, 0);
-    return range;
+    return new this._window.Range();
   }
 
   createElement(tagName: string): Element {

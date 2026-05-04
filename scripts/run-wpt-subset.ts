@@ -278,7 +278,7 @@ function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string)
         continue;
       }
       const sourcePath = resolveScriptPath(entryFile, srcValue, wptRootPath);
-      scripts.push(readText(sourcePath) + rangeCommonGlobalExportScript(sourcePath));
+      scripts.push(rewriteRangeEval(sourcePath, readText(sourcePath)) + rangeCommonGlobalExportScript(sourcePath));
       continue;
     }
 
@@ -291,9 +291,13 @@ function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string)
 }
 
 function rewriteRangeEval(entryFile: string, source: string): string {
-  return entryFile.includes("/dom/ranges/")
-    ? source.replace(/\beval\s*\(/g, "rangeEval(")
-    : source;
+  if (!entryFile.includes("/dom/ranges/")) {
+    return source;
+  }
+
+  return source
+    .replace(/\beval\s*\(/g, "rangeEval(")
+    .replace(/\bmap\s*\(\s*eval\s*\)/g, "map(rangeEval)");
 }
 
 function rangeCommonGlobalExportScript(sourcePath: string): string {
@@ -363,7 +367,7 @@ window.rangeEval = function(source) {
 
 function stripScriptTags(html: string): string {
   const masked = maskTemplateBlocks(html);
-  const stripped = masked.masked.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const stripped = masked.masked.replace(/<script\b([^>]*)>[\s\S]*?<\/script>/gi, (_match, attrs: string) => `<script${attrs}></script>`);
   return unmaskTemplateBlocks(stripped, masked.templates);
 }
 
@@ -408,12 +412,31 @@ function extractHeadAndBodyMarkup(html: string): { head: string; body: string; b
     .replace(/<body[^>]*>/gi, "")
     .replace(/<\/body>/gi, "");
 
+  const headBlocks = fallbackBody.match(/<(title|style)\b[^>]*>[\s\S]*?<\/\1>/gi) ?? [];
+  const headVoids = fallbackBody.match(/<(?:base|link|meta)\b[^>]*>/gi) ?? [];
+  const fallbackHead = [...headBlocks, ...headVoids].join("");
+  const fallbackBodyContent = fallbackBody
+    .replace(/<(title|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
+    .replace(/<(?:base|link|meta)\b[^>]*>/gi, "");
+
   return {
-    head: headMatch?.[1] ?? "",
-    body: fallbackBody,
+    head: headMatch?.[1] ?? fallbackHead,
+    body: fallbackBodyContent,
     bodyAttributes: bodyStartMatch?.[1] ?? "",
     htmlAttributes: htmlStartMatch?.[1] ?? ""
   };
+}
+
+function ensureHeadPlaceholder(document: Window["document"], sourceHeadMarkup: string): void {
+  if (sourceHeadMarkup.trim().length === 0) {
+    return;
+  }
+
+  if (document.head.childNodes.length > 0) {
+    return;
+  }
+
+  document.head.appendChild(document.createComment("head-placeholder"));
 }
 
 function applyAttributeMarkup(element: { setAttribute(name: string, value: string): void }, source: string): void {
@@ -556,6 +579,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     }
     applyAttributeMarkup(frameDocument.documentElement, frameMarkup.htmlAttributes);
     frameDocument.head.innerHTML = frameMarkup.head;
+    ensureHeadPlaceholder(frameDocument, frameMarkup.head);
     applyAttributeMarkup(frameDocument.body, frameMarkup.bodyAttributes);
     frameDocument.body.innerHTML = frameMarkup.body;
     if (frameWindow) {
@@ -594,6 +618,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   const initialMarkup = extractHeadAndBodyMarkup(html);
   applyAttributeMarkup(window.document.documentElement, initialMarkup.htmlAttributes);
   window.document.head.innerHTML = initialMarkup.head;
+  ensureHeadPlaceholder(window.document, initialMarkup.head);
   applyAttributeMarkup(window.document.body, initialMarkup.bodyAttributes);
   window.document.body.innerHTML = initialMarkup.body;
   for (const frame of window.document.querySelectorAll("iframe") as unknown as Array<{
@@ -622,11 +647,14 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
           durationMs: performance.now() - start
         });
       } catch (error) {
+        const detail = error instanceof Error
+          ? (error.stack ? `${error.message}\n${error.stack}` : error.message)
+          : String(error);
         results.push({
           file: fileId,
           name,
           status: "fail",
-          message: error instanceof Error ? error.message : String(error),
+          message: detail,
           durationMs: performance.now() - start
         });
       }
@@ -1067,6 +1095,8 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
       syntaxerr: 12,
       invalidstateerror: 11,
       invalidstateerr: 11,
+      notsupportederror: 9,
+      notsupportederr: 9,
       invalidnodetypeerror: 24,
       invalidnodetypeerr: 24
     };
@@ -1167,6 +1197,10 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   context.console = console;
   context.setTimeout = setTimeout;
   context.clearTimeout = clearTimeout;
+  context.addEventListener = window.addEventListener.bind(window);
+  context.removeEventListener = window.removeEventListener.bind(window);
+  context.dispatchEvent = window.dispatchEvent.bind(window);
+  context.getSelection = window.getSelection.bind(window);
   context.requestAnimationFrame = window.requestAnimationFrame.bind(window);
   context.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
   context.Promise = Promise;

@@ -146,21 +146,15 @@
       "owner": "compat"
     },
     {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-compareBoundaryPoints.html",
+      "subtest": "__all__",
+      "reason": "Range boundary comparison behavior is incomplete",
+      "owner": "compat"
+    },
+    {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-comparePoint.html",
       "subtest": "__all__",
-      "reason": "Range boundary traversal semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-comparePoint-2.html",
-      "subtest": "__all__",
-      "reason": "Range comparePoint argument validation is incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-constructor.html",
-      "subtest": "__all__",
-      "reason": "Range constructor initialization is incomplete",
+      "reason": "Range comparePoint behavior is incomplete",
       "owner": "compat"
     },
     {
@@ -194,12 +188,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-in-shadow-after-the-shadow-removed.html",
-      "subtest": "__all__",
-      "reason": "Range behavior across removed shadow roots is incomplete",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-insertNode.html",
       "subtest": "__all__",
       "reason": "Range insertNode behavior is incomplete",
@@ -212,41 +200,11 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode-2.html",
-      "subtest": "__all__",
-      "reason": "Range intersectsNode edge behavior is incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode-binding.html",
-      "subtest": "__all__",
-      "reason": "Range intersectsNode WebIDL binding behavior is incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode-shadow.html",
-      "subtest": "__all__",
-      "reason": "Range intersectsNode shadow-tree behavior is incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode.html",
-      "subtest": "__all__",
-      "reason": "Range intersectsNode behavior is incomplete",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/observable/tentative/idlharness.html",
       "subtest": "__all__",
       "reason": "Tentative Observable DOM coverage is outside the frontend DOM compatibility target",
       "owner": "compat",
       "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-adopt-test.html",
-      "subtest": "__all__",
-      "reason": "Range adoption/collapse behavior is incomplete",
-      "owner": "compat"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-cloneContents.html",
@@ -261,33 +219,15 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-cloneRange.html",
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-intersectsNode.html",
       "subtest": "__all__",
-      "reason": "Range cloneRange test harness helper integration is incomplete",
+      "reason": "Range intersectsNode behavior is incomplete",
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-collapse.html",
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-isPointInRange.html",
       "subtest": "__all__",
-      "reason": "Range collapse test harness helper integration is incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-compareBoundaryPoints.html",
-      "subtest": "__all__",
-      "reason": "Range.compareBoundaryPoints is not implemented yet",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-set.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-dataChange.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
+      "reason": "Range isPointInRange behavior is incomplete",
       "owner": "compat"
     },
     {
@@ -297,69 +237,15 @@
       "owner": "compat"
     },
     {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-surroundContents.html",
+      "subtest": "__timeout__",
+      "reason": "1s timeout budget in keep-going loop",
+      "owner": "compat"
+    },
+    {
       "file": ".wpt-cache/web-platform-tests/dom/traversal/NodeIterator.html",
       "subtest": "__all__",
       "reason": "Traversal APIs (NodeIterator/TreeWalker/NodeFilter) are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-isPointInRange.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceData.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-deleteData.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendData.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertData.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-selectNode.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-splitText.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertBefore.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendChild.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceChild.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
       "owner": "compat"
     },
     {
@@ -376,23 +262,11 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-removeChild.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-auto-disconnect.html",
       "subtest": "__all__",
       "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
       "owner": "compat",
       "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/StaticRange-constructor.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/tentative/OpaqueRange-geometry-multiline-and-mutations.html",
@@ -592,12 +466,6 @@
       "reason": "Tentative OpaqueRange coverage is outside the frontend DOM compatibility target",
       "owner": "compat",
       "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-stringifier.html",
-      "subtest": "__all__",
-      "reason": "Range mutation and boundary semantics are incomplete",
-      "owner": "compat"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/abort/abort-signal-timeout.html",
@@ -1694,30 +1562,6 @@
       "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
       "owner": "compat",
       "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-attributes.html",
-      "subtest": "test",
-      "reason": "Legacy Range.detach() coverage is intentionally skipped",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-commonAncestorContainer-2.html",
-      "subtest": "Detached Range",
-      "reason": "Legacy Range.detach() coverage is intentionally skipped",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-commonAncestorContainer.html",
-      "subtest": "0: range [detached]",
-      "reason": "Legacy Range.detach() coverage is intentionally skipped",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-detach.html",
-      "subtest": "test",
-      "reason": "Legacy Range.detach() coverage is intentionally skipped",
-      "owner": "compat"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches-namespaced-elements.html",

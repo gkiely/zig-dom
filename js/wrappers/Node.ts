@@ -6,6 +6,12 @@ import { Event, EventTargetBase } from "./Event.ts";
 import { NodeList } from "./NodeList.ts";
 import type { Window } from "./Window.ts";
 
+type RangeMutationHooks = {
+  hasTrackedRanges?: () => boolean;
+  notifyNodeRemovalMutation?: (removedNode: Node, oldParent: Node, oldIndex: number) => void;
+  notifyNodeInsertionMutation?: (insertedNode: Node, newParent: Node, newIndex: number) => void;
+};
+
 export class Node extends EventTargetBase {
   static readonly ELEMENT_NODE = 1;
   static readonly ATTRIBUTE_NODE = 2;
@@ -255,10 +261,15 @@ export class Node extends EventTargetBase {
       node = adoptForeignNodeForParent(this, node);
     }
 
+    const rangeHooks = getActiveRangeMutationHooks();
+    const rangeOldParent = rangeHooks ? node.parentNode : null;
+    const rangeOldIndex = rangeHooks && rangeOldParent ? rangeOldParent.childNodes.toArray().indexOf(node) : -1;
+
     const trackMutations = this._window._hasMutationObservers;
     const hasCustomElementConnectionCallbacks = this._window._hasCustomElementConnectionCallbacks;
     if (!trackMutations && !hasCustomElementConnectionCallbacks) {
       native.appendChild(this._handle, node._handle);
+      applyRangeMoveMutation(rangeHooks, node, this, rangeOldParent, rangeOldIndex);
       if (isIFrameElement(node)) {
         scheduleIFrameLoad(node);
       }
@@ -273,6 +284,7 @@ export class Node extends EventTargetBase {
     const nextSibling = trackMutations ? node.nextSibling : null;
     const wasConnected = this._window.isConnectedNode(node);
     native.appendChildInWindow(this._window._nativeWindowHandle, this._handle, node._handle);
+    applyRangeMoveMutation(rangeHooks, node, this, rangeOldParent, rangeOldIndex);
 
     if (trackMutations) {
       this._window.notifyChildListMutation(this, [node], [], node.previousSibling, node.nextSibling);
@@ -458,9 +470,14 @@ export class Node extends EventTargetBase {
       childToInsert = adoptForeignNodeForParent(this, childToInsert);
     }
 
+    const rangeHooks = getActiveRangeMutationHooks();
+    const rangeOldParent = rangeHooks ? childToInsert.parentNode : null;
+    const rangeOldIndex = rangeHooks && rangeOldParent ? rangeOldParent.childNodes.toArray().indexOf(childToInsert) : -1;
+
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.insertBefore(this._handle, childToInsert._handle, reference?._handle ?? 0);
+      applyRangeMoveMutation(rangeHooks, childToInsert, this, rangeOldParent, rangeOldIndex);
       scheduleIFrameLoadIfNeeded(childToInsert);
       refreshDocumentElementFlag(this);
       return newChild;
@@ -471,6 +488,7 @@ export class Node extends EventTargetBase {
     const nextSibling = trackMutations ? childToInsert.nextSibling : null;
     const wasConnected = this._window.isConnectedNode(childToInsert);
     native.insertBefore(this._handle, childToInsert._handle, reference?._handle ?? 0);
+    applyRangeMoveMutation(rangeHooks, childToInsert, this, rangeOldParent, rangeOldIndex);
 
     if (trackMutations) {
       this._window.notifyChildListMutation(this, [childToInsert], [], childToInsert.previousSibling, childToInsert.nextSibling);
@@ -521,9 +539,13 @@ export class Node extends EventTargetBase {
       return child;
     }
 
+    const rangeHooks = getActiveRangeMutationHooks();
+    const oldIndexForRange = rangeHooks ? this.childNodes.toArray().indexOf(child) : -1;
+
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.removeChild(this._handle, child._handle);
+      applyRangeRemovalMutation(rangeHooks, child, this, oldIndexForRange);
       refreshDocumentElementFlag(this);
       return child;
     }
@@ -532,6 +554,7 @@ export class Node extends EventTargetBase {
     const nextSibling = trackMutations ? child.nextSibling : null;
     const wasConnected = this._window.isConnectedNode(child);
     native.removeChild(this._handle, child._handle);
+    applyRangeRemovalMutation(rangeHooks, child, this, oldIndexForRange);
     if (trackMutations) {
       this._window.notifyChildListMutation(this, [], [child], previousSibling, nextSibling);
     }
@@ -672,9 +695,25 @@ export class Node extends EventTargetBase {
       replacementChild = adoptForeignNodeForParent(this, replacementChild);
     }
 
+    const rangeHooks = getActiveRangeMutationHooks();
+    const oldChildIndexForRange = rangeHooks ? this.childNodes.toArray().indexOf(oldChild) : -1;
+    const replacementOldParentForRange = rangeHooks ? replacementChild.parentNode : null;
+    const replacementOldIndexForRange = rangeHooks && replacementOldParentForRange
+      ? replacementOldParentForRange.childNodes.toArray().indexOf(replacementChild)
+      : -1;
+
     const trackMutations = this._window.hasMutationObservers();
     if (!trackMutations && !this._window.customElements.hasDefinitions) {
       native.replaceChild(this._handle, replacementChild._handle, oldChild._handle);
+      applyRangeReplacementMutation(
+        rangeHooks,
+        this,
+        oldChild,
+        oldChildIndexForRange,
+        replacementChild,
+        replacementOldParentForRange,
+        replacementOldIndexForRange,
+      );
       scheduleIFrameLoadIfNeeded(replacementChild);
       refreshDocumentElementFlag(this);
       return oldChild;
@@ -688,6 +727,15 @@ export class Node extends EventTargetBase {
     const newPreviousSibling = trackMutations ? replacementChild.previousSibling : null;
     const newNextSibling = trackMutations ? replacementChild.nextSibling : null;
     native.replaceChild(this._handle, replacementChild._handle, oldChild._handle);
+    applyRangeReplacementMutation(
+      rangeHooks,
+      this,
+      oldChild,
+      oldChildIndexForRange,
+      replacementChild,
+      replacementOldParentForRange,
+      replacementOldIndexForRange,
+    );
 
     if (trackMutations) {
       this._window.notifyChildListMutation(this, [], [oldChild], oldPreviousSibling, oldNextSibling);
@@ -740,7 +788,7 @@ export class Node extends EventTargetBase {
 
   compareDocumentPosition(other: Node): number {
     this._window.assertOpen();
-    return native.nodeCompareDocumentPosition(this._handle, other._handle);
+    return compareDocumentPosition(this, other);
   }
 
   lookupNamespaceURI(prefix: string | null): string | null {
@@ -1186,6 +1234,72 @@ export class Node extends EventTargetBase {
   }
 }
 
+function getRangeMutationHooks(): RangeMutationHooks | undefined {
+  return (globalThis as typeof globalThis & {
+    __zigDomRangeMutationHooks?: RangeMutationHooks;
+  }).__zigDomRangeMutationHooks;
+}
+
+function getActiveRangeMutationHooks(): RangeMutationHooks | undefined {
+  const hooks = getRangeMutationHooks();
+  if (!hooks || hooks.hasTrackedRanges?.() === false) {
+    return undefined;
+  }
+  return hooks;
+}
+
+function applyRangeRemovalMutation(hooks: RangeMutationHooks | undefined, removedNode: Node, oldParent: Node, oldIndex: number): void {
+  if (!hooks || oldIndex < 0) {
+    return;
+  }
+  hooks.notifyNodeRemovalMutation?.(removedNode, oldParent, oldIndex);
+}
+
+function applyRangeMoveMutation(
+  hooks: RangeMutationHooks | undefined,
+  movedNode: Node,
+  newParent: Node,
+  oldParent: Node | null,
+  oldIndex: number,
+): void {
+  if (!hooks) {
+    return;
+  }
+
+  if (oldParent && oldIndex >= 0) {
+    hooks.notifyNodeRemovalMutation?.(movedNode, oldParent, oldIndex);
+  }
+
+  const newIndex = newParent.childNodes.toArray().indexOf(movedNode);
+  if (newIndex >= 0) {
+    hooks.notifyNodeInsertionMutation?.(movedNode, newParent, newIndex);
+  }
+}
+
+function applyRangeReplacementMutation(
+  hooks: RangeMutationHooks | undefined,
+  parent: Node,
+  oldChild: Node,
+  oldChildIndex: number,
+  newChild: Node,
+  newChildOldParent: Node | null,
+  newChildOldIndex: number,
+): void {
+  if (!hooks) {
+    return;
+  }
+
+  applyRangeRemovalMutation(hooks, oldChild, parent, oldChildIndex);
+  if (newChild !== oldChild) {
+    applyRangeRemovalMutation(hooks, newChild, newChildOldParent ?? parent, newChildOldIndex);
+  }
+
+  const newChildIndex = parent.childNodes.toArray().indexOf(newChild);
+  if (newChildIndex >= 0) {
+    hooks.notifyNodeInsertionMutation?.(newChild, parent, newChildIndex);
+  }
+}
+
 const NODE_PROTOTYPE_CONSTANTS: Record<string, number> = {
   ELEMENT_NODE: Node.ELEMENT_NODE,
   ATTRIBUTE_NODE: Node.ATTRIBUTE_NODE,
@@ -1483,6 +1597,87 @@ function escapeTextForSerialization(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+const disconnectedNodeOrder = new WeakMap<Node, number>();
+let nextDisconnectedNodeOrder = 1;
+
+function compareDocumentPosition(left: Node, right: Node): number {
+  if (left === right) {
+    return 0;
+  }
+
+  const leftChain = ancestorChain(left);
+  const rightChain = ancestorChain(right);
+  const leftRoot = leftChain[leftChain.length - 1];
+  const rightRoot = rightChain[rightChain.length - 1];
+
+  if (!leftRoot || !rightRoot || leftRoot !== rightRoot) {
+    return Node.DOCUMENT_POSITION_DISCONNECTED |
+      Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC |
+      (orderToken(left) < orderToken(right)
+        ? Node.DOCUMENT_POSITION_FOLLOWING
+        : Node.DOCUMENT_POSITION_PRECEDING);
+  }
+
+  if (isAncestorNode(left, right)) {
+    return Node.DOCUMENT_POSITION_PRECEDING | Node.DOCUMENT_POSITION_CONTAINS;
+  }
+
+  if (isAncestorNode(right, left)) {
+    return Node.DOCUMENT_POSITION_FOLLOWING | Node.DOCUMENT_POSITION_CONTAINED_BY;
+  }
+
+  let leftIndex = leftChain.length - 1;
+  let rightIndex = rightChain.length - 1;
+  while (leftIndex >= 0 && rightIndex >= 0 && leftChain[leftIndex] === rightChain[rightIndex]) {
+    leftIndex -= 1;
+    rightIndex -= 1;
+  }
+
+  const leftSibling = leftChain[leftIndex];
+  const rightSibling = rightChain[rightIndex];
+  const commonAncestor = leftChain[leftIndex + 1];
+  if (!leftSibling || !rightSibling || !commonAncestor) {
+    return Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC;
+  }
+
+  const siblings = commonAncestor.childNodes.toArray();
+  return siblings.indexOf(leftSibling) < siblings.indexOf(rightSibling)
+    ? Node.DOCUMENT_POSITION_FOLLOWING
+    : Node.DOCUMENT_POSITION_PRECEDING;
+}
+
+function ancestorChain(node: Node): Node[] {
+  const chain: Node[] = [];
+  let cursor: Node | null = node;
+  while (cursor) {
+    chain.push(cursor);
+    cursor = cursor.parentNode;
+  }
+  return chain;
+}
+
+function isAncestorNode(ancestor: Node, node: Node): boolean {
+  let cursor: Node | null = node.parentNode;
+  while (cursor) {
+    if (cursor === ancestor) {
+      return true;
+    }
+    cursor = cursor.parentNode;
+  }
+  return false;
+}
+
+function orderToken(node: Node): number {
+  const cached = disconnectedNodeOrder.get(node);
+  if (cached != null) {
+    return cached;
+  }
+  const next = nextDisconnectedNodeOrder;
+  nextDisconnectedNodeOrder += 1;
+  disconnectedNodeOrder.set(node, next);
+  return next;
 }
 
 function isEqualDocumentNode(left: Node, right: Node): boolean {

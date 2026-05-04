@@ -28,7 +28,7 @@ import {
 import { MutationObserver, type InternalMutationRecord } from "./MutationObserver.ts";
 import { Node } from "./Node.ts";
 import { NodeList } from "./NodeList.ts";
-import { Range, Selection } from "./Range.ts";
+import { Range, Selection, StaticRange } from "./Range.ts";
 import { Storage } from "./Storage.ts";
 import { Text } from "./Text.ts";
 
@@ -461,7 +461,8 @@ export class Window extends EventTargetBase {
   readonly NodeFilter = NodeFilter;
   readonly DOMTokenList = DOMTokenList;
   readonly MutationObserver = MutationObserver;
-  readonly Range = Range;
+  readonly Range: typeof Range;
+  readonly StaticRange: typeof StaticRange;
   readonly Selection = Selection;
   readonly Document = Document;
   readonly XMLDocument = Document;
@@ -526,6 +527,15 @@ export class Window extends EventTargetBase {
     };
 
     this.document = this.getNode(this.#documentHandle) as Document;
+    const windowDocument = this.document as unknown as Node;
+    this.Range = class RangeForWindow extends Range {
+      constructor() {
+        super();
+        this.setStart(windowDocument, 0);
+        this.setEnd(windowDocument, 0);
+      }
+    } as unknown as typeof Range;
+    this.StaticRange = StaticRange;
 
     this.happyDOM = {
       reset: () => {

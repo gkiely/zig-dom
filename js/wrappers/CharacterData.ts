@@ -1,10 +1,26 @@
 import { ZigDOMException } from "./DOMException.ts";
 import { Node } from "./Node.ts";
+import { notifyCharacterDataMutation } from "./Range.ts";
 import type { Window } from "./Window.ts";
 
 export class CharacterData extends Node {
+  #suppressRangeTextContentNotification = false;
+
   constructor(window: Window, handle: number, nodeType = Node.TEXT_NODE) {
     super(window, handle, nodeType);
+  }
+
+  get textContent(): string {
+    return super.textContent;
+  }
+
+  set textContent(value: string | null) {
+    const previous = super.textContent ?? "";
+    const next = value === null ? "" : String(value);
+    super.textContent = next;
+    if (!this.#suppressRangeTextContentNotification) {
+      notifyCharacterDataMutation(this, 0, previous.length, next.length);
+    }
   }
 
   get data(): string {
@@ -32,7 +48,10 @@ export class CharacterData extends Node {
     if (arguments.length < 1) {
       throw new TypeError("Failed to execute 'appendData': 1 argument required.");
     }
-    this.data = `${this.data}${String(data)}`;
+    const source = this.data;
+    const text = String(data);
+    this._setTextContentWithoutRangeNotification(`${source}${text}`);
+    notifyCharacterDataMutation(this, source.length, 0, text.length);
   }
 
   insertData(offset: number, data: string): void {
@@ -42,7 +61,8 @@ export class CharacterData extends Node {
     const start = normalizeOffset(offset, this.length);
     const source = this.data;
     const text = String(data);
-    this.data = `${source.slice(0, start)}${text}${source.slice(start)}`;
+    this._setTextContentWithoutRangeNotification(`${source.slice(0, start)}${text}${source.slice(start)}`);
+    notifyCharacterDataMutation(this, start, 0, text.length);
   }
 
   deleteData(offset: number, count: number): void {
@@ -52,7 +72,9 @@ export class CharacterData extends Node {
     const start = normalizeOffset(offset, this.length);
     const size = normalizeCount(count);
     const source = this.data;
-    this.data = `${source.slice(0, start)}${source.slice(start + size)}`;
+    const removed = Math.min(size, Math.max(0, source.length - start));
+    this._setTextContentWithoutRangeNotification(`${source.slice(0, start)}${source.slice(start + size)}`);
+    notifyCharacterDataMutation(this, start, removed, 0);
   }
 
   replaceData(offset: number, count: number, data: string): void {
@@ -63,7 +85,18 @@ export class CharacterData extends Node {
     const size = normalizeCount(count);
     const source = this.data;
     const text = String(data);
-    this.data = `${source.slice(0, start)}${text}${source.slice(start + size)}`;
+    const removed = Math.min(size, Math.max(0, source.length - start));
+    this._setTextContentWithoutRangeNotification(`${source.slice(0, start)}${text}${source.slice(start + size)}`);
+    notifyCharacterDataMutation(this, start, removed, text.length);
+  }
+
+  protected _setTextContentWithoutRangeNotification(value: string): void {
+    this.#suppressRangeTextContentNotification = true;
+    try {
+      this.textContent = value;
+    } finally {
+      this.#suppressRangeTextContentNotification = false;
+    }
   }
 }
 

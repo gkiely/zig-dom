@@ -1037,6 +1037,7 @@ export class Element extends Node {
     const metadata = this.#attributeMetadata.get(internalName) ?? this.#attributeMetadata.get(name) ?? this.#attributeMetadata.get(key);
     const reflectedName = metadata?.qualifiedName ?? (this.#nonHtmlAttributes.has(name) ? name : key);
     return {
+      nodeType: Node.ATTRIBUTE_NODE,
       name: reflectedName,
       value,
       ownerElement: this,
