@@ -58,6 +58,54 @@ class ProcessingInstruction {}
 const CUSTOM_ELEMENT_UPGRADED = Symbol("zig-dom-custom-element-upgraded");
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
+
+type ZeroDelayTimeout = {
+  callback: () => void;
+};
+
+let zeroDelayTimeouts: ZeroDelayTimeout[] | null = null;
+let zeroDelayNativeHandle: ReturnType<typeof globalThis.setTimeout> | null = null;
+
+function setDOMTimeout(callback: (...args: unknown[]) => void, delay = 0, ...args: unknown[]): ReturnType<typeof globalThis.setTimeout> {
+  if (!delay) {
+    if (!zeroDelayTimeouts) {
+      zeroDelayTimeouts = [];
+      zeroDelayNativeHandle = nativeSetTimeout(() => {
+        const timeouts = zeroDelayTimeouts;
+        zeroDelayTimeouts = null;
+        zeroDelayNativeHandle = null;
+        for (const timeout of timeouts ?? []) {
+          timeout.callback();
+        }
+      }, 0);
+    }
+
+    const timeout = { callback: () => callback(...args) };
+    zeroDelayTimeouts.push(timeout);
+    return timeout as unknown as ReturnType<typeof globalThis.setTimeout>;
+  }
+
+  return nativeSetTimeout(callback as TimerHandler, delay, ...args) as unknown as ReturnType<typeof globalThis.setTimeout>;
+}
+
+function clearDOMTimeout(handle: ReturnType<typeof globalThis.setTimeout>): void {
+  if (zeroDelayTimeouts) {
+    const index = zeroDelayTimeouts.indexOf(handle as unknown as ZeroDelayTimeout);
+    if (index !== -1) {
+      zeroDelayTimeouts.splice(index, 1);
+      if (zeroDelayTimeouts.length === 0 && zeroDelayNativeHandle) {
+        nativeClearTimeout(zeroDelayNativeHandle);
+        zeroDelayNativeHandle = null;
+        zeroDelayTimeouts = null;
+      }
+      return;
+    }
+  }
+
+  nativeClearTimeout(handle);
+}
 
 function htmlElementConstructorAlias(constructorName: string): typeof HTMLElement {
   switch (constructorName) {
@@ -855,15 +903,15 @@ export class Window extends EventTargetBase {
       });
     }
 
-    this.setTimeout = globalThis.setTimeout.bind(globalThis);
-    this.clearTimeout = globalThis.clearTimeout.bind(globalThis);
+    this.setTimeout = setDOMTimeout as typeof globalThis.setTimeout;
+    this.clearTimeout = clearDOMTimeout as typeof globalThis.clearTimeout;
     this.setInterval = globalThis.setInterval.bind(globalThis);
     this.clearInterval = globalThis.clearInterval.bind(globalThis);
     this.requestAnimationFrame = (callback: FrameRequestCallback): number => {
-      return globalThis.setTimeout(() => callback(globalThis.performance.now()), 0) as unknown as number;
+      return this.setTimeout(() => callback(globalThis.performance.now()), 0) as unknown as number;
     };
     this.cancelAnimationFrame = (handle: number): void => {
-      globalThis.clearTimeout(handle as unknown as ReturnType<typeof globalThis.setTimeout>);
+      this.clearTimeout(handle as unknown as ReturnType<typeof globalThis.setTimeout>);
     };
     this.queueMicrotask = globalThis.queueMicrotask.bind(globalThis);
     this.fetch = globalThis.fetch.bind(globalThis);

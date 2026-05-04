@@ -488,10 +488,14 @@ export class Element extends Node {
   }
 
   getClientRects(): DOMRectList {
+    const rect = this.getBoundingClientRect();
     return {
-      length: 0,
-      item: () => null,
-      [Symbol.iterator]: function*() {}
+      0: rect,
+      length: 1,
+      item: (index: number) => index === 0 ? rect : null,
+      [Symbol.iterator]: function*() {
+        yield rect;
+      }
     } as DOMRectList;
   }
 
