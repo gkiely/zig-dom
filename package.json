@@ -1,6 +1,6 @@
 {
   "name": "zig-dom",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Bun-only Zig-backed DOM implementation with happy-dom-compatible surface",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,22 +18,14 @@
   },
   "files": [
     "dist",
-    "!dist/native",
     "build.zig",
     "build.zig.zon"
   ],
-  "optionalDependencies": {
-    "zig-dom-darwin-arm64": "0.1.2",
-    "zig-dom-darwin-x64": "0.1.2",
-    "zig-dom-linux-arm64": "0.1.2",
-    "zig-dom-linux-x64": "0.1.2",
-    "zig-dom-win32-x64": "0.1.2"
-  },
   "scripts": {
     "build:native": "bun run scripts/build-native.ts",
     "build:native:packages": "bun run scripts/build-native-packages.ts",
     "build:js": "bunx tsc -p tsconfig.json",
-    "build": "bun run build:native && bun run build:js",
+    "build": "bun run build:js && bun run build:native:packages",
     "wpt:sync": "bun run scripts/sync-wpt.ts",
     "wpt:manifest": "bun run scripts/generate-wpt-manifest.ts",
     "verify:wpt:upstream:dom:smoke": "bun run wpt:sync && bun run wpt:manifest --dir dom --out-manifest wpt/manifest/upstream-dom-smoke.json --out-expected wpt/expected/upstream-dom-smoke.json --max 200 && bun run scripts/run-wpt-subset.ts --manifest wpt/manifest/upstream-dom-smoke.json --expected wpt/expected/upstream-dom-smoke.json --wpt-root .wpt-cache/web-platform-tests --entry-timeout-ms 3000 --progress-every 20",

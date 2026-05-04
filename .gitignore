@@ -15,6 +15,9 @@ dist/
 build/
 coverage/
 
+# Generated native package payloads
+npm/zig-dom-*/native/
+
 # WPT cache/vendor scratch space
 .wpt-cache/
 
