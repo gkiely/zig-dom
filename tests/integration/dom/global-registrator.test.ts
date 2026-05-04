@@ -25,6 +25,7 @@ describe("GlobalRegistrator", () => {
     expect(globalThis.cancelAnimationFrame).toBe(first.cancelAnimationFrame);
     expect(globalThis.queueMicrotask).toBe(first.queueMicrotask);
     expect(globalThis.performance).toBe(first.performance);
+    expect(typeof globalThis.performance.measure).toBe("function");
   });
 
   test("register(forceNewWindow) creates a fresh window", () => {

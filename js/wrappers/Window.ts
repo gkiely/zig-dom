@@ -1299,5 +1299,5 @@ export class Window extends EventTargetBase {
   URL!: typeof globalThis.URL;
   AbortSignal!: typeof globalThis.AbortSignal;
   AbortController!: typeof globalThis.AbortController;
-  performance!: typeof globalThis.performance;
+  declare performance: typeof globalThis.performance;
 }
