@@ -4,9 +4,17 @@ Bun-only Zig-backed DOM implementation with a `happy-dom`-compatible surface.
 
 ## Install
 
-| Bun | npm |
-| --- | --- |
-| `bun add zig-dom` | `npm install zig-dom` |
+### Bun
+
+```sh
+bun add zig-dom
+```
+
+### npm
+
+```sh
+npm install zig-dom
+```
 
 The current package ships a macOS native library. Linux and Windows builds are not published yet.
 
@@ -36,13 +44,41 @@ import { GlobalRegistrator } from "zig-dom/global-registrator";
 GlobalRegistrator.register();
 ```
 
-| bunfig.toml | CLI fallback |
-| --- | --- |
-| <pre lang="toml">[test]<br>preload = ["./preload.ts"]</pre> | <pre lang="sh">bun test --preload ./preload.ts</pre> |
+### bunfig.toml
 
-| Vanilla JS | React |
-| --- | --- |
-| <pre lang="ts">import { test, expect } from "bun:test";<br><br>test("updates the document", () => {<br>  document.body.innerHTML = "&lt;button&gt;Save&lt;/button&gt;";<br>  expect(document.querySelector("button")?.textContent).toBe("Save");<br>});</pre> | <pre lang="tsx">import { render, screen } from "@testing-library/react";<br>import { test, expect } from "bun:test";<br><br>test("renders", () => {<br>  render(&lt;button&gt;Save&lt;/button&gt;);<br>  expect(screen.getByRole("button").textContent).toBe("Save");<br>});</pre> |
+```toml
+[test]
+preload = ["./preload.ts"]
+```
+
+### CLI fallback
+
+```sh
+bun test --preload ./preload.ts
+```
+
+### Vanilla JS
+
+```ts
+import { test, expect } from "bun:test";
+
+test("updates the document", () => {
+  document.body.innerHTML = "<button>Save</button>";
+  expect(document.querySelector("button")?.textContent).toBe("Save");
+});
+```
+
+### React
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import { test, expect } from "bun:test";
+
+test("renders", () => {
+  render(<button>Save</button>);
+  expect(screen.getByRole("button").textContent).toBe("Save");
+});
+```
 
 ## Development
 
