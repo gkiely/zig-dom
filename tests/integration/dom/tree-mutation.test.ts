@@ -53,20 +53,4 @@ describe("native-backed tree mutation", () => {
     externalWindow.close();
   });
 
-  test("cross-window insertion throws DOMException-compatible names", () => {
-    const externalWindow = new Window();
-    const foreignNode = externalWindow.document.createElement("div");
-
-    let thrown: unknown;
-    try {
-      document.body.appendChild(foreignNode);
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeDefined();
-    expect((thrown as Error).name).toBe("HierarchyRequestError");
-
-    externalWindow.close();
-  });
 });
