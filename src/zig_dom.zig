@@ -1039,6 +1039,13 @@ pub export fn zig_dom_document_create_element(document: u64, name_ptr: [*]const 
     return STATUS_OK;
 }
 
+pub export fn zig_dom_document_create_div_element(document: u64) u64 {
+
+    const window = resolveNodeWindow(document) orelse return 0;
+
+    return createNode(window, .element, "div", "", document, false) catch 0;
+}
+
 pub export fn zig_dom_document_create_text_node(document: u64, data_ptr: [*]const u8, data_len: usize, out_handle: *u64) u32 {
 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;

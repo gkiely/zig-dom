@@ -87,6 +87,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_node_remove_child: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_replace_child: { returns: "u32", args: ["u64", "u64", "u64"] },
   zig_dom_document_create_element: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
+  zig_dom_document_create_div_element: { returns: "u64", args: ["u64"] },
   zig_dom_document_create_text_node: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_create_comment: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_create_document_fragment: { returns: "u32", args: ["u64", "ptr"] },
@@ -300,6 +301,13 @@ export const native = {
     const status = nativeLibrary.symbols.zig_dom_document_create_element(documentHandle, ptr(tag), tag.length, ptr(out));
     assertStatus(status, "zig_dom_document_create_element");
     return readHandle(out);
+  },
+  createDivElement(documentHandle: number): number {
+    const handle = Number(nativeLibrary.symbols.zig_dom_document_create_div_element(documentHandle));
+    if (handle === 0) {
+      throw domExceptionForStatus(NativeStatus.OutOfMemory, "zig_dom_document_create_div_element", `${statusName(NativeStatus.OutOfMemory)} (${NativeStatus.OutOfMemory})`);
+    }
+    return handle;
   },
   createTextNode(documentHandle: number, text: string): number {
     const data = encode(text);

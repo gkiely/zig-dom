@@ -448,7 +448,7 @@ export class Element extends Node {
   }
 
   override get nodeName(): string {
-    return this.tagName;
+    return this.localName;
   }
 
   get namespaceURI(): string | null {

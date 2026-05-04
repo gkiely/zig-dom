@@ -33,6 +33,40 @@ function asciiLowercase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
+function normalizeFastHtmlElementName(value: string): string | null {
+  if (value.length === 0) {
+    return null;
+  }
+
+  const first = value.charCodeAt(0);
+  const firstIsLower = first >= 0x61 && first <= 0x7a;
+  const firstIsUpper = first >= 0x41 && first <= 0x5a;
+  if (!firstIsLower && !firstIsUpper) {
+    return null;
+  }
+
+  let normalized: string | null = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    const isLower = code >= 0x61 && code <= 0x7a;
+    const isUpper = code >= 0x41 && code <= 0x5a;
+    const isDigit = code >= 0x30 && code <= 0x39;
+    if (!isLower && !isUpper && !isDigit && code !== 0x2e && code !== 0x5f && code !== 0x3a && code !== 0x2d) {
+      return null;
+    }
+    if (isUpper) {
+      if (normalized == null) {
+        normalized = value.slice(0, index);
+      }
+      normalized += String.fromCharCode(code + 0x20);
+    } else if (normalized != null) {
+      normalized += value[index];
+    }
+  }
+
+  return normalized ?? value;
+}
+
 function splitAsciiWhitespace(value: string): string[] {
   return value.match(/[^\t\n\f\r ]+/g) ?? [];
 }
@@ -475,11 +509,10 @@ export class Document extends Node {
     this._window.assertOpen();
     const isXMLDocument = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument === true;
     const inputTagName = typeof tagName === "string" ? tagName : String(tagName);
-    const normalizedTagName = isXMLDocument
-      ? inputTagName
-      : asciiLowercase(inputTagName);
+    const fastHtmlName = isXMLDocument ? null : normalizeFastHtmlElementName(inputTagName);
+    const normalizedTagName = isXMLDocument ? inputTagName : fastHtmlName ?? asciiLowercase(inputTagName);
     let isValid = false;
-    if (!isXMLDocument && isFastAsciiElementName(normalizedTagName)) {
+    if (fastHtmlName != null) {
       isValid = true;
     } else {
       const cached = elementNameValidationCache.get(normalizedTagName);
@@ -496,7 +529,9 @@ export class Document extends Node {
     if (!isValid) {
       throw new ZigDOMException("The qualified name is invalid.", "InvalidCharacterError", 5);
     }
-    const handle = native.createElement(this._handle, normalizedTagName);
+    const handle = normalizedTagName === "div"
+      ? native.createDivElement(this._handle)
+      : native.createElement(this._handle, normalizedTagName);
     const element = this._window.createFreshElementNode(handle, normalizedTagName, true) as Element;
     if (isXMLDocument) {
       const mutable = element as unknown as {

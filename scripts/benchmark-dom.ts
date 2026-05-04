@@ -42,6 +42,8 @@ type MetricRow = {
 
 const ELEMENT_COUNT = 10_000;
 const RESET_COUNT = 500;
+const APPEND_SAMPLE_COUNT = 7;
+const CREATE_SAMPLE_COUNT = 7;
 const COMMON_HTML = `
   <main class="layout" data-x="1">
     <header><button class="primary" data-x="save">Save</button></header>
@@ -67,6 +69,15 @@ async function measureMetric(metric: () => void | Promise<void>): Promise<number
   const start = now();
   await metric();
   return now() - start;
+}
+
+async function medianSample(samples: () => Promise<number> | number, count: number): Promise<number> {
+  const values: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    values.push(await samples());
+  }
+  values.sort((left, right) => left - right);
+  return values[Math.floor(values.length / 2)] ?? 0;
 }
 
 function resetByClearing(windowLike: AnyWindow): void {
@@ -278,29 +289,31 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
   });
 
   await withEnv("create_10k_elements_ms", async (env) => {
-    return measureMetric(() => {
+    return medianSample(() => measureMetric(() => {
       for (let i = 0; i < ELEMENT_COUNT; i += 1) {
         env.document.createElement("div");
       }
-    });
+    }), CREATE_SAMPLE_COUNT);
   });
 
   await withEnv("append_10k_children_ms", async (env) => {
-    const children: Element[] = [];
-    for (let i = 0; i < ELEMENT_COUNT; i += 1) {
-      children.push(env.document.createElement("div"));
-    }
-
-    return measureMetric(() => {
-      const parent = env.document.createElement("section");
+    return medianSample(() => {
+      const children: Element[] = [];
       for (let i = 0; i < ELEMENT_COUNT; i += 1) {
-        const child = children[i];
-        if (child) {
-          parent.appendChild(child);
-        }
+        children.push(env.document.createElement("div"));
       }
-      env.document.body.appendChild(parent);
-    });
+
+      return measureMetric(() => {
+        const parent = env.document.createElement("section");
+        for (let i = 0; i < ELEMENT_COUNT; i += 1) {
+          const child = children[i];
+          if (child) {
+            parent.appendChild(child);
+          }
+        }
+        env.document.body.appendChild(parent);
+      });
+    }, APPEND_SAMPLE_COUNT);
   });
 
   await withEnv("set_get_10k_attributes_ms", async (env) => {
