@@ -6,6 +6,23 @@ import { Event, EventTargetBase } from "./Event.ts";
 import { NodeList } from "./NodeList.ts";
 import type { Window } from "./Window.ts";
 
+function isInHiddenSubtree(node: Node): boolean {
+  let cursor: Node | null = node.nodeType === 1 ? node : node.parentNode;
+  while (cursor) {
+    if (cursor.nodeType === 1) {
+      const elementLike = cursor as unknown as {
+        getAttribute(name: string): string | null;
+        hasAttribute(name: string): boolean;
+      };
+      if (elementLike.getAttribute("aria-hidden") === "true" || elementLike.hasAttribute("hidden")) {
+        return true;
+      }
+    }
+    cursor = cursor.parentNode;
+  }
+  return false;
+}
+
 export class Node extends EventTargetBase {
   static readonly ELEMENT_NODE = 1;
   static readonly ATTRIBUTE_NODE = 2;
@@ -135,6 +152,10 @@ export class Node extends EventTargetBase {
 
     if (this.#nodeType === Node.DOCUMENT_NODE || this.#nodeType === Node.DOCUMENT_TYPE_NODE) {
       return null as unknown as string;
+    }
+
+    if (isInHiddenSubtree(this)) {
+      return "";
     }
 
     const value = native.nodeTextContent(this._handle);

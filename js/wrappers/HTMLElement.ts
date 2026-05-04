@@ -1,6 +1,6 @@
 import type { DocumentFragment } from "./DocumentFragment.ts";
 import { Element } from "./Element.ts";
-import { Event, FocusEvent } from "./Event.ts";
+import { Event, FocusEvent, MouseEvent } from "./Event.ts";
 import { HTMLCollection } from "./HTMLCollection.ts";
 import type { Window } from "./Window.ts";
 
@@ -20,6 +20,33 @@ function retargetFocusRelatedTarget(target: unknown): unknown {
     cursor = cursor.parentNode;
   }
   return target;
+}
+
+function clampSelectionOffset(value: number, length: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(Math.trunc(value), length));
+}
+
+type SelectionMode = "preserve" | "select" | "start" | "end";
+
+function normalizeSelectionMode(mode: string | undefined): SelectionMode {
+  if (mode === "select" || mode === "start" || mode === "end" || mode === "preserve") {
+    return mode;
+  }
+  return "preserve";
+}
+
+function normalizeSelectionDirection(direction: string | undefined): "forward" | "backward" | "none" {
+  if (direction === "forward" || direction === "backward") {
+    return direction;
+  }
+  return "none";
+}
+
+function isValidEmailAddress(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 export class HTMLElement extends Element {
@@ -113,7 +140,7 @@ export class HTMLElement extends Element {
   }
 
   click(): void {
-    this.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
+    this.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, button: 0 }));
   }
 
   constructor(window: Element["_window"], handle: number, nodeType = 1, _skipInitialStyleSync = false) {
@@ -193,18 +220,46 @@ export class HTMLElement extends Element {
     if (this.disabled) {
       return;
     }
+
     const previous = this._window.document.activeElement;
+    if (previous === this) {
+      return;
+    }
+
+    if (previous instanceof HTMLElement) {
+      const blurEvent = new FocusEvent("blur");
+      (blurEvent as unknown as { relatedTarget: unknown }).relatedTarget = retargetFocusRelatedTarget(this);
+      previous.dispatchEvent(blurEvent);
+
+      const focusOutEvent = new FocusEvent("focusout", { bubbles: true });
+      (focusOutEvent as unknown as { relatedTarget: unknown }).relatedTarget = retargetFocusRelatedTarget(this);
+      previous.dispatchEvent(focusOutEvent);
+    }
+
     this._window.setActiveElement(this);
-    const event = new FocusEvent("focus");
-    (event as unknown as { relatedTarget: unknown }).relatedTarget = retargetFocusRelatedTarget(previous);
-    this.dispatchEvent(event);
+
+    const focusEvent = new FocusEvent("focus");
+    (focusEvent as unknown as { relatedTarget: unknown }).relatedTarget = retargetFocusRelatedTarget(previous);
+    this.dispatchEvent(focusEvent);
+
+    const focusInEvent = new FocusEvent("focusin", { bubbles: true });
+    (focusInEvent as unknown as { relatedTarget: unknown }).relatedTarget = retargetFocusRelatedTarget(previous);
+    this.dispatchEvent(focusInEvent);
   }
 
   blur(): void {
-    if (this._window.document.activeElement === this) {
-      this._window.setActiveElement(null);
+    const isActive = this._window.document.activeElement === this;
+    if (isActive) {
+      this._window.setActiveElement(this.ownerDocument?.body ?? null);
     }
-    this.dispatchEvent(new Event("blur"));
+
+    const blurEvent = new FocusEvent("blur");
+    (blurEvent as unknown as { relatedTarget: unknown }).relatedTarget = null;
+    this.dispatchEvent(blurEvent);
+
+    const focusOutEvent = new FocusEvent("focusout", { bubbles: true });
+    (focusOutEvent as unknown as { relatedTarget: unknown }).relatedTarget = null;
+    this.dispatchEvent(focusOutEvent);
   }
 
   get disabled(): boolean {
@@ -316,6 +371,42 @@ export class HTMLIFrameElement extends HTMLElement {
 export class HTMLInputElement extends HTMLElement {
   #value: string | null = null;
   #checked: boolean | null = null;
+  #customValidityMessage = "";
+  #selectionStart = 0;
+  #selectionEnd = 0;
+  #selectionDirection: "forward" | "backward" | "none" = "none";
+
+  #computeValidity(): ValidityState {
+    const type = this.type;
+    const value = this.value;
+    const customError = this.#customValidityMessage.length > 0;
+    const valueMissing = this.required && value.length === 0;
+
+    let typeMismatch = false;
+    if (type === "email" && value.length > 0) {
+      if (this.hasAttribute("multiple")) {
+        const emails = value.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+        typeMismatch = emails.length === 0 || emails.some((email) => !isValidEmailAddress(email));
+      } else {
+        typeMismatch = !isValidEmailAddress(value.trim());
+      }
+    }
+
+    const valid = !(customError || valueMissing || typeMismatch);
+    return {
+      badInput: false,
+      customError,
+      patternMismatch: false,
+      rangeOverflow: false,
+      rangeUnderflow: false,
+      stepMismatch: false,
+      tooLong: false,
+      tooShort: false,
+      typeMismatch,
+      valid,
+      valueMissing
+    };
+  }
 
   #isDefaultCheckedRadioWinner(): boolean {
     const name = this.getAttribute("name");
@@ -396,6 +487,9 @@ export class HTMLInputElement extends HTMLElement {
 
   set value(next: string) {
     this.#value = String(next);
+    const length = this.value.length;
+    this.#selectionStart = clampSelectionOffset(this.#selectionStart, length);
+    this.#selectionEnd = clampSelectionOffset(this.#selectionEnd, length);
   }
 
   get defaultValue(): string {
@@ -404,6 +498,160 @@ export class HTMLInputElement extends HTMLElement {
 
   set defaultValue(next: string) {
     this.setAttribute("value", String(next));
+  }
+
+  get required(): boolean {
+    return this.hasAttribute("required");
+  }
+
+  set required(next: boolean) {
+    if (next) {
+      this.setAttribute("required", "");
+    } else {
+      this.removeAttribute("required");
+    }
+  }
+
+  get name(): string {
+    return this.getAttribute("name") ?? "";
+  }
+
+  set name(next: string) {
+    const value = String(next);
+    if (value.length === 0) {
+      this.removeAttribute("name");
+      return;
+    }
+    this.setAttribute("name", value);
+  }
+
+  get form(): HTMLFormElement | null {
+    return this.closestForm();
+  }
+
+  get validity(): ValidityState {
+    return this.#computeValidity();
+  }
+
+  get validationMessage(): string {
+    const validity = this.validity;
+    if (validity.customError) {
+      return this.#customValidityMessage;
+    }
+    if (validity.valueMissing) {
+      return "Please fill out this field.";
+    }
+    if (validity.typeMismatch) {
+      return "Please enter a valid value.";
+    }
+    return "";
+  }
+
+  get willValidate(): boolean {
+    if (this.disabled) {
+      return false;
+    }
+
+    const type = this.type;
+    return type !== "hidden" && type !== "button" && type !== "reset";
+  }
+
+  checkValidity(): boolean {
+    return this.validity.valid;
+  }
+
+  reportValidity(): boolean {
+    return this.checkValidity();
+  }
+
+  setCustomValidity(message: string): void {
+    this.#customValidityMessage = String(message);
+  }
+
+  get selectionStart(): number {
+    return this.#selectionStart;
+  }
+
+  set selectionStart(next: number) {
+    this.setSelectionRange(next, this.#selectionEnd, this.#selectionDirection);
+  }
+
+  get selectionEnd(): number {
+    return this.#selectionEnd;
+  }
+
+  set selectionEnd(next: number) {
+    this.setSelectionRange(this.#selectionStart, next, this.#selectionDirection);
+  }
+
+  get selectionDirection(): "forward" | "backward" | "none" {
+    return this.#selectionDirection;
+  }
+
+  set selectionDirection(next: "forward" | "backward" | "none") {
+    if (next === "forward" || next === "backward" || next === "none") {
+      this.#selectionDirection = next;
+    }
+  }
+
+  select(): void {
+    this.setSelectionRange(0, this.value.length, "none");
+  }
+
+  setSelectionRange(start: number, end: number, direction: "forward" | "backward" | "none" = "none"): void {
+    const length = this.value.length;
+    let nextStart = clampSelectionOffset(start, length);
+    const nextEnd = clampSelectionOffset(end, length);
+
+    if (nextEnd < nextStart) {
+      nextStart = nextEnd;
+    }
+
+    this.#selectionStart = nextStart;
+    this.#selectionEnd = nextEnd;
+    this.#selectionDirection = normalizeSelectionDirection(direction);
+  }
+
+  setRangeText(replacement: string, start?: number, end?: number, selectionMode?: SelectionMode): void {
+    const value = this.value;
+    let rangeStart = start === undefined ? this.#selectionStart : clampSelectionOffset(start, value.length);
+    let rangeEnd = end === undefined ? this.#selectionEnd : clampSelectionOffset(end, value.length);
+
+    if (rangeEnd < rangeStart) {
+      rangeStart = rangeEnd;
+    }
+
+    const replacementText = String(replacement);
+    const nextValue = value.slice(0, rangeStart) + replacementText + value.slice(rangeEnd);
+    this.value = nextValue;
+
+    const insertedEnd = rangeStart + replacementText.length;
+    const mode = normalizeSelectionMode(selectionMode);
+    if (mode === "select") {
+      this.setSelectionRange(rangeStart, insertedEnd, "none");
+      return;
+    }
+    if (mode === "start") {
+      this.setSelectionRange(rangeStart, rangeStart, "none");
+      return;
+    }
+    if (mode === "end") {
+      this.setSelectionRange(insertedEnd, insertedEnd, "none");
+      return;
+    }
+
+    const delta = replacementText.length - (rangeEnd - rangeStart);
+    const nextSelectionStart = this.#selectionStart > rangeEnd
+      ? this.#selectionStart + delta
+      : this.#selectionStart > rangeStart
+        ? insertedEnd
+        : this.#selectionStart;
+    const nextSelectionEnd = this.#selectionEnd > rangeEnd
+      ? this.#selectionEnd + delta
+      : this.#selectionEnd > rangeStart
+        ? insertedEnd
+        : this.#selectionEnd;
+    this.setSelectionRange(nextSelectionStart, nextSelectionEnd, this.#selectionDirection);
   }
 
   get checked(): boolean {
@@ -498,6 +746,9 @@ export class HTMLInputElement extends HTMLElement {
   _resetForForm(): void {
     this.#value = null;
     this.#checked = null;
+    this.#selectionStart = 0;
+    this.#selectionEnd = 0;
+    this.#selectionDirection = "none";
   }
 }
 
@@ -527,6 +778,9 @@ export class HTMLFormElement extends HTMLElement {
 
 export class HTMLTextAreaElement extends HTMLElement {
   #value: string | null = null;
+  #selectionStart = 0;
+  #selectionEnd = 0;
+  #selectionDirection: "forward" | "backward" | "none" = "none";
 
   get value(): string {
     return this.#value ?? this.defaultValue;
@@ -534,6 +788,9 @@ export class HTMLTextAreaElement extends HTMLElement {
 
   set value(next: string) {
     this.#value = String(next);
+    const length = this.value.length;
+    this.#selectionStart = clampSelectionOffset(this.#selectionStart, length);
+    this.#selectionEnd = clampSelectionOffset(this.#selectionEnd, length);
   }
 
   get defaultValue(): string {
@@ -544,8 +801,97 @@ export class HTMLTextAreaElement extends HTMLElement {
     this.setAttribute("value", String(next));
   }
 
+  get selectionStart(): number {
+    return this.#selectionStart;
+  }
+
+  set selectionStart(next: number) {
+    this.setSelectionRange(next, this.#selectionEnd, this.#selectionDirection);
+  }
+
+  get selectionEnd(): number {
+    return this.#selectionEnd;
+  }
+
+  set selectionEnd(next: number) {
+    this.setSelectionRange(this.#selectionStart, next, this.#selectionDirection);
+  }
+
+  get selectionDirection(): "forward" | "backward" | "none" {
+    return this.#selectionDirection;
+  }
+
+  set selectionDirection(next: "forward" | "backward" | "none") {
+    if (next === "forward" || next === "backward" || next === "none") {
+      this.#selectionDirection = next;
+    }
+  }
+
+  select(): void {
+    this.setSelectionRange(0, this.value.length, "none");
+  }
+
+  setSelectionRange(start: number, end: number, direction: "forward" | "backward" | "none" = "none"): void {
+    const length = this.value.length;
+    let nextStart = clampSelectionOffset(start, length);
+    const nextEnd = clampSelectionOffset(end, length);
+
+    if (nextEnd < nextStart) {
+      nextStart = nextEnd;
+    }
+
+    this.#selectionStart = nextStart;
+    this.#selectionEnd = nextEnd;
+    this.#selectionDirection = normalizeSelectionDirection(direction);
+  }
+
+  setRangeText(replacement: string, start?: number, end?: number, selectionMode?: SelectionMode): void {
+    const value = this.value;
+    let rangeStart = start === undefined ? this.#selectionStart : clampSelectionOffset(start, value.length);
+    let rangeEnd = end === undefined ? this.#selectionEnd : clampSelectionOffset(end, value.length);
+
+    if (rangeEnd < rangeStart) {
+      rangeStart = rangeEnd;
+    }
+
+    const replacementText = String(replacement);
+    const nextValue = value.slice(0, rangeStart) + replacementText + value.slice(rangeEnd);
+    this.value = nextValue;
+
+    const insertedEnd = rangeStart + replacementText.length;
+    const mode = normalizeSelectionMode(selectionMode);
+    if (mode === "select") {
+      this.setSelectionRange(rangeStart, insertedEnd, "none");
+      return;
+    }
+    if (mode === "start") {
+      this.setSelectionRange(rangeStart, rangeStart, "none");
+      return;
+    }
+    if (mode === "end") {
+      this.setSelectionRange(insertedEnd, insertedEnd, "none");
+      return;
+    }
+
+    const delta = replacementText.length - (rangeEnd - rangeStart);
+    const nextSelectionStart = this.#selectionStart > rangeEnd
+      ? this.#selectionStart + delta
+      : this.#selectionStart > rangeStart
+        ? insertedEnd
+        : this.#selectionStart;
+    const nextSelectionEnd = this.#selectionEnd > rangeEnd
+      ? this.#selectionEnd + delta
+      : this.#selectionEnd > rangeStart
+        ? insertedEnd
+        : this.#selectionEnd;
+    this.setSelectionRange(nextSelectionStart, nextSelectionEnd, this.#selectionDirection);
+  }
+
   _resetForForm(): void {
     this.#value = null;
+    this.#selectionStart = 0;
+    this.#selectionEnd = 0;
+    this.#selectionDirection = "none";
   }
 }
 

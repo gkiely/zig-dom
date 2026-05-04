@@ -1,6 +1,6 @@
 # zig-dom
 
-Zig-backed DOM implementation with a `happy-dom` compatible surface for Bun.
+A Zig-backed DOM implementation.
 
 ## Install
 

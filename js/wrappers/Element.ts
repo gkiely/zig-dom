@@ -576,8 +576,41 @@ export class Element extends Node {
     this.setAttribute("href", String(value));
   }
 
+  get role(): string {
+    return this.getAttribute("role") ?? "";
+  }
+
+  set role(value: string) {
+    const next = String(value);
+    if (next.length === 0) {
+      this.removeAttribute("role");
+      return;
+    }
+    this.setAttribute("role", next);
+  }
+
+  get ariaHidden(): string | null {
+    return this.getAttribute("aria-hidden");
+  }
+
+  set ariaHidden(value: string | null) {
+    if (value == null) {
+      this.removeAttribute("aria-hidden");
+      return;
+    }
+    this.setAttribute("aria-hidden", String(value));
+  }
+
   get src(): string {
-    return this.getAttribute("src") ?? "";
+    const raw = this.getAttribute("src");
+    if (raw == null) {
+      return "";
+    }
+    try {
+      return new URL(raw, this.ownerDocument?.URL ?? this._window.location.href).href;
+    } catch {
+      return raw;
+    }
   }
 
   set src(value: string) {

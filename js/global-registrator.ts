@@ -74,7 +74,7 @@ export class GlobalRegistrator {
       Range,
       Selection,
       Document,
-      navigator: { userAgent: "zig-dom" },
+      navigator: window.navigator,
       happyDOM: window.happyDOM,
       getSelection: () => window.getSelection(),
       localStorage: window.localStorage,
@@ -82,12 +82,19 @@ export class GlobalRegistrator {
       location: window.location,
       history: window.history,
       customElements: window.customElements,
+      Image: (window as unknown as Record<string, unknown>).Image,
       getComputedStyle: window.getComputedStyle,
+      addEventListener: window.addEventListener.bind(window),
+      removeEventListener: window.removeEventListener.bind(window),
+      dispatchEvent: window.dispatchEvent.bind(window),
+      scrollTo: window.scrollTo.bind(window),
+      scroll: window.scroll.bind(window),
+      scrollBy: window.scrollBy.bind(window),
       requestAnimationFrame: window.requestAnimationFrame,
       cancelAnimationFrame: window.cancelAnimationFrame,
       queueMicrotask: window.queueMicrotask,
       performance: window.performance,
-      fetch: window.fetch,
+      fetch: (...args: Parameters<typeof window.fetch>) => window.fetch(...args),
       Headers: window.Headers,
       Request: window.Request,
       Response: window.Response,
@@ -169,6 +176,17 @@ export class GlobalRegistrator {
       Object.defineProperty(globalThis, key, {
         value,
         writable: true,
+        configurable: true,
+        enumerable: true
+      });
+    }
+
+    for (const key of ["google", "gapi", "gapi_loaded"] as const) {
+      Object.defineProperty(globalThis, key, {
+        get: () => (window as unknown as Record<string, unknown>)[key],
+        set: (value: unknown) => {
+          (window as unknown as Record<string, unknown>)[key] = value;
+        },
         configurable: true,
         enumerable: true
       });

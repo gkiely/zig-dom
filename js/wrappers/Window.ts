@@ -320,6 +320,48 @@ function nodeIdFromHandle(handle: number): number {
   return handle >>> 0;
 }
 
+function populateFormDataFromForm(target: FormData, form: HTMLFormElement): void {
+  for (const control of form.elements) {
+    if (!(control instanceof HTMLElement) || control.disabled) {
+      continue;
+    }
+
+    const name = control.getAttribute("name");
+    if (!name) {
+      continue;
+    }
+
+    if (control instanceof HTMLInputElement) {
+      const type = control.type;
+      if ((type === "checkbox" || type === "radio") && !control.checked) {
+        continue;
+      }
+      if (type === "file") {
+        continue;
+      }
+      target.append(name, control.value);
+      continue;
+    }
+
+    if (control instanceof HTMLTextAreaElement) {
+      target.append(name, control.value);
+      continue;
+    }
+
+    if (control instanceof HTMLSelectElement) {
+      if (control.multiple) {
+        for (const option of control.options) {
+          if ((option as HTMLOptionElement).selected) {
+            target.append(name, (option as HTMLOptionElement).value);
+          }
+        }
+      } else {
+        target.append(name, control.value);
+      }
+    }
+  }
+}
+
 export class Window extends EventTargetBase {
   readonly _nativeWindowHandle: number;
   readonly #documentHandle: number;
@@ -328,6 +370,9 @@ export class Window extends EventTargetBase {
   readonly #selection = new Selection();
   readonly #cookies = new Map<string, string>();
   readonly #mutationObservers = new Set<MutationObserverLike>();
+  #scrollX = 0;
+  #scrollY = 0;
+  #clipboardText = "";
 
   #closed = false;
 
@@ -378,6 +423,13 @@ export class Window extends EventTargetBase {
   readonly document: Document;
   readonly localStorage = new Storage();
   readonly sessionStorage = new Storage();
+  readonly navigator: {
+    userAgent: string;
+    clipboard: {
+      readText(): Promise<string>;
+      writeText(text: string): Promise<void>;
+    };
+  };
   readonly customElements: CustomElementRegistry;
   _hasCustomElementDefinitions = false;
   _hasCustomElementConnectionCallbacks = false;
@@ -415,6 +467,15 @@ export class Window extends EventTargetBase {
 
     this.location = new WindowLocationImpl(options?.url ?? "http://localhost/");
     this.history = new WindowHistoryImpl(this);
+    this.navigator = {
+      userAgent: "zig-dom",
+      clipboard: {
+        readText: async () => this.#clipboardText,
+        writeText: async (text: string) => {
+          this.#clipboardText = String(text);
+        }
+      }
+    };
 
     this.document = this.getNode(this.#documentHandle) as Document;
 
@@ -649,6 +710,22 @@ export class Window extends EventTargetBase {
     CharacterDataConstructor.prototype = BaseCharacterData.prototype;
 
     const thisWindow = this;
+    const BaseHTMLImageElement = (selfRecord.HTMLImageElement as { prototype: HTMLElement } | undefined) ?? HTMLElement;
+    const ImageConstructor = function(this: unknown, width?: unknown, height?: unknown) {
+      const image = thisWindow.document.createElement("img") as HTMLElement;
+      if (width !== undefined) {
+        image.setAttribute("width", String(width));
+      }
+      if (height !== undefined) {
+        image.setAttribute("height", String(height));
+      }
+      return image;
+    } as unknown as {
+      new (width?: number, height?: number): HTMLElement;
+      prototype: HTMLElement;
+    };
+    ImageConstructor.prototype = BaseHTMLImageElement.prototype;
+
     const BaseText = Text;
     const TextConstructor = function(this: unknown, data?: unknown) {
       const value = arguments.length === 0 || data === undefined ? "" : String(data);
@@ -698,6 +775,12 @@ export class Window extends EventTargetBase {
 
     Object.defineProperty(this, "DocumentFragment", {
       value: DocumentFragmentConstructor,
+      configurable: true,
+      writable: true
+    });
+
+    Object.defineProperty(this, "Image", {
+      value: ImageConstructor,
       configurable: true,
       writable: true
     });
@@ -787,7 +870,19 @@ export class Window extends EventTargetBase {
     this.Headers = globalThis.Headers;
     this.Request = globalThis.Request;
     this.Response = globalThis.Response;
-    this.FormData = globalThis.FormData;
+    const NativeFormData = globalThis.FormData;
+    const WindowFormData = class extends NativeFormData {
+      constructor(form?: unknown) {
+        if (form instanceof HTMLFormElement) {
+          super();
+          populateFormDataFromForm(this, form);
+          return;
+        }
+
+        super(form as ConstructorParameters<typeof NativeFormData>[0]);
+      }
+    };
+    this.FormData = WindowFormData as unknown as typeof globalThis.FormData;
     this.Blob = globalThis.Blob;
     this.File = globalThis.File;
     this.URL = globalThis.URL;
@@ -1284,6 +1379,58 @@ export class Window extends EventTargetBase {
     return this.#selection;
   }
 
+  get scrollX(): number {
+    return this.#scrollX;
+  }
+
+  get pageXOffset(): number {
+    return this.#scrollX;
+  }
+
+  get scrollY(): number {
+    return this.#scrollY;
+  }
+
+  get pageYOffset(): number {
+    return this.#scrollY;
+  }
+
+  scrollTo(x: number | ScrollToOptions, y?: number): void {
+    if (typeof x === "object") {
+      if (typeof x.left === "number") {
+        this.#scrollX = Number.isFinite(x.left) ? x.left : this.#scrollX;
+      }
+      if (typeof x.top === "number") {
+        this.#scrollY = Number.isFinite(x.top) ? x.top : this.#scrollY;
+      }
+      return;
+    }
+
+    this.#scrollX = Number.isFinite(x) ? x : this.#scrollX;
+    if (typeof y === "number" && Number.isFinite(y)) {
+      this.#scrollY = y;
+    }
+  }
+
+  scroll(x: number | ScrollToOptions, y?: number): void {
+    this.scrollTo(x, y);
+  }
+
+  scrollBy(x: number | ScrollToOptions, y?: number): void {
+    if (typeof x === "object") {
+      const left = typeof x.left === "number" && Number.isFinite(x.left) ? x.left : 0;
+      const top = typeof x.top === "number" && Number.isFinite(x.top) ? x.top : 0;
+      this.#scrollX += left;
+      this.#scrollY += top;
+      return;
+    }
+
+    this.#scrollX += Number.isFinite(x) ? x : 0;
+    if (typeof y === "number" && Number.isFinite(y)) {
+      this.#scrollY += y;
+    }
+  }
+
   getCookieString(): string {
     this.assertOpen();
     return [...this.#cookies.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
@@ -1310,15 +1457,58 @@ export class Window extends EventTargetBase {
     this.assertOpen();
 
     const declarations = new Map<string, string>();
-    const styleText = element.getAttribute("style") ?? "";
-    for (const part of styleText.split(";")) {
-      const [rawName, rawValue] = part.split(":");
-      const name = rawName?.trim().toLowerCase();
-      const value = rawValue?.trim();
-      if (name && value) {
-        declarations.set(name, value);
+    const parseDeclarations = (cssText: string) => {
+      for (const part of cssText.split(";")) {
+        const [rawName, rawValue] = part.split(":");
+        const name = rawName?.trim().toLowerCase();
+        const value = rawValue?.trim();
+        if (name && value) {
+          declarations.set(name, value);
+        }
+      }
+    };
+
+    const classSet = new Set((element.getAttribute("class") ?? "").split(/\s+/).filter(Boolean));
+    const localName = element.localName.toLowerCase();
+    const matchesSimpleSelector = (selector: string): boolean => {
+      const normalized = selector.trim();
+      if (!normalized) {
+        return false;
+      }
+      if (/[:\[>+~\s]/.test(normalized)) {
+        return false;
+      }
+
+      if (normalized.startsWith(".")) {
+        const classes = normalized.slice(1).split(".").filter(Boolean);
+        return classes.length > 0 && classes.every((className) => classSet.has(className));
+      }
+
+      const [tag, ...classes] = normalized.split(".");
+      if (tag && tag.toLowerCase() !== localName) {
+        return false;
+      }
+      return classes.every((className) => classSet.has(className));
+    };
+
+    for (const styleElement of this.document.querySelectorAll("style")) {
+      const cssText = styleElement.textContent;
+      if (!cssText) {
+        continue;
+      }
+
+      const rules = cssText.matchAll(/([^{}]+)\{([^{}]*)\}/g);
+      for (const rule of rules) {
+        const selectors = rule[1]?.split(",") ?? [];
+        if (!selectors.some((selector) => matchesSimpleSelector(selector))) {
+          continue;
+        }
+        parseDeclarations(rule[2] ?? "");
       }
     }
+
+    const styleText = element.getAttribute("style") ?? "";
+    parseDeclarations(styleText);
 
     const computed = {
       cssText: styleText,
