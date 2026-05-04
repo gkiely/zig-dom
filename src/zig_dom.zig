@@ -920,7 +920,7 @@ const SimpleSelector = struct {
 
 fn parseSimpleSelector(input: []const u8) SimpleSelector {
     var selector = SimpleSelector{};
-    const trimmed = std.mem.trim(u8, input, " \t\n\r");
+    const trimmed = std.mem.trim(u8, input, " \t\n\r\x0c");
     if (trimmed.len == 0) return selector;
     if (std.mem.eql(u8, trimmed, "*")) {
         selector.any = true;
@@ -957,14 +957,14 @@ fn parseSimpleSelector(input: []const u8) SimpleSelector {
                 while (i < trimmed.len and trimmed[i] != '=' and trimmed[i] != ']') {
                     i += 1;
                 }
-                selector.attr_name = std.mem.trim(u8, trimmed[name_start..i], " \t\n\r");
+                selector.attr_name = std.mem.trim(u8, trimmed[name_start..i], " \t\n\r\x0c");
                 if (i < trimmed.len and trimmed[i] == '=') {
                     i += 1;
                     const value_start = i;
                     while (i < trimmed.len and trimmed[i] != ']') {
                         i += 1;
                     }
-                    const value = std.mem.trim(u8, trimmed[value_start..i], " \t\n\r\"");
+                    const value = std.mem.trim(u8, trimmed[value_start..i], " \t\n\r\x0c\"");
                     selector.attr_value = value;
                 }
                 while (i < trimmed.len and trimmed[i] != ']') {
@@ -980,7 +980,7 @@ fn parseSimpleSelector(input: []const u8) SimpleSelector {
 }
 
 fn classContains(class_attr: []const u8, expected: []const u8) bool {
-    var iter = std.mem.tokenizeScalar(u8, class_attr, ' ');
+    var iter = std.mem.tokenizeAny(u8, class_attr, " \t\n\r\x0c");
     while (iter.next()) |token| {
         if (std.mem.eql(u8, token, expected)) return true;
     }
@@ -1075,8 +1075,41 @@ fn collectDescendantElements(window: *Window, root_handle: u64, selectors: []con
     }
 }
 
+fn findFirstElement(window: *Window, root_handle: u64, selectors: []const SimpleSelector) ?u64 {
+    const node = resolveNode(window, root_handle) orelse return null;
+
+    if (node.kind == .element and matchesSelectorChain(window, root_handle, selectors)) {
+        return root_handle;
+    }
+
+    var cursor = node.first_child;
+    while (cursor != 0) {
+        if (findFirstElement(window, cursor, selectors)) |match| {
+            return match;
+        }
+        const child = resolveNode(window, cursor) orelse break;
+        cursor = child.next_sibling;
+    }
+
+    return null;
+}
+
+fn findFirstDescendantElement(window: *Window, root_handle: u64, selectors: []const SimpleSelector) ?u64 {
+    const root = resolveNode(window, root_handle) orelse return null;
+    var cursor = root.first_child;
+    while (cursor != 0) {
+        if (findFirstElement(window, cursor, selectors)) |match| {
+            return match;
+        }
+        const child = resolveNode(window, cursor) orelse break;
+        cursor = child.next_sibling;
+    }
+
+    return null;
+}
+
 fn parseSelectorList(query: []const u8, output: *std.ArrayListUnmanaged(SimpleSelector)) !void {
-    var token_iter = std.mem.tokenizeAny(u8, query, " \t\n\r");
+    var token_iter = std.mem.tokenizeAny(u8, query, " \t\n\r\x0c");
     while (token_iter.next()) |token| {
         try output.append(c_allocator, parseSimpleSelector(token));
     }
@@ -1683,17 +1716,7 @@ pub export fn zig_dom_document_query_selector(document: u64, selector_ptr: [*]co
         return STATUS_OK;
     }
 
-    var matches: std.ArrayListUnmanaged(u64) = .empty;
-    defer matches.deinit(c_allocator);
-
-    var cursor = doc_node.first_child;
-    while (cursor != 0) {
-        collectElements(window, cursor, selectors.items, &matches) catch return STATUS_OOM;
-        const child = resolveNode(window, cursor) orelse break;
-        cursor = child.next_sibling;
-    }
-
-    out_handle.* = if (matches.items.len > 0) matches.items[0] else 0;
+    out_handle.* = findFirstDescendantElement(window, document, selectors.items) orelse 0;
     return STATUS_OK;
 }
 
@@ -1743,6 +1766,22 @@ pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const 
     collectDescendantElements(window, root, selectors.items, &matches) catch return STATUS_OOM;
 
     return outputHandleArray(matches.items, out_ptr, out_len);
+}
+
+pub export fn zig_dom_node_query_selector(root: u64, selector_ptr: [*]const u8, selector_len: usize, out_handle: *u64) u32 {
+
+    const window = resolveNodeWindow(root) orelse return STATUS_INVALID_HANDLE;
+    const root_node = resolveNode(window, root) orelse return STATUS_INVALID_HANDLE;
+    if (root_node.kind != .element and root_node.kind != .document_fragment and root_node.kind != .document) {
+        return STATUS_INVALID_ARGUMENT;
+    }
+
+    var selectors: std.ArrayListUnmanaged(SimpleSelector) = .empty;
+    defer selectors.deinit(c_allocator);
+    parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
+
+    out_handle.* = findFirstDescendantElement(window, root, selectors.items) orelse 0;
+    return STATUS_OK;
 }
 
 pub export fn zig_dom_document_reset(document: u64) u32 {

@@ -84,6 +84,10 @@ function splitAsciiWhitespace(value: string): string[] {
   return value.match(/[^\t\n\f\r ]+/g) ?? [];
 }
 
+function canUseClassSelectorToken(value: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(value);
+}
+
 function isValidElementName(value: string): boolean {
   if (value.length === 0) {
     return false;
@@ -760,9 +764,16 @@ export class Document extends Node {
       return new HTMLCollection(() => []);
     }
 
-    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+    const firstToken = tokens[0] ?? "";
+    const selector = canUseClassSelectorToken(firstToken) ? `.${firstToken}` : "*";
+    const remainingTokens = selector === "*" ? tokens : tokens.slice(1);
+
+    return new HTMLCollection(() => Array.from(this.querySelectorAll(selector) as unknown as Iterable<Element>).filter((element) => {
+      if (remainingTokens.length === 0) {
+        return true;
+      }
       const classes = splitAsciiWhitespace(element.getAttribute("class") ?? "");
-      return tokens.every((token) => classes.includes(token));
+      return remainingTokens.every((token) => classes.includes(token));
     }));
   }
 

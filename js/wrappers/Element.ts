@@ -49,6 +49,10 @@ function splitAsciiWhitespace(value: string): string[] {
   return value.match(/[^\t\n\f\r ]+/g) ?? [];
 }
 
+function canUseClassSelectorToken(value: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(value);
+}
+
 class ElementCSSStyleDeclaration {
   readonly #onChange: (cssText: string) => void;
   #values = new Map<string, string>();
@@ -1327,7 +1331,12 @@ export class Element extends Node {
     if (arguments.length === 0) {
       throw new TypeError("Failed to execute 'querySelector': 1 argument required, but only 0 present.");
     }
-    return this.querySelectorAll(String(selector))[0] ?? null;
+    const normalizedSelector = String(selector);
+    if (canUseNativeSelector(normalizedSelector)) {
+      const handle = native.nodeQuerySelector(this._handle, normalizedSelector);
+      return this._window.getNode(handle) as Element | null;
+    }
+    return this.querySelectorAll(normalizedSelector)[0] ?? null;
   }
 
   querySelectorAll(selector: string): Element[] {
@@ -1440,9 +1449,18 @@ export class Element extends Node {
       return new HTMLCollection(() => []);
     }
 
-    return new HTMLCollection(() => collectDescendantElements(this).filter((element) => {
+    const firstToken = tokens[0] ?? "";
+    const candidates = canUseClassSelectorToken(firstToken)
+      ? () => Array.from(this.querySelectorAll(`.${firstToken}`) as unknown as Iterable<Element>)
+      : () => collectDescendantElements(this);
+    const remainingTokens = canUseClassSelectorToken(firstToken) ? tokens.slice(1) : tokens;
+
+    return new HTMLCollection(() => candidates().filter((element) => {
+      if (remainingTokens.length === 0) {
+        return true;
+      }
       const classes = splitAsciiWhitespace(element.getAttribute("class") ?? "");
-      return tokens.every((token) => classes.includes(token));
+      return remainingTokens.every((token) => classes.includes(token));
     }));
   }
 }

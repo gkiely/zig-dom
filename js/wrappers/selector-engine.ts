@@ -45,10 +45,17 @@ function asciiLowercase(value: string): string {
 }
 
 export function canUseNativeSelector(selector: string): boolean {
-  return selector === "*"
-    || /^[A-Za-z][A-Za-z0-9_-]*$/.test(selector)
-    || /^\.[A-Za-z_][A-Za-z0-9_-]*$/.test(selector)
-    || /^\[[A-Za-z_][A-Za-z0-9_:-]*\]$/.test(selector);
+  return selector
+    .trim()
+    .split(/[\t\n\f\r ]+/)
+    .every((part) => canUseNativeSelectorPart(part));
+}
+
+function canUseNativeSelectorPart(selector: string): boolean {
+  return selector.length > 0 && (
+    selector === "*"
+    || /^(?:[A-Za-z][A-Za-z0-9_-]*)?(?:#[A-Za-z_][A-Za-z0-9_-]*)?(?:\.[A-Za-z_][A-Za-z0-9_-]*)?(?:\[[A-Za-z_][A-Za-z0-9_:-]*(?:=(?:"[^"]*"|[A-Za-z0-9_-]+))?\])?$/.test(selector)
+  );
 }
 
 export function querySelectorAllInDocument(document: Document, selector: string): Element[] {
@@ -167,7 +174,9 @@ function parseFastSimpleSelector(selector: string): FastSimpleSelector | null {
 
 function queryFastSimpleSelectorFromRoots(roots: Node[], selector: FastSimpleSelector, includeRoot: boolean): Element[] {
   const matches: Element[] = [];
-  const seen = new Set<number>();
+  const seen = roots.length > 1 ? new Set<number>() : null;
+  const selectorTagName = selector.kind === "tag" ? asciiLowercase(selector.value) : "";
+  const attributeName = selector.kind === "attribute" ? asciiLowercase(selector.value) : "";
 
   for (const root of roots) {
     const stack: Node[] = [];
@@ -191,23 +200,9 @@ function queryFastSimpleSelectorFromRoots(roots: Node[], selector: FastSimpleSel
 
       if (current.nodeType === Node.ELEMENT_NODE) {
         const element = current as unknown as Element;
-        let matched = false;
-        if (selector.kind === "tag") {
-          const selectorTagName = isHtmlElement(element)
-            ? asciiLowercase(selector.value)
-            : selector.value;
-          matched = element.localName === selectorTagName;
-        } else if (selector.kind === "class") {
-          const className = element.getAttribute("class");
-          matched = className != null && className.split(/[\t\n\f\r ]+/).includes(selector.value);
-        } else {
-          const attributeName = isHtmlElement(element)
-            ? asciiLowercase(selector.value)
-            : selector.value;
-          matched = element.getAttribute(attributeName) != null;
-        }
-        if (matched && !seen.has(element._handle)) {
-          seen.add(element._handle);
+        const matched = matchesFastSimpleSelector(element, selector, selectorTagName, attributeName);
+        if (matched && (!seen || !seen.has(element._handle))) {
+          seen?.add(element._handle);
           matches.push(element);
         }
       }
@@ -225,9 +220,22 @@ function queryFastSimpleSelectorFromRoots(roots: Node[], selector: FastSimpleSel
   return matches;
 }
 
+function matchesFastSimpleSelector(element: Element, selector: FastSimpleSelector, selectorTagName = "", attributeName = ""): boolean {
+  if (selector.kind === "tag") {
+    const expectedTagName = selectorTagName || asciiLowercase(selector.value);
+    return element.localName === (isHtmlElement(element) ? expectedTagName : selector.value);
+  }
+  if (selector.kind === "class") {
+    const className = element.getAttribute("class");
+    return className != null && classNameContains(className, selector.value);
+  }
+  const expectedAttributeName = attributeName || asciiLowercase(selector.value);
+  return element.getAttribute(isHtmlElement(element) ? expectedAttributeName : selector.value) != null;
+}
+
 function querySimpleIdFromRoots(roots: Node[], id: string, includeRoot: boolean): Element[] {
   const matches: Element[] = [];
-  const seen = new Set<number>();
+  const seen = roots.length > 1 ? new Set<number>() : null;
 
   for (const root of roots) {
     const stack: Node[] = [];
@@ -251,8 +259,8 @@ function querySimpleIdFromRoots(roots: Node[], id: string, includeRoot: boolean)
 
       if (current.nodeType === Node.ELEMENT_NODE) {
         const element = current as unknown as Element;
-        if (element.id === id && !seen.has(element._handle)) {
-          seen.add(element._handle);
+        if (element.id === id && (!seen || !seen.has(element._handle))) {
+          seen?.add(element._handle);
           matches.push(element);
         }
       }
@@ -268,6 +276,24 @@ function querySimpleIdFromRoots(roots: Node[], id: string, includeRoot: boolean)
   }
 
   return matches;
+}
+
+function classNameContains(className: string, selector: string): boolean {
+  let start = 0;
+  while (start < className.length) {
+    while (start < className.length && isAsciiWhitespace(className[start] ?? "")) {
+      start += 1;
+    }
+    let end = start;
+    while (end < className.length && !isAsciiWhitespace(className[end] ?? "")) {
+      end += 1;
+    }
+    if (end > start && className.slice(start, end) === selector) {
+      return true;
+    }
+    start = end + 1;
+  }
+  return false;
 }
 
 function parseSelectorList(selector: string): ComplexSelector[] {

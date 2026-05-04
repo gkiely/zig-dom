@@ -117,6 +117,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_document_get_element_by_id: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_query_selector: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_query_selector_all: { returns: "u32", args: ["u64", "ptr", "usize", "ptr", "ptr"] },
+  zig_dom_node_query_selector: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_node_query_selector_all: { returns: "u32", args: ["u64", "ptr", "usize", "ptr", "ptr"] },
   zig_dom_document_reset: { returns: "u32", args: ["u64"] },
   zig_dom_free_string: { returns: "void", args: ["ptr", "usize"] },
@@ -510,6 +511,13 @@ export const native = {
     const status = nativeLibrary.symbols.zig_dom_node_query_selector_all(rootHandle, ptr(data), encodedLength(selector, data), ptr(outPtr), ptr(outLen));
     assertStatus(status, "zig_dom_node_query_selector_all");
     return readHandleArrayFromOutParams(outPtr, outLen);
+  },
+  nodeQuerySelector(rootHandle: number, selector: string): number {
+    const data = encode(selector);
+    const out = createHandleOut();
+    const status = nativeLibrary.symbols.zig_dom_node_query_selector(rootHandle, ptr(data), encodedLength(selector, data), ptr(out));
+    assertStatus(status, "zig_dom_node_query_selector");
+    return readHandle(out);
   },
   documentReset(documentHandle: number): void {
     const status = nativeLibrary.symbols.zig_dom_document_reset(documentHandle);

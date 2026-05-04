@@ -2,7 +2,7 @@ import type { Node } from "./Node.ts";
 
 const GET_NODES = Symbol("getNodes");
 const STATIC_LENGTH = Symbol("staticLength");
-const EAGER_STATIC_INDEX_LIMIT = 256;
+const EAGER_STATIC_INDEX_LIMIT = 8;
 
 export class NodeList implements Iterable<Node> {
   declare readonly forEach: (callback: (value: Node, index: number, parent: NodeList) => void, thisArg?: unknown) => void;

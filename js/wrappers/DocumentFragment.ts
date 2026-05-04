@@ -36,7 +36,12 @@ export class DocumentFragment extends Node {
     if (arguments.length === 0) {
       throw new TypeError("Failed to execute 'querySelector': 1 argument required, but only 0 present.");
     }
-    return this.querySelectorAll(String(selector))[0] ?? null;
+    const normalizedSelector = String(selector);
+    if (canUseNativeSelector(normalizedSelector)) {
+      const handle = native.nodeQuerySelector(this._handle, normalizedSelector);
+      return this._window.getNode(handle) as Element | null;
+    }
+    return this.querySelectorAll(normalizedSelector)[0] ?? null;
   }
 
   querySelectorAll(selector: string): Element[] {
@@ -49,7 +54,7 @@ export class DocumentFragment extends Node {
         .map((handle) => this._window.getNode(handle))
         .filter((node): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE))
       : querySelectorAllInSubtree(this, normalizedSelector);
-    return new NodeList(() => snapshot as unknown as Node[]) as unknown as Element[];
+    return new NodeList(() => snapshot as unknown as Node[], { static: true }) as unknown as Element[];
   }
 
   getElementById(id: string): Element | null {
