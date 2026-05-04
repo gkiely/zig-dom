@@ -4,9 +4,9 @@ Bun-only Zig-backed DOM implementation with a `happy-dom`-compatible surface.
 
 ## Install
 
-```sh
-bun add zig-dom
-```
+| Bun | npm |
+| --- | --- |
+| `bun add zig-dom` | `npm install zig-dom` |
 
 The current package ships a macOS native library. Linux and Windows builds are not published yet.
 
