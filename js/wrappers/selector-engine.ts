@@ -257,7 +257,12 @@ function parseCompoundSelector(input: string, start: number): { compound: Compou
   let index = start;
   const simples: SimpleSelector[] = [];
 
-  if (input[index] === "*") {
+  if (input[index] === "*" && input[index + 1] === "|") {
+    const tag = readIdentifier(input, index + 2);
+    if (!tag.value) return null;
+    simples.push({ kind: "tag", value: tag.value.toLowerCase() });
+    index = tag.next;
+  } else if (input[index] === "*") {
     simples.push({ kind: "universal" });
     index += 1;
   } else {
@@ -619,7 +624,7 @@ function matchesCompound(element: Element, compound: CompoundSelector, scopeRoot
     }
 
     if (simple.kind === "tag") {
-      if (element.tagName.toLowerCase() !== simple.value) {
+      if (element.tagName.toLowerCase() !== simple.value && element.localName.toLowerCase() !== simple.value) {
         return false;
       }
       continue;

@@ -249,6 +249,7 @@ export class Document extends Node {
       }).XMLDocument;
       const nextDocument = new XMLDocumentCtor();
       Object.setPrototypeOf(nextDocument, XMLDocumentCtor.prototype);
+      (nextDocument as unknown as { __isXMLDocument?: boolean }).__isXMLDocument = true;
 
       if (doctype) {
         const source = doctype as unknown as { name?: string; publicId?: string; systemId?: string };
@@ -264,6 +265,7 @@ export class Document extends Node {
       if (qualifiedName) {
         const root = nextDocument.createElementNS(namespace, qualifiedName);
         nextDocument.appendChild(root);
+        nextDocument.#documentElementCache = root;
         if (namespace === "http://www.w3.org/1999/xhtml" && root.localName === "html") {
           root.textContent = "";
         }
@@ -386,10 +388,12 @@ export class Document extends Node {
       __namespaceURI?: string | null;
       __prefix?: string | null;
       __localName?: string;
+      __isXMLNode?: boolean;
     };
     mutable.__namespaceURI = namespace;
     mutable.__prefix = prefix;
     mutable.__localName = localName;
+    mutable.__isXMLNode = (this as unknown as { __isXMLDocument?: boolean }).__isXMLDocument === true;
     return element;
   }
 
@@ -630,7 +634,7 @@ function cloneNodeIntoDocument(document: Document, source: Node, deep: boolean):
     const clone = document.createElementNS(sourceElement.namespaceURI, sourceElement.prefix
       ? `${sourceElement.prefix}:${sourceElement.localName}`
       : sourceElement.localName);
-    for (const attribute of sourceElement.attributes) {
+    for (const attribute of Array.from(sourceElement.attributes)) {
       const namespaced = attribute as unknown as { namespaceURI?: string | null };
       if (namespaced.namespaceURI) {
         clone.setAttributeNS(namespaced.namespaceURI, attribute.name, attribute.value);

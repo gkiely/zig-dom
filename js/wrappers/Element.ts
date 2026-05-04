@@ -173,7 +173,8 @@ export class Element extends Node {
   get tagName(): string {
     const localName = this.localName;
     const qualifiedName = this.prefix ? `${this.prefix}:${localName}` : localName;
-    if (this.namespaceURI === "http://www.w3.org/1999/xhtml") {
+    const isXMLNode = (this as unknown as { __isXMLNode?: boolean }).__isXMLNode === true;
+    if (this.namespaceURI === "http://www.w3.org/1999/xhtml" && !isXMLNode) {
       return qualifiedName.toUpperCase();
     }
     return qualifiedName;
@@ -623,6 +624,10 @@ export class Element extends Node {
     return has;
   }
 
+  hasAttributes(): boolean {
+    return this.attributes.length > 0;
+  }
+
   getAttributeNS(namespace: string | null, localName: string): string | null {
     for (const [name, metadata] of this.#attributeMetadata) {
       if (metadata.namespaceURI === namespace && metadata.localName === localName) {
@@ -654,6 +659,10 @@ export class Element extends Node {
 
   matches(selector: string): boolean {
     return elementMatchesSelector(this, selector);
+  }
+
+  webkitMatchesSelector(selector: string): boolean {
+    return this.matches(selector);
   }
 
   querySelector(selector: string): Element | null {
