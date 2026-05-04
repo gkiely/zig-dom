@@ -6,9 +6,9 @@ type CustomElementConstructor = {
 export class CustomElementRegistry {
   #definitions = new Map<string, CustomElementConstructor>();
   #pending = new Map<string, Array<() => void>>();
-  readonly #onDefine?: (name: string) => void;
+  readonly #onDefine?: (name: string, constructor: CustomElementConstructor) => void;
 
-  constructor(onDefine?: (name: string) => void) {
+  constructor(onDefine?: (name: string, constructor: CustomElementConstructor) => void) {
     this.#onDefine = onDefine;
   }
 
@@ -26,7 +26,7 @@ export class CustomElementRegistry {
     }
 
     this.#definitions.set(normalized, constructor);
-    this.#onDefine?.(normalized);
+    this.#onDefine?.(normalized, constructor);
     const waiters = this.#pending.get(normalized) ?? [];
     this.#pending.delete(normalized);
     for (const resolve of waiters) {

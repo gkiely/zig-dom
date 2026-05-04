@@ -292,6 +292,84 @@ fn appendChild(window: *Window, parent_handle: u64, child_handle: u64) api.Statu
     return appendChildResolved(window, parent_handle, parent, child_handle, child);
 }
 
+fn appendFragmentChildren(window: *Window, parent_handle: u64, fragment_handle: u64) api.Status {
+    const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
+    const fragment = resolveNode(window, fragment_handle) orelse return .invalid_handle;
+    if (fragment.kind != .document_fragment) return .invalid_argument;
+
+    const first_child = fragment.first_child;
+    if (first_child == 0) return .ok;
+
+    const last_child = fragment.last_child;
+    var cursor = first_child;
+    while (cursor != 0) {
+        const child = resolveNode(window, cursor) orelse return .invalid_handle;
+        child.parent = parent_handle;
+        if (cursor == last_child) break;
+        cursor = child.next_sibling;
+    }
+
+    if (parent.last_child == 0) {
+        parent.first_child = first_child;
+    } else {
+        const previous_last = resolveNode(window, parent.last_child) orelse return .invalid_handle;
+        previous_last.next_sibling = first_child;
+        const first = resolveNode(window, first_child) orelse return .invalid_handle;
+        first.prev_sibling = parent.last_child;
+    }
+
+    parent.last_child = last_child;
+    fragment.first_child = 0;
+    fragment.last_child = 0;
+    return .ok;
+}
+
+fn clearChildrenResolved(window: *Window, parent: *Node) api.Status {
+    var cursor = parent.first_child;
+    while (cursor != 0) {
+        const child = resolveNode(window, cursor) orelse return .invalid_handle;
+        const next = child.next_sibling;
+        child.parent = 0;
+        child.prev_sibling = 0;
+        child.next_sibling = 0;
+        cursor = next;
+    }
+    parent.first_child = 0;
+    parent.last_child = 0;
+    return .ok;
+}
+
+fn replaceChildrenWithDetached(window: *Window, parent_handle: u64, handles: []const u64) api.Status {
+    const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
+    const clear_status = clearChildrenResolved(window, parent);
+    if (clear_status != .ok) return clear_status;
+
+    var previous_handle: u64 = 0;
+    for (handles) |child_handle| {
+        const child = resolveNode(window, child_handle) orelse return .invalid_handle;
+        if (child.parent != 0) {
+            const detach_status = detachFromParent(window, child_handle);
+            if (detach_status != .ok) return detach_status;
+        }
+
+        child.parent = parent_handle;
+        child.prev_sibling = previous_handle;
+        child.next_sibling = 0;
+
+        if (previous_handle == 0) {
+            parent.first_child = child_handle;
+        } else {
+            const previous = resolveNode(window, previous_handle) orelse return .invalid_handle;
+            previous.next_sibling = child_handle;
+        }
+
+        parent.last_child = child_handle;
+        previous_handle = child_handle;
+    }
+
+    return .ok;
+}
+
 fn insertBefore(window: *Window, parent_handle: u64, child_handle: u64, reference_handle: u64) api.Status {
     if (reference_handle == 0) {
         return appendChild(window, parent_handle, child_handle);
@@ -992,6 +1070,30 @@ pub export fn zig_dom_node_append_child(parent: u64, child: u64) u32 {
     return @intFromEnum(appendChild(window, parent, child));
 }
 
+pub export fn zig_dom_node_append_fragment(parent: u64, fragment: u64) u32 {
+
+    const window_handle = decodeNodeWindowHandle(parent);
+    if (window_handle == 0) return STATUS_INVALID_HANDLE;
+    if (decodeNodeWindowHandle(fragment) != window_handle) return STATUS_HIERARCHY;
+
+    const window = resolveWindow(window_handle) orelse return STATUS_INVALID_HANDLE;
+    return @intFromEnum(appendFragmentChildren(window, parent, fragment));
+}
+
+pub export fn zig_dom_node_replace_children(parent: u64, children_ptr: [*]const u64, children_len: usize) u32 {
+
+    const window_handle = decodeNodeWindowHandle(parent);
+    if (window_handle == 0) return STATUS_INVALID_HANDLE;
+    const window = resolveWindow(window_handle) orelse return STATUS_INVALID_HANDLE;
+
+    const children = children_ptr[0..children_len];
+    for (children) |child| {
+        if (decodeNodeWindowHandle(child) != window_handle) return STATUS_HIERARCHY;
+    }
+
+    return @intFromEnum(replaceChildrenWithDetached(window, parent, children));
+}
+
 pub export fn zig_dom_window_append_child(window: u64, parent: u64, child: u64) u32 {
 
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
@@ -1054,6 +1156,15 @@ pub export fn zig_dom_document_create_text_node(document: u64, data_ptr: [*]cons
 
     out_handle.* = createNode(window, .text, "#text", data_ptr[0..data_len], document, false) catch return STATUS_OOM;
     return STATUS_OK;
+}
+
+pub export fn zig_dom_document_create_text_node_direct(document: u64, data_ptr: [*]const u8, data_len: usize) u64 {
+
+    const window = resolveNodeWindow(document) orelse return 0;
+    const record = resolveNode(window, document) orelse return 0;
+    if (record.kind != .document) return 0;
+
+    return createNode(window, .text, "#text", data_ptr[0..data_len], document, false) catch 0;
 }
 
 pub export fn zig_dom_document_create_comment(document: u64, data_ptr: [*]const u8, data_len: usize, out_handle: *u64) u32 {
@@ -1222,6 +1333,16 @@ pub export fn zig_dom_node_set_text_content(node: u64, data_ptr: [*]const u8, da
     }
 
     return STATUS_OK;
+}
+
+pub export fn zig_dom_character_data_set_data_direct(node: u64, data_ptr: [*]const u8, data_len: usize) void {
+
+    const window = resolveNodeWindow(node) orelse return;
+    const record = resolveNode(window, node) orelse return;
+    switch (record.kind) {
+        .text, .comment => setNodeData(record, data_ptr[0..data_len]) catch return,
+        else => return,
+    }
 }
 
 pub export fn zig_dom_node_outer_html(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {

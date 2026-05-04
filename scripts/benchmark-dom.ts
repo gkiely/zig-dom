@@ -41,9 +41,14 @@ type MetricRow = {
 };
 
 const ELEMENT_COUNT = 10_000;
+const SMALL_ELEMENT_COUNT = 1_000;
 const RESET_COUNT = 500;
 const APPEND_SAMPLE_COUNT = 7;
 const CREATE_SAMPLE_COUNT = 7;
+const WORKFLOW_SAMPLE_COUNT = 5;
+const QUERY_SAMPLE_COUNT = 7;
+const REACT_SAMPLE_COUNT = 7;
+const REACT_ROW_COUNT = 1_000;
 const COMMON_HTML = `
   <main class="layout" data-x="1">
     <header><button class="primary" data-x="save">Save</button></header>
@@ -78,6 +83,55 @@ async function medianSample(samples: () => Promise<number> | number, count: numb
   }
   values.sort((left, right) => left - right);
   return values[Math.floor(values.length / 2)] ?? 0;
+}
+
+async function withGlobalDOM<T>(env: DomEnv, action: () => Promise<T> | T): Promise<T> {
+  const keys = [
+    "window",
+    "document",
+    "Node",
+    "Element",
+    "HTMLElement",
+    "Document",
+    "Event",
+    "CustomEvent",
+    "MouseEvent",
+    "KeyboardEvent",
+    "InputEvent",
+    "navigator"
+  ] as const;
+  const previous = new Map<string, unknown>();
+  const globalScope = globalThis as Record<string, unknown>;
+
+  for (const key of keys) {
+    previous.set(key, globalScope[key]);
+  }
+
+  globalScope.window = env.window;
+  globalScope.document = env.document;
+  globalScope.Node = env.window.Node;
+  globalScope.Element = env.window.Element;
+  globalScope.HTMLElement = env.window.HTMLElement;
+  globalScope.Document = env.window.Document;
+  globalScope.Event = env.window.Event;
+  globalScope.CustomEvent = env.window.CustomEvent;
+  globalScope.MouseEvent = env.window.MouseEvent;
+  globalScope.KeyboardEvent = env.window.KeyboardEvent;
+  globalScope.InputEvent = env.window.InputEvent;
+  globalScope.navigator = { userAgent: "zig-dom-benchmark" };
+
+  try {
+    return await action();
+  } finally {
+    for (const key of keys) {
+      const value = previous.get(key);
+      if (value === undefined) {
+        delete globalScope[key];
+      } else {
+        globalScope[key] = value;
+      }
+    }
+  }
 }
 
 function resetByClearing(windowLike: AnyWindow): void {
@@ -196,35 +250,84 @@ function buildSelectorFixture(document: Document): HTMLElement {
 }
 
 async function measureReactRender(adapterName: string, env: DomEnv): Promise<number> {
-  const React = await import("react");
-  const ReactDOMClient = await import("react-dom/client");
-
-  const previous = {
-    window: globalThis.window,
-    document: globalThis.document
-  };
-
-  const win = env.window;
-  (globalThis as Record<string, unknown>).window = win;
-  (globalThis as Record<string, unknown>).document = env.document;
-
-  try {
+  return withGlobalDOM(env, async () => {
+    const React = await import("react");
+    const { flushSync } = await import("react-dom");
+    const ReactDOMClient = await import("react-dom/client");
     const container = env.document.createElement("div");
     env.document.body.appendChild(container);
 
     const root = ReactDOMClient.createRoot(container);
     const elapsed = await measureMetric(async () => {
-      root.render(
-        React.createElement("main", { "data-testid": "bench-root" }, `hello from ${adapterName}`)
-      );
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      flushSync(() => {
+        root.render(
+          React.createElement("main", { "data-testid": "bench-root" }, `hello from ${adapterName}`)
+        );
+      });
     });
     root.unmount();
     return elapsed;
-  } finally {
-    (globalThis as Record<string, unknown>).window = previous.window;
-    (globalThis as Record<string, unknown>).document = previous.document;
-  }
+  });
+}
+
+async function measureReactRows(env: DomEnv): Promise<number> {
+  return withGlobalDOM(env, async () => {
+    const React = await import("react");
+    const { flushSync } = await import("react-dom");
+    const ReactDOMClient = await import("react-dom/client");
+
+    return medianSample(() => {
+      const container = env.document.createElement("div");
+      env.document.body.appendChild(container);
+
+      const root = ReactDOMClient.createRoot(container);
+      const elapsed = measureMetric(async () => {
+        flushSync(() => {
+          root.render(
+            React.createElement("ul", null,
+              Array.from({ length: REACT_ROW_COUNT }, (_, index) =>
+                React.createElement("li", { key: index, "data-row": index }, `row ${index}`)
+              )
+            )
+          );
+        });
+      });
+      root.unmount();
+      return elapsed;
+    }, REACT_SAMPLE_COUNT);
+  });
+}
+
+async function measureReactRowsUpdate(env: DomEnv): Promise<number> {
+  return withGlobalDOM(env, async () => {
+    const React = await import("react");
+    const { flushSync } = await import("react-dom");
+    const ReactDOMClient = await import("react-dom/client");
+    const renderRows = (offset: number) =>
+      React.createElement("ul", null,
+        Array.from({ length: REACT_ROW_COUNT }, (_, index) =>
+          React.createElement("li", { key: index, "data-row": index }, `row ${index + offset}`)
+        )
+      );
+
+    return medianSample(() => {
+      const container = env.document.createElement("div");
+      env.document.body.appendChild(container);
+
+      const root = ReactDOMClient.createRoot(container);
+      flushSync(() => {
+        root.render(renderRows(0));
+      });
+
+      const elapsed = measureMetric(async () => {
+        flushSync(() => {
+          root.render(renderRows(1));
+        });
+      });
+      root.unmount();
+      return elapsed;
+    }, REACT_SAMPLE_COUNT);
+  });
 }
 
 async function runForAdapter(adapter: Adapter): Promise<Record<string, number | null>> {
@@ -333,25 +436,120 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
     });
   });
 
+  await withEnv("fragment_append_10k_children_ms", async (env) => {
+    return medianSample(() => {
+      const fragment = env.document.createDocumentFragment();
+      for (let i = 0; i < ELEMENT_COUNT; i += 1) {
+        fragment.appendChild(env.document.createElement("div"));
+      }
+
+      return measureMetric(() => {
+        env.document.body.appendChild(fragment);
+      });
+    }, APPEND_SAMPLE_COUNT);
+  });
+
+  await withEnv("replace_children_1k_ms", async (env) => {
+    return medianSample(() => {
+      const container = env.document.createElement("div");
+      env.document.body.appendChild(container);
+      const nodes: Element[] = [];
+      for (let i = 0; i < SMALL_ELEMENT_COUNT; i += 1) {
+        const child = env.document.createElement("span");
+        child.textContent = String(i);
+        nodes.push(child);
+      }
+
+      return measureMetric(() => {
+        container.replaceChildren(...nodes);
+      });
+    }, QUERY_SAMPLE_COUNT);
+  });
+
+  await withEnv("mixed_dom_workflow_1k_ms", async (env) => {
+    return medianSample(() => measureMetric(() => {
+      const container = env.document.createElement("section");
+      for (let i = 0; i < SMALL_ELEMENT_COUNT; i += 1) {
+        const child = env.document.createElement(i % 5 === 0 ? "button" : "div");
+        child.className = i % 2 === 0 ? "even item" : "odd item";
+        child.setAttribute("data-index", String(i));
+        child.textContent = `item ${i}`;
+        container.appendChild(child);
+      }
+      env.document.body.appendChild(container);
+      void container.querySelectorAll(".item");
+      void container.querySelectorAll("[data-index]");
+      container.remove();
+    }), WORKFLOW_SAMPLE_COUNT);
+  });
+
+  await withEnv("custom_elements_create_append_1k_ms", async (env) => {
+    if (!env.window.customElements || !env.window.HTMLElement) {
+      return NaN;
+    }
+    const name = `x-bench-${adapter.name}`;
+    if (!env.window.customElements.get(name)) {
+      env.window.customElements.define(name, class extends env.window.HTMLElement {});
+    }
+
+    return medianSample(() => measureMetric(() => {
+      const container = env.document.createElement("div");
+      for (let i = 0; i < SMALL_ELEMENT_COUNT; i += 1) {
+        container.appendChild(env.document.createElement(name));
+      }
+      env.document.body.appendChild(container);
+    }), WORKFLOW_SAMPLE_COUNT);
+  });
+
+  await withEnv("mutation_observer_append_1k_ms", async (env) => {
+    const MutationObserverCtor = (env.window as AnyWindow & { MutationObserver?: typeof MutationObserver }).MutationObserver;
+    if (!MutationObserverCtor) {
+      return NaN;
+    }
+
+    return medianSample(() => {
+      const container = env.document.createElement("div");
+      env.document.body.appendChild(container);
+      const observer = new MutationObserverCtor(() => {});
+      observer.observe(container, { childList: true });
+
+      return measureMetric(() => {
+        for (let i = 0; i < SMALL_ELEMENT_COUNT; i += 1) {
+          container.appendChild(env.document.createElement("div"));
+        }
+        observer.disconnect();
+      });
+    }, WORKFLOW_SAMPLE_COUNT);
+  });
+
   await withEnv("query_all_div_10k_ms", async (env) => {
-    buildSelectorFixture(env.document);
-    return measureMetric(() => {
+    return medianSample(() => {
+      env.reset();
+      buildSelectorFixture(env.document);
+      return measureMetric(() => {
       env.document.querySelectorAll("div");
-    });
+      });
+    }, QUERY_SAMPLE_COUNT);
   });
 
   await withEnv("query_all_class_10k_ms", async (env) => {
-    buildSelectorFixture(env.document);
-    return measureMetric(() => {
-      env.document.querySelectorAll(".item");
-    });
+    return medianSample(() => {
+      env.reset();
+      buildSelectorFixture(env.document);
+      return measureMetric(() => {
+        env.document.querySelectorAll(".item");
+      });
+    }, QUERY_SAMPLE_COUNT);
   });
 
   await withEnv("query_all_attr_10k_ms", async (env) => {
-    buildSelectorFixture(env.document);
-    return measureMetric(() => {
-      env.document.querySelectorAll("[data-x]");
-    });
+    return medianSample(() => {
+      env.reset();
+      buildSelectorFixture(env.document);
+      return measureMetric(() => {
+        env.document.querySelectorAll("[data-x]");
+      });
+    }, QUERY_SAMPLE_COUNT);
   });
 
   await withEnv("inner_html_parse_ms", async (env) => {
@@ -383,6 +581,14 @@ async function runForAdapter(adapter: Adapter): Promise<Record<string, number | 
   } else {
     results.react_render_smoke_ms = null;
   }
+
+  await withEnv("react_render_1k_rows_ms", async (env) => {
+    return measureReactRows(env);
+  });
+
+  await withEnv("react_update_1k_rows_ms", async (env) => {
+    return measureReactRowsUpdate(env);
+  });
 
   for (const [key, value] of Object.entries(results)) {
     if (typeof value === "number" && Number.isNaN(value)) {

@@ -256,6 +256,7 @@ export class Window extends EventTargetBase {
   readonly sessionStorage = new Storage();
   readonly customElements: CustomElementRegistry;
   _hasCustomElementDefinitions = false;
+  _hasCustomElementConnectionCallbacks = false;
   _hasMutationObservers = false;
   onanimationend: ((event: Event) => void) | null = null;
   onanimationiteration: ((event: Event) => void) | null = null;
@@ -273,8 +274,18 @@ export class Window extends EventTargetBase {
     this._nativeWindowHandle = native.createWindow();
     this.#documentHandle = native.windowDocument(this._nativeWindowHandle);
 
-    this.customElements = new CustomElementRegistry((name) => {
+    this.customElements = new CustomElementRegistry((name, constructor) => {
       this._hasCustomElementDefinitions = true;
+      const prototype = constructor.prototype as unknown as {
+        connectedCallback?: () => void;
+        disconnectedCallback?: () => void;
+      };
+      if (
+        typeof prototype.connectedCallback === "function" ||
+        typeof prototype.disconnectedCallback === "function"
+      ) {
+        this._hasCustomElementConnectionCallbacks = true;
+      }
       this.upgradeDefinedElements(name);
     });
 

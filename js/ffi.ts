@@ -82,6 +82,8 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_node_compare_document_position: { returns: "u32", args: ["u64", "u64"] },
   zig_dom_node_name: { returns: "u32", args: ["u64", "ptr", "ptr"] },
   zig_dom_node_append_child: { returns: "u32", args: ["u64", "u64"] },
+  zig_dom_node_append_fragment: { returns: "u32", args: ["u64", "u64"] },
+  zig_dom_node_replace_children: { returns: "u32", args: ["u64", "ptr", "usize"] },
   zig_dom_window_append_child: { returns: "u32", args: ["u64", "u64", "u64"] },
   zig_dom_node_insert_before: { returns: "u32", args: ["u64", "u64", "u64"] },
   zig_dom_node_remove_child: { returns: "u32", args: ["u64", "u64"] },
@@ -89,6 +91,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_document_create_element: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_create_div_element: { returns: "u64", args: ["u64"] },
   zig_dom_document_create_text_node: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
+  zig_dom_document_create_text_node_direct: { returns: "u64", args: ["u64", "ptr", "usize"] },
   zig_dom_document_create_comment: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_create_document_fragment: { returns: "u32", args: ["u64", "ptr"] },
   zig_dom_element_get_attribute: { returns: "u32", args: ["u64", "ptr", "usize", "ptr", "ptr", "ptr"] },
@@ -99,6 +102,7 @@ const nativeLibrary = dlopen(libraryPath, {
   zig_dom_element_attributes_json: { returns: "u32", args: ["u64", "ptr", "ptr"] },
   zig_dom_node_text_content: { returns: "u32", args: ["u64", "ptr", "ptr"] },
   zig_dom_node_set_text_content: { returns: "u32", args: ["u64", "ptr", "usize"] },
+  zig_dom_character_data_set_data_direct: { returns: "void", args: ["u64", "ptr", "usize"] },
   zig_dom_node_outer_html: { returns: "u32", args: ["u64", "ptr", "ptr"] },
   zig_dom_document_get_element_by_id: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
   zig_dom_document_query_selector: { returns: "u32", args: ["u64", "ptr", "usize", "ptr"] },
@@ -119,6 +123,7 @@ const ENCODE_CACHE_LIMIT = 256;
 const ENCODE_CACHE_MAX_INPUT_LENGTH = 64;
 const encodeCache = new Map<string, Uint8Array>();
 const HANDLE_OUT_SCRATCH = new BigUint64Array(1);
+let HANDLE_ARRAY_SCRATCH = new BigUint64Array(0);
 const GET_ATTR_OUT_PTR = new BigUint64Array(1);
 const GET_ATTR_OUT_LEN = new BigUint64Array(1);
 const GET_ATTR_OUT_EXISTS = new Uint8Array(1);
@@ -168,6 +173,16 @@ function createHandleOut(): BigUint64Array {
 
 function readHandle(out: BigUint64Array): number {
   return Number(out[0]);
+}
+
+function writeHandleArray(handles: number[]): BigUint64Array {
+  if (HANDLE_ARRAY_SCRATCH.length < handles.length) {
+    HANDLE_ARRAY_SCRATCH = new BigUint64Array(handles.length);
+  }
+  for (let index = 0; index < handles.length; index += 1) {
+    HANDLE_ARRAY_SCRATCH[index] = BigInt(handles[index] ?? 0);
+  }
+  return HANDLE_ARRAY_SCRATCH.subarray(0, handles.length);
 }
 
 function readHandleArrayFromOutParams(addressRef: BigUint64Array, lengthRef: BigUint64Array): number[] {
@@ -277,6 +292,19 @@ export const native = {
     const status = nativeLibrary.symbols.zig_dom_node_append_child(parent, child);
     assertStatus(status, "zig_dom_node_append_child");
   },
+  appendFragment(parent: number, fragment: number): void {
+    const status = nativeLibrary.symbols.zig_dom_node_append_fragment(parent, fragment);
+    assertStatus(status, "zig_dom_node_append_fragment");
+  },
+  replaceChildren(parent: number, children: number[]): void {
+    const handles = writeHandleArray(children);
+    const status = nativeLibrary.symbols.zig_dom_node_replace_children(
+      parent,
+      ptr(handles.length === 0 ? HANDLE_OUT_SCRATCH : handles),
+      handles.length
+    );
+    assertStatus(status, "zig_dom_node_replace_children");
+  },
   appendChildInWindow(window: number, parent: number, child: number): void {
     const status = nativeLibrary.symbols.zig_dom_window_append_child(window, parent, child);
     if (status !== NativeStatus.Ok) {
@@ -311,10 +339,11 @@ export const native = {
   },
   createTextNode(documentHandle: number, text: string): number {
     const data = encode(text);
-    const out = createHandleOut();
-    const status = nativeLibrary.symbols.zig_dom_document_create_text_node(documentHandle, ptr(data), data.length, ptr(out));
-    assertStatus(status, "zig_dom_document_create_text_node");
-    return readHandle(out);
+    const handle = Number(nativeLibrary.symbols.zig_dom_document_create_text_node_direct(documentHandle, ptr(data), data.length));
+    if (handle === 0) {
+      throw domExceptionForStatus(NativeStatus.OutOfMemory, "zig_dom_document_create_text_node_direct", `${statusName(NativeStatus.OutOfMemory)} (${NativeStatus.OutOfMemory})`);
+    }
+    return handle;
   },
   createComment(documentHandle: number, text: string): number {
     const data = encode(text);
@@ -394,6 +423,10 @@ export const native = {
     const data = encode(value);
     const status = nativeLibrary.symbols.zig_dom_node_set_text_content(handle, ptr(data), data.length);
     assertStatus(status, "zig_dom_node_set_text_content");
+  },
+  setCharacterDataDirect(handle: number, value: string): void {
+    const data = encode(value);
+    nativeLibrary.symbols.zig_dom_character_data_set_data_direct(handle, ptr(data), data.length);
   },
   nodeOuterHtml(handle: number): string {
     const outPtr = new BigUint64Array(1);

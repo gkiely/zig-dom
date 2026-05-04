@@ -184,7 +184,11 @@ export class Node extends EventTargetBase {
     const previousValue = trackCharacterData ? this.textContent : "";
     const rawValue = value as unknown;
     const nextValue = rawValue == null ? "" : String(rawValue);
-    native.setNodeTextContent(this._handle, nextValue);
+    if (!trackCharacterData && (this.#nodeType === Node.TEXT_NODE || this.#nodeType === Node.COMMENT_NODE)) {
+      native.setCharacterDataDirect(this._handle, nextValue);
+    } else {
+      native.setNodeTextContent(this._handle, nextValue);
+    }
     const mutableNode = this as unknown as { __textContentOverride?: string };
     if (this.#nodeType === Node.TEXT_NODE || this.#nodeType === Node.COMMENT_NODE || this.#nodeType === Node.PROCESSING_INSTRUCTION_NODE) {
       mutableNode.__textContentOverride = nextValue;
@@ -223,6 +227,18 @@ export class Node extends EventTargetBase {
     }
 
     if (node.#nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      if (
+        node._window === this._window &&
+        !this._window._hasMutationObservers &&
+        !this._window._hasCustomElementDefinitions
+      ) {
+        native.appendFragment(this._handle, node._handle);
+        if (this.#nodeType === Node.DOCUMENT_NODE) {
+          refreshDocumentElementFlag(this);
+        }
+        return child;
+      }
+
       while (node.firstChild) {
         this.appendChild(node.firstChild);
       }
@@ -234,8 +250,8 @@ export class Node extends EventTargetBase {
     }
 
     const trackMutations = this._window._hasMutationObservers;
-    const hasCustomElements = this._window._hasCustomElementDefinitions;
-    if (!trackMutations && !hasCustomElements) {
+    const hasCustomElementConnectionCallbacks = this._window._hasCustomElementConnectionCallbacks;
+    if (!trackMutations && !hasCustomElementConnectionCallbacks) {
       native.appendChild(this._handle, node._handle);
       if (isIFrameElement(node)) {
         scheduleIFrameLoad(node);
@@ -259,7 +275,7 @@ export class Node extends EventTargetBase {
       }
     }
 
-    if (!hasCustomElements) {
+    if (!hasCustomElementConnectionCallbacks) {
       if (isIFrameElement(node)) {
         scheduleIFrameLoad(node);
       }
@@ -346,6 +362,26 @@ export class Node extends EventTargetBase {
 
     const insertionNodes = (nodes as unknown[]).map((node) => coerceInsertionNode(document, node));
     validateInsertionSequence(this, insertionNodes, null);
+
+    const canUseDetachedBatchReplace =
+      !this._window._hasMutationObservers &&
+      !this._window._hasCustomElementDefinitions &&
+      insertionNodes.every((node) =>
+        node._window === this._window &&
+        node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE
+      );
+    if (canUseDetachedBatchReplace) {
+      native.replaceChildren(this._handle, insertionNodes.map((node) => node._handle));
+      for (const node of insertionNodes) {
+        if (isIFrameElement(node)) {
+          scheduleIFrameLoad(node);
+        }
+      }
+      if (this.#nodeType === Node.DOCUMENT_NODE) {
+        refreshDocumentElementFlag(this);
+      }
+      return;
+    }
 
     for (const node of insertionNodes) {
       const parent = node.parentNode;

@@ -5,7 +5,7 @@ export const tests = [
       const window = createWindow();
       const { document } = window;
       const element = document.createElement("DiV");
-      assert.equal(element.nodeName, "div");
+      assert.equal(element.nodeName, "DIV");
       window.close();
     }
   }
