@@ -45,7 +45,8 @@ function asciiLowercase(value: string): string {
 }
 
 export function canUseNativeSelector(selector: string): boolean {
-  return /^[A-Za-z][A-Za-z0-9_-]*$/.test(selector)
+  return selector === "*"
+    || /^[A-Za-z][A-Za-z0-9_-]*$/.test(selector)
     || /^\.[A-Za-z_][A-Za-z0-9_-]*$/.test(selector)
     || /^\[[A-Za-z_][A-Za-z0-9_:-]*\]$/.test(selector);
 }

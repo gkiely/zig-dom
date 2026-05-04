@@ -414,18 +414,18 @@ export class EventTargetBase {
       return;
     }
 
-    for (const listener of [...listeners]) {
+    const globalScope = this.#resolveGlobalScope();
+    for (const listener of listeners.slice()) {
       if (listener.capture !== capturePhase) {
         continue;
       }
       const currentListeners = this.#listeners.get(event.type);
-      if (!currentListeners?.some((entry) => entry.original === listener.original && entry.capture === listener.capture)) {
+      if (!currentListeners?.includes(listener)) {
         continue;
       }
       if (listener.once) {
         this.removeEventListener(event.type, listener.original, { capture: listener.capture });
       }
-      const globalScope = this.#resolveGlobalScope();
       const previousEvent = globalScope ? (globalScope as { event?: Event }).event : undefined;
       if (globalScope) {
         (globalScope as { event?: Event }).event = event;

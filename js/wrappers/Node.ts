@@ -1123,7 +1123,7 @@ export class Node extends EventTargetBase {
         cursor = cursor.parentNode;
       }
       propagationPath.push(this._window as unknown as Node);
-      event.setPath([...propagationPath]);
+      event.setPath(propagationPath);
 
       for (let i = propagationPath.length - 1; i >= 1; i -= 1) {
         if (event.propagationStopped) break;
