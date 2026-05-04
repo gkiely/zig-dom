@@ -390,6 +390,11 @@ export class Node extends EventTargetBase {
     return newChild;
   }
 
+  moveBefore<TNode extends Node>(movedNode: TNode, child: Node | null): TNode {
+    this._window.assertOpen();
+    return this.insertBefore(movedNode, child);
+  }
+
   removeChild<TNode extends Node>(child: TNode): TNode {
     this._window.assertOpen();
 

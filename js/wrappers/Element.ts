@@ -8,7 +8,7 @@ import { parseHtmlInto } from "./html-parser.ts";
 import { elementMatchesSelector, querySelectorAllInElement } from "./selector-engine.ts";
 
 type AttributeEntry = { name: string; value: string };
-type AttributeMetadata = { namespaceURI: string | null; prefix: string | null; localName: string };
+type AttributeMetadata = { namespaceURI: string | null; prefix: string | null; localName: string; qualifiedName: string };
 type DatasetShape = Record<string, string>;
 
 const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
@@ -123,6 +123,8 @@ export class Element extends Node {
   #attributeNamespaces: Map<string, string | null> = new Map();
   #attributeMetadata: Map<string, AttributeMetadata> = new Map();
   #nonHtmlAttributes: Map<string, string> = new Map();
+  #plainAttributeNames: Set<string> = new Set();
+  #attributeSerial = 0;
 
   constructor(window: Node["_window"], handle: number, nodeType = Node.ELEMENT_NODE) {
     super(window, handle, nodeType);
@@ -137,6 +139,35 @@ export class Element extends Node {
 
   #isHtmlElement(): boolean {
     return this.namespaceURI === "http://www.w3.org/1999/xhtml";
+  }
+
+  #attributeDisplayName(internalName: string): string {
+    return this.#attributeMetadata.get(internalName)?.qualifiedName ?? internalName;
+  }
+
+  #findAttributeByQualifiedName(name: string): string | null {
+    const key = this.#attributeKey(name);
+    for (const [internalName, metadata] of this.#attributeMetadata) {
+      if (this.#attributeKey(metadata.qualifiedName) === key) {
+        return internalName;
+      }
+    }
+
+    if (this.#nonHtmlAttributes.has(key)) {
+      return key;
+    }
+
+    return null;
+  }
+
+  #findAttributeByNamespace(namespace: string | null, localName: string): string | null {
+    for (const [internalName, metadata] of this.#attributeMetadata) {
+      if (metadata.namespaceURI === namespace && metadata.localName === localName) {
+        return internalName;
+      }
+    }
+
+    return namespace == null ? this.#findAttributeByQualifiedName(localName) : null;
   }
 
   get classList(): DOMTokenList {
@@ -252,14 +283,22 @@ export class Element extends Node {
   }
 
   get attributes(): Array<{ name: string; value: string }> {
-    const nativeAttrs = native.elementAttributes(this._handle) as AttributeEntry[];
+    const syntheticNames = new Set([...this.#attributeMetadata.values()].map((metadata) => this.#attributeKey(metadata.qualifiedName)));
+    const nativeAttrs = (native.elementAttributes(this._handle) as AttributeEntry[])
+      .filter((attribute) => {
+        const key = this.#attributeKey(attribute.name);
+        return !syntheticNames.has(key) || this.#plainAttributeNames.has(key);
+      });
     const attrs = [...nativeAttrs];
     for (const [name, value] of this.#nonHtmlAttributes) {
-      const existingIndex = attrs.findIndex((attribute) => this.#attributeKey(attribute.name) === this.#attributeKey(name));
+      const displayName = this.#attributeDisplayName(name);
+      const existingIndex = this.#attributeMetadata.has(name)
+        ? -1
+        : attrs.findIndex((attribute) => this.#attributeKey(attribute.name) === this.#attributeKey(displayName));
       if (existingIndex === -1) {
-        attrs.push({ name, value });
+        attrs.push({ name: displayName, value });
       } else {
-        attrs[existingIndex] = { name, value };
+        attrs[existingIndex] = { name: displayName, value };
       }
     }
     const ownerDocument = this.ownerDocument;
@@ -269,13 +308,19 @@ export class Element extends Node {
     }
     this.#attributeCache = cache;
     const collection = attrs.map((attr) => {
-      const metadata = this.#attributeMetadata.get(attr.name);
+      const internalName = [...this.#attributeMetadata.entries()].find(([, metadata]) => metadata.qualifiedName === attr.name)?.[0] ?? attr.name;
+      const metadata = this.#attributeMetadata.get(internalName);
       const name = this.#isHtmlElement() && !this.#nonHtmlAttributes.has(attr.name) && !metadata
         ? attr.name.toLowerCase()
         : attr.name;
       return {
       ...attr,
       name,
+      nodeName: name,
+      nodeValue: attr.value,
+      textContent: attr.value,
+      specified: true,
+      ownerElement: this,
       ownerDocument,
       namespaceURI: metadata?.namespaceURI ?? this.#attributeNamespaces.get(this.#attributeKey(attr.name)) ?? attributeNamespace(attr.name),
       prefix: metadata?.prefix ?? attributePrefix(name),
@@ -444,8 +489,15 @@ export class Element extends Node {
 
   getAttribute(name: string): string | null {
     const key = this.#attributeKey(name);
-    if (this.#nonHtmlAttributes.has(name)) {
-      return this.#nonHtmlAttributes.get(name) ?? null;
+    if (this.#plainAttributeNames.has(key)) {
+      const value = native.getAttribute(this._handle, key);
+      if (value != null) {
+        return value;
+      }
+    }
+    const internalName = this.#findAttributeByQualifiedName(name);
+    if (internalName && this.#nonHtmlAttributes.has(internalName)) {
+      return this.#nonHtmlAttributes.get(internalName) ?? null;
     }
     if (!this.#isHtmlElement()) {
       if (this.#nonHtmlAttributes.has(key)) {
@@ -475,8 +527,9 @@ export class Element extends Node {
     }
 
     const key = this.#attributeKey(name);
-    const metadata = this.#attributeMetadata.get(name) ?? this.#attributeMetadata.get(key);
-    const reflectedName = this.#nonHtmlAttributes.has(name) ? name : key;
+    const internalName = this.#findAttributeByQualifiedName(name) ?? key;
+    const metadata = this.#attributeMetadata.get(internalName) ?? this.#attributeMetadata.get(name) ?? this.#attributeMetadata.get(key);
+    const reflectedName = metadata?.qualifiedName ?? (this.#nonHtmlAttributes.has(name) ? name : key);
     return {
       name: reflectedName,
       value,
@@ -489,12 +542,11 @@ export class Element extends Node {
   }
 
   getAttributeNodeNS(namespace: string | null, localName: string): Attr | null {
-    for (const [name, metadata] of this.#attributeMetadata) {
-      if (metadata.namespaceURI === namespace && metadata.localName === localName) {
-        return this.getAttributeNode(name);
-      }
+    const internalName = this.#findAttributeByNamespace(namespace, localName);
+    if (internalName) {
+      return this.getAttributeNode(this.#attributeDisplayName(internalName));
     }
-    return namespace == null ? this.getAttributeNode(localName) : null;
+    return null;
   }
 
   setAttributeNode(attribute: Attr): Attr | null {
@@ -523,6 +575,16 @@ export class Element extends Node {
     const key = this.#attributeKey(name);
     const previousValue = this.getAttribute(key);
     native.setAttribute(this._handle, key, value);
+    const existingInternalName = this.#findAttributeByQualifiedName(key);
+    if (existingInternalName && this.#nonHtmlAttributes.has(existingInternalName)) {
+      this.#nonHtmlAttributes.set(existingInternalName, value);
+      if (!this.#attributeCache) {
+        this.#attributeCache = new Map();
+      }
+      this.#attributeCache.set(key, value);
+      this._window.notifyAttributeChanged(this, key, previousValue, value);
+      return;
+    }
     if (!this.#isHtmlElement()) {
       this.#nonHtmlAttributes.set(key, value);
     } else if (key !== name.toLowerCase()) {
@@ -531,6 +593,7 @@ export class Element extends Node {
     if (!this.#attributeNamespaces.has(key)) {
       this.#attributeNamespaces.set(key, attributeNamespace(name));
     }
+    this.#plainAttributeNames.add(key);
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
@@ -539,27 +602,38 @@ export class Element extends Node {
   }
 
   setAttributeNS(namespace: string | null, qualifiedName: string, value: string): void {
-    const key = qualifiedName;
-    const previousValue = this.getAttributeNS(namespace, attributeLocalName(qualifiedName));
-    native.setAttribute(this._handle, key, value);
+    const normalizedNamespace = namespace === "" ? null : namespace;
+    const localName = attributeLocalName(qualifiedName);
+    const previousValue = this.getAttributeNS(normalizedNamespace, localName);
+    const existingInternalName = this.#findAttributeByNamespace(normalizedNamespace, localName);
+    const key = existingInternalName ?? (this.#nonHtmlAttributes.has(qualifiedName) || native.hasAttribute(this._handle, qualifiedName)
+      ? `${qualifiedName}\u0000${++this.#attributeSerial}`
+      : qualifiedName);
+    if (!this.#plainAttributeNames.has(this.#attributeKey(qualifiedName))) {
+      native.setAttribute(this._handle, qualifiedName, value);
+    }
     this.#nonHtmlAttributes.set(key, value);
-    this.#attributeNamespaces.set(key, namespace);
+    this.#attributeNamespaces.set(key, normalizedNamespace);
     this.#attributeMetadata.set(key, {
-      namespaceURI: namespace,
+      qualifiedName,
+      namespaceURI: normalizedNamespace,
       prefix: attributePrefix(qualifiedName),
-      localName: attributeLocalName(qualifiedName)
+      localName
     });
     if (!this.#attributeCache) {
       this.#attributeCache = new Map();
     }
-    this.#attributeCache.set(key, value);
-    this._window.notifyAttributeChanged(this, key, previousValue, value);
+    this.#attributeCache.set(qualifiedName, value);
+    this._window.notifyAttributeChanged(this, qualifiedName, previousValue, value);
   }
 
   removeAttribute(name: string): void {
     const key = this.#attributeKey(name);
     const previousValue = this.getAttribute(key);
-    native.removeAttribute(this._handle, key);
+    const removingPlainAttribute = this.#plainAttributeNames.has(key);
+    const internalName = removingPlainAttribute ? key : this.#findAttributeByQualifiedName(key) ?? key;
+    const displayName = this.#attributeDisplayName(internalName);
+    native.removeAttribute(this._handle, displayName);
     if (!this.#isHtmlElement()) {
       this.#nonHtmlAttributes.delete(key);
     }
@@ -567,20 +641,21 @@ export class Element extends Node {
       this.#attributeCache = new Map();
     }
     this.#attributeCache.set(key, null);
-    this.#attributeNamespaces.delete(key);
-    this.#attributeMetadata.delete(key);
+    if (!removingPlainAttribute) {
+      this.#attributeNamespaces.delete(internalName);
+      this.#attributeMetadata.delete(internalName);
+    }
     this.#nonHtmlAttributes.delete(name);
+    this.#nonHtmlAttributes.delete(internalName);
+    this.#plainAttributeNames.delete(key);
     this._window.notifyAttributeChanged(this, key, previousValue, null);
   }
 
   removeAttributeNS(namespace: string | null, localName: string): void {
-    for (const [name, metadata] of this.#attributeMetadata) {
-      if (metadata.namespaceURI === namespace && metadata.localName === localName) {
-        this.removeAttribute(name);
-        return;
-      }
+    const internalName = this.#findAttributeByNamespace(namespace === "" ? null : namespace, localName);
+    if (internalName) {
+      this.removeAttribute(this.#attributeDisplayName(internalName));
     }
-    this.removeAttribute(localName);
   }
 
   removeAttributeNode(attribute: Attr): Attr {
@@ -629,12 +704,23 @@ export class Element extends Node {
   }
 
   getAttributeNS(namespace: string | null, localName: string): string | null {
-    for (const [name, metadata] of this.#attributeMetadata) {
-      if (metadata.namespaceURI === namespace && metadata.localName === localName) {
-        return this.getAttribute(name);
+    const normalizedNamespace = namespace === "" ? null : namespace;
+    if (normalizedNamespace == null && this.#plainAttributeNames.has(this.#attributeKey(localName))) {
+      const attr = this.getAttributeNode(localName);
+      if (attr?.localName === localName) {
+        return attr.value;
       }
     }
-    return namespace == null ? this.getAttribute(localName) : null;
+    for (const [name, metadata] of this.#attributeMetadata) {
+      if (metadata.namespaceURI === normalizedNamespace && metadata.localName === localName) {
+        return this.#nonHtmlAttributes.get(name) ?? null;
+      }
+    }
+    if (normalizedNamespace == null) {
+      const attr = this.getAttributeNode(localName);
+      return attr && attr.namespaceURI == null && attr.localName === localName ? attr.value : null;
+    }
+    return null;
   }
 
   hasAttributeNS(namespace: string | null, localName: string): boolean {
@@ -742,7 +828,7 @@ export class Element extends Node {
 
   getElementsByTagName(tagName: string): HTMLCollection {
     const expectedHtmlName = asciiLowercase(tagName);
-    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+    return new HTMLCollection(() => collectDescendantElements(this).filter((element) => {
       if (tagName === "*") {
         return true;
       }
@@ -757,7 +843,7 @@ export class Element extends Node {
 
   getElementsByTagNameNS(namespace: string | null, localName: string): HTMLCollection {
     const expectedLocalName = localName === "*" ? null : localName;
-    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+    return new HTMLCollection(() => collectDescendantElements(this).filter((element) => {
       const namespaceMatches = namespace === "*" || element.namespaceURI === namespace;
       const localNameMatches = expectedLocalName == null || element.localName === expectedLocalName;
       return namespaceMatches && localNameMatches;
@@ -770,11 +856,25 @@ export class Element extends Node {
       return new HTMLCollection(() => []);
     }
 
-    return new HTMLCollection(() => Array.from(this.querySelectorAll("*") as unknown as Iterable<Element>).filter((element) => {
+    return new HTMLCollection(() => collectDescendantElements(this).filter((element) => {
       const classes = splitAsciiWhitespace(element.getAttribute("class") ?? "");
       return tokens.every((token) => classes.includes(token));
     }));
   }
+}
+
+function collectDescendantElements(root: Element): Element[] {
+  const descendants: Element[] = [];
+  const visit = (node: Node) => {
+    for (const child of node.childNodes.toArray()) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        descendants.push(child as Element);
+        visit(child);
+      }
+    }
+  };
+  visit(root);
+  return descendants;
 }
 
 function attributePrefix(name: string): string | null {
