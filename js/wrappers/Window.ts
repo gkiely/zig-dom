@@ -523,6 +523,15 @@ export class Window extends EventTargetBase {
     };
     CommentConstructor.prototype = BaseComment.prototype;
 
+    const BaseDocumentFragment = DocumentFragment;
+    const DocumentFragmentConstructor = function(this: unknown) {
+      return thisWindow.document.createDocumentFragment();
+    } as unknown as {
+      new (): DocumentFragment;
+      prototype: DocumentFragment;
+    };
+    DocumentFragmentConstructor.prototype = BaseDocumentFragment.prototype;
+
     Object.defineProperty(this, "CharacterData", {
       value: CharacterDataConstructor,
       configurable: true,
@@ -537,6 +546,12 @@ export class Window extends EventTargetBase {
 
     Object.defineProperty(this, "Comment", {
       value: CommentConstructor,
+      configurable: true,
+      writable: true
+    });
+
+    Object.defineProperty(this, "DocumentFragment", {
+      value: DocumentFragmentConstructor,
       configurable: true,
       writable: true
     });

@@ -398,9 +398,6 @@ export class Element extends Node {
         }
         (this._window as unknown as { __loadFrameDocument?: (frame: unknown) => void }).__loadFrameDocument?.(this);
         const event = new Event("load");
-        if (!this.hasAttribute("onload")) {
-          (this as unknown as { onload?: ((event: Event) => void) | null }).onload?.call(this, event);
-        }
         this.dispatchEvent(event);
       });
     }
@@ -684,7 +681,7 @@ export class Element extends Node {
   get innerHTML(): string {
     return this.childNodes
       .toArray()
-      .map((child) => native.nodeOuterHtml(child._handle))
+      .map((child) => child.outerHTML)
       .join("");
   }
 
@@ -977,7 +974,10 @@ export class Element extends Node {
   }
 
   matches(selector: string): boolean {
-    return elementMatchesSelector(this, selector);
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'matches': 1 argument required, but only 0 present.");
+    }
+    return elementMatchesSelector(this, String(selector));
   }
 
   webkitMatchesSelector(selector: string): boolean {
@@ -985,9 +985,13 @@ export class Element extends Node {
   }
 
   closest(selector: string): Element | null {
+    if (arguments.length === 0) {
+      throw new TypeError("Failed to execute 'closest': 1 argument required, but only 0 present.");
+    }
+    const normalizedSelector = String(selector);
     let current: Element | null = this;
     while (current) {
-      if (elementMatchesSelector(current, selector, this)) {
+      if (elementMatchesSelector(current, normalizedSelector, this)) {
         return current;
       }
       current = current.parentElement;

@@ -35,6 +35,7 @@ type ExpectedEntry = {
   subtest: string;
   reason: string;
   owner: string;
+  status?: "fail" | "skip";
 };
 
 type ExpectedMap = {
@@ -44,7 +45,7 @@ type ExpectedMap = {
 type SubtestResult = {
   file: string;
   name: string;
-  status: "pass" | "fail";
+  status: "pass" | "fail" | "skip";
   message?: string;
   durationMs: number;
 };
@@ -793,6 +794,12 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
     }
   };
 
+  const assert_idl_attribute = (object: unknown, property: string, message = "Expected IDL attribute") => {
+    if (object == null || !(property in Object(object))) {
+      throw new Error(message);
+    }
+  };
+
   const assert_greater_than_equal = (actual: number, expected: number, message = "Expected actual >= expected") => {
     if (!(actual >= expected)) {
       throw new Error(message);
@@ -1096,6 +1103,7 @@ async function runHtmlEntry(file: string, wptRootPath: string, variant?: string)
   context.assert_equals = assert_equals;
   context.assert_not_equals = assert_not_equals;
   context.assert_own_property = assert_own_property;
+  context.assert_idl_attribute = assert_idl_attribute;
   context.assert_greater_than_equal = assert_greater_than_equal;
   context.assert_implements = assert_implements;
   context.assert_array_equals = assert_array_equals;
@@ -1254,6 +1262,13 @@ for (const entry of expected.expectedFailures) {
   expectedMap.set(key, entry);
 }
 
+const skippedFileMap = new Map<string, ExpectedEntry>();
+for (const entry of expected.expectedFailures) {
+  if (entry.status === "skip" && entry.subtest === "__all__") {
+    skippedFileMap.set(entry.file, entry);
+  }
+}
+
 const expandedEntries: Array<{ entry: ManifestEntry; variant: string | undefined }> = [];
 for (const entry of manifest.tests) {
   for (const variant of expandEntryVariants(entry)) {
@@ -1273,6 +1288,23 @@ let completedEntries = 0;
 const runSelectedEntry = async (index: number): Promise<void> => {
   const { entry, variant } = selectedEntries[index];
   const fileId = entryId(entry.file, variant);
+  const skipEntry = skippedFileMap.get(fileId) ?? skippedFileMap.get(entry.file);
+  if (skipEntry) {
+    allResults.push({
+      file: fileId,
+      name: "__skip__",
+      status: "skip",
+      message: skipEntry.reason,
+      durationMs: 0
+    });
+    completedEntries += 1;
+    const absolute = startEntry + index + 1;
+    if (progressEvery > 0 && (completedEntries % progressEvery === 0 || completedEntries === selectedEntries.length)) {
+      console.log(`PROGRESS entries=${completedEntries}/${selectedEntries.length} absolute=${absolute}/${expandedEntries.length} file=${entry.file}`);
+    }
+    return;
+  }
+
   const start = performance.now();
 
   try {
@@ -1356,8 +1388,15 @@ let passed = 0;
 let failed = 0;
 let expectedFail = 0;
 let unexpectedPass = 0;
+let skipped = 0;
 
 for (const result of allResults) {
+  if (result.status === "skip") {
+    skipped += 1;
+    console.log(`SKIP ${result.file} :: ${result.message ?? "skipped"}`);
+    continue;
+  }
+
   const key = `${result.file}::${result.name}`;
   const expectedByName = expectedMap.get(key);
   const expectedByFile = expectedMap.get(`${result.file}::__all__`);
@@ -1383,7 +1422,7 @@ for (const result of allResults) {
 }
 
 const unexpectedFail = failed - expectedFail;
-console.log(`SUMMARY pass=${passed} fail=${failed} expected_fail=${expectedFail} unexpected_pass=${unexpectedPass}`);
+console.log(`SUMMARY pass=${passed} fail=${failed} expected_fail=${expectedFail} unexpected_pass=${unexpectedPass} skipped=${skipped}`);
 
 if (unexpectedFail > 0 || unexpectedPass > 0) {
   process.exit(1);

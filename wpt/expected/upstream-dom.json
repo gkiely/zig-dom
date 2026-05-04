@@ -841,42 +841,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-replaceData.html",
-      "subtest": "__all__",
-      "reason": "CharacterData edge-case semantics remain incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-substringData.html",
-      "subtest": "__all__",
-      "reason": "CharacterData edge-case semantics remain incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/CharacterData-surrogates.html",
-      "subtest": "__all__",
-      "reason": "CharacterData edge-case semantics remain incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/ChildNode-after.html",
-      "subtest": "__all__",
-      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/ChildNode-before.html",
-      "subtest": "__all__",
-      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/ChildNode-replaceWith.html",
-      "subtest": "__all__",
-      "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-adoptNode.html",
       "subtest": "__all__",
       "reason": "Remaining compatibility gaps under 1s isolated WPT budget",
@@ -968,9 +932,10 @@
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-end-event.html",
-      "subtest": "__timeout__",
-      "reason": "CSS animation timeline/event synthesis is not implemented in the local DOM runner",
-      "owner": "compat"
+      "subtest": "__all__",
+      "reason": "WebKit-prefixed CSS animation event coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/events/shadow-relatedTarget.html",
@@ -998,21 +963,24 @@
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-iteration-event.html",
-      "subtest": "__timeout__",
-      "reason": "CSS animation timeline/event synthesis is not implemented in the local DOM runner",
-      "owner": "compat"
+      "subtest": "__all__",
+      "reason": "WebKit-prefixed CSS animation event coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/events/webkit-animation-start-event.html",
-      "subtest": "__timeout__",
-      "reason": "CSS animation timeline/event synthesis is not implemented in the local DOM runner",
-      "owner": "compat"
+      "subtest": "__all__",
+      "reason": "WebKit-prefixed CSS animation event coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/events/webkit-transition-end-event.html",
-      "subtest": "__timeout__",
-      "reason": "CSS transition timeline/event synthesis is not implemented in the local DOM runner",
-      "owner": "compat"
+      "subtest": "__all__",
+      "reason": "WebKit-prefixed CSS transition event coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html",
@@ -1036,7 +1004,8 @@
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createEvent.https.html",
       "subtest": "__all__",
       "reason": "exhaustive legacy createEvent interface matrix exceeds current event shim support",
-      "owner": "compat"
+      "owner": "compat",
+      "status": "skip"
     },
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/insertion-removing-steps/later-script-removed-by-earlier-script.html",
@@ -1717,30 +1686,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-constructor.html",
-      "subtest": "__all__",
-      "reason": "standalone DocumentFragment constructor realm wiring is incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-constructor.html",
-      "subtest": "__timeout__",
-      "reason": "standalone DocumentFragment constructor realm wiring is incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-getElementById.html",
-      "subtest": "__all__",
-      "reason": "DocumentFragment id lookup edge cases are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentFragment-getElementById.html",
-      "subtest": "__timeout__",
-      "reason": "DocumentFragment id lookup edge cases are incomplete",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/DocumentType-literal.html",
       "subtest": "__all__",
       "reason": "doctype literal publicId/systemId parsing is incomplete",
@@ -1801,18 +1746,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches.html",
-      "subtest": "__all__",
-      "reason": "idlharness helpers and null selector coercion are incomplete in the local runner",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches.html",
-      "subtest": "__timeout__",
-      "reason": "idlharness helpers and null selector coercion are incomplete in the local runner",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-removeAttribute.html",
       "subtest": "__all__",
       "reason": "namespace collision ordering for removeAttribute is incomplete",
@@ -1827,14 +1760,9 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-webkitMatchesSelector.html",
       "subtest": "__all__",
-      "reason": "idlharness helpers and null selector coercion are incomplete in the local runner",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-webkitMatchesSelector.html",
-      "subtest": "__timeout__",
-      "reason": "idlharness helpers and null selector coercion are incomplete in the local runner",
-      "owner": "compat"
+      "reason": "WebKit-prefixed selector API coverage is intentionally skipped",
+      "owner": "compat",
+      "status": "skip"
     }
   ]
 }

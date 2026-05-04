@@ -565,9 +565,7 @@ export class Document extends Node {
     const text = String(data);
     const handle = native.createTextNode(this._handle, text);
     const node = this._window.createKnownNode(handle, Node.TEXT_NODE) as Text;
-    if (text.includes("\u0000")) {
-      (node as unknown as { __textContentOverride?: string }).__textContentOverride = text;
-    }
+    (node as unknown as { __textContentOverride?: string }).__textContentOverride = text;
     return node;
   }
 
@@ -576,9 +574,7 @@ export class Document extends Node {
     const text = String(data);
     const handle = native.createComment(this._handle, text);
     const node = this._window.createKnownNode(handle, Node.COMMENT_NODE) as Comment;
-    if (text.includes("\u0000")) {
-      (node as unknown as { __textContentOverride?: string }).__textContentOverride = text;
-    }
+    (node as unknown as { __textContentOverride?: string }).__textContentOverride = text;
     return node;
   }
 

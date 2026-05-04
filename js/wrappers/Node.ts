@@ -186,7 +186,7 @@ export class Node extends EventTargetBase {
     const nextValue = rawValue == null ? "" : String(rawValue);
     native.setNodeTextContent(this._handle, nextValue);
     const mutableNode = this as unknown as { __textContentOverride?: string };
-    if (nextValue.includes("\u0000")) {
+    if (this.#nodeType === Node.TEXT_NODE || this.#nodeType === Node.COMMENT_NODE || this.#nodeType === Node.PROCESSING_INSTRUCTION_NODE) {
       mutableNode.__textContentOverride = nextValue;
     } else {
       delete mutableNode.__textContentOverride;
@@ -813,8 +813,10 @@ export class Node extends EventTargetBase {
       return;
     }
 
-    for (const node of nodes as unknown[]) {
-      parent.insertBefore(coerceInsertionNode(document, node), this);
+    const insertionNodes = (nodes as unknown[]).map((node) => coerceInsertionNode(document, node));
+    const reference = insertionNodes.includes(this) ? viableNextSibling(this, insertionNodes) : this;
+    for (const node of insertionNodes) {
+      parent.insertBefore(node, reference);
     }
   }
 
@@ -833,9 +835,10 @@ export class Node extends EventTargetBase {
       return;
     }
 
-    const reference = this.nextSibling;
-    for (const node of nodes as unknown[]) {
-      parent.insertBefore(coerceInsertionNode(document, node), reference);
+    const insertionNodes = (nodes as unknown[]).map((node) => coerceInsertionNode(document, node));
+    const reference = viableNextSibling(this, insertionNodes);
+    for (const node of insertionNodes) {
+      parent.insertBefore(node, reference);
     }
   }
 
@@ -847,8 +850,21 @@ export class Node extends EventTargetBase {
       return;
     }
 
-    this.before(...nodes);
-    this.remove();
+    const document = parent.nodeType === Node.DOCUMENT_NODE
+      ? (parent as unknown as Document)
+      : parent.ownerDocument;
+    if (!document) {
+      return;
+    }
+
+    const insertionNodes = (nodes as unknown[]).map((node) => coerceInsertionNode(document, node));
+    const reference = viableNextSibling(this, insertionNodes);
+    for (const node of insertionNodes) {
+      parent.insertBefore(node, reference);
+    }
+    if (!insertionNodes.includes(this)) {
+      this.remove();
+    }
   }
 
   cloneNode(deep = false): Node {
@@ -1100,6 +1116,12 @@ export class Node extends EventTargetBase {
   }
 
   get outerHTML(): string {
+    if (this.#nodeType === Node.TEXT_NODE) {
+      return escapeTextForSerialization(this.textContent);
+    }
+    if (this.#nodeType === Node.COMMENT_NODE) {
+      return `<!--${this.textContent}-->`;
+    }
     return native.nodeOuterHtml(this._handle);
   }
 
@@ -1359,7 +1381,23 @@ function coerceInsertionNode(document: Document, value: unknown): Node {
   if (value && typeof value === "object" && typeof (value as { nodeType?: unknown }).nodeType === "number") {
     return value as Node;
   }
-  return document.createTextNode(String(value));
+  const text = String(value);
+  return document.createTextNode(text);
+}
+
+function viableNextSibling(node: Node, insertionNodes: Node[]): Node | null {
+  let sibling = node.nextSibling;
+  while (sibling && insertionNodes.includes(sibling)) {
+    sibling = sibling.nextSibling;
+  }
+  return sibling;
+}
+
+function escapeTextForSerialization(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function isEqualDocumentNode(left: Node, right: Node): boolean {
@@ -1424,9 +1462,6 @@ function scheduleIFrameLoadIfNeeded(node: Node): void {
     }
     (node._window as unknown as { __loadFrameDocument?: (frame: unknown) => void }).__loadFrameDocument?.(node);
     const event = new Event("load");
-    if (!elementLike.hasAttribute?.("onload")) {
-      elementLike.onload?.call(node, event);
-    }
     elementLike.dispatchEvent?.(event);
   });
 }
