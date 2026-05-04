@@ -25,26 +25,24 @@ console.log(window.document.querySelector("button")?.textContent);
 window.close();
 ```
 
-## React Usage
+## Test Setup
 
-Create a Bun preload file, similar to `react-ts-template`:
+Create a Bun preload file:
 
 ```ts
 // preload.ts
 import { GlobalRegistrator } from "zig-dom/global-registrator";
-import * as matchers from "@testing-library/jest-dom/matchers";
-import { afterEach, expect } from "bun:test";
 
 GlobalRegistrator.register();
-expect.extend(matchers);
-
-const { cleanup } = await import("@testing-library/react");
-afterEach(() => cleanup());
 ```
 
 | bunfig.toml | CLI fallback |
 | --- | --- |
 | <pre lang="toml">[test]<br>preload = ["./preload.ts"]</pre> | <pre lang="sh">bun test --preload ./preload.ts</pre> |
+
+| Vanilla JS | React |
+| --- | --- |
+| <pre lang="ts">import { test, expect } from "bun:test";<br><br>test("updates the document", () => {<br>  document.body.innerHTML = "&lt;button&gt;Save&lt;/button&gt;";<br>  expect(document.querySelector("button")?.textContent).toBe("Save");<br>});</pre> | <pre lang="tsx">import { render, screen } from "@testing-library/react";<br>import { test, expect } from "bun:test";<br><br>test("renders", () => {<br>  render(&lt;button&gt;Save&lt;/button&gt;);<br>  expect(screen.getByRole("button").textContent).toBe("Save");<br>});</pre> |
 
 ## Development
 
