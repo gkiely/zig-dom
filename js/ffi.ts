@@ -120,7 +120,7 @@ const nativeLibrary = dlopen(libraryPath, {
 });
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 const EMPTY_BYTES = new Uint8Array(1);
 const ENCODE_CACHE_LIMIT = 256;
 const ENCODE_CACHE_MAX_INPUT_LENGTH = 64;
@@ -154,6 +154,10 @@ function encode(input: string, shouldCache = true): Uint8Array {
   }
 
   return bytes;
+}
+
+function encodedLength(input: string, bytes: Uint8Array): number {
+  return input.length === 0 ? 0 : bytes.length;
 }
 
 function readStringFromOutParams(addressRef: BigUint64Array, lengthRef: BigUint64Array): string {
@@ -224,7 +228,7 @@ export const native = {
     const bytes = encode(input);
     const outPtr = new BigUint64Array(1);
     const outLen = new BigUint64Array(1);
-    const status = nativeLibrary.symbols.zig_dom_echo_utf8(ptr(bytes), bytes.length, ptr(outPtr), ptr(outLen));
+    const status = nativeLibrary.symbols.zig_dom_echo_utf8(ptr(bytes), encodedLength(input, bytes), ptr(outPtr), ptr(outLen));
     assertStatus(status, "zig_dom_echo_utf8");
     return readStringFromOutParams(outPtr, outLen);
   },
@@ -336,7 +340,7 @@ export const native = {
   },
   setInnerHTML(parent: number, html: string): void {
     const bytes = encode(html, false);
-    const status = nativeLibrary.symbols.zig_dom_node_set_inner_html(parent, ptr(bytes), bytes.length);
+    const status = nativeLibrary.symbols.zig_dom_node_set_inner_html(parent, ptr(bytes), encodedLength(html, bytes));
     assertStatus(status, "zig_dom_node_set_inner_html");
   },
   appendChildInWindow(window: number, parent: number, child: number): void {
@@ -360,7 +364,7 @@ export const native = {
   createElement(documentHandle: number, tagName: string): number {
     const tag = encode(tagName);
     const out = createHandleOut();
-    const status = nativeLibrary.symbols.zig_dom_document_create_element(documentHandle, ptr(tag), tag.length, ptr(out));
+    const status = nativeLibrary.symbols.zig_dom_document_create_element(documentHandle, ptr(tag), encodedLength(tagName, tag), ptr(out));
     assertStatus(status, "zig_dom_document_create_element");
     return readHandle(out);
   },
@@ -373,7 +377,7 @@ export const native = {
   },
   createTextNode(documentHandle: number, text: string): number {
     const data = encode(text);
-    const handle = Number(nativeLibrary.symbols.zig_dom_document_create_text_node_direct(documentHandle, ptr(data), data.length));
+    const handle = Number(nativeLibrary.symbols.zig_dom_document_create_text_node_direct(documentHandle, ptr(data), encodedLength(text, data)));
     if (handle === 0) {
       throw domExceptionForStatus(NativeStatus.OutOfMemory, "zig_dom_document_create_text_node_direct", `${statusName(NativeStatus.OutOfMemory)} (${NativeStatus.OutOfMemory})`);
     }
@@ -382,7 +386,7 @@ export const native = {
   createComment(documentHandle: number, text: string): number {
     const data = encode(text);
     const out = createHandleOut();
-    const status = nativeLibrary.symbols.zig_dom_document_create_comment(documentHandle, ptr(data), data.length, ptr(out));
+    const status = nativeLibrary.symbols.zig_dom_document_create_comment(documentHandle, ptr(data), encodedLength(text, data), ptr(out));
     assertStatus(status, "zig_dom_document_create_comment");
     return readHandle(out);
   },
@@ -400,7 +404,7 @@ export const native = {
     const status = nativeLibrary.symbols.zig_dom_element_get_attribute_ref(
       elementHandle,
       ptr(key),
-      key.length,
+      encodedLength(name, key),
       ptr(GET_ATTR_OUT_PTR),
       ptr(GET_ATTR_OUT_LEN),
       ptr(GET_ATTR_OUT_EXISTS)
@@ -420,17 +424,17 @@ export const native = {
   setAttribute(elementHandle: number, name: string, value: string): void {
     const key = encode(name);
     const val = encode(value, false);
-    const status = nativeLibrary.symbols.zig_dom_element_set_attribute(elementHandle, ptr(key), key.length, ptr(val), val.length);
+    const status = nativeLibrary.symbols.zig_dom_element_set_attribute(elementHandle, ptr(key), encodedLength(name, key), ptr(val), encodedLength(value, val));
     assertStatus(status, "zig_dom_element_set_attribute");
   },
   removeAttribute(elementHandle: number, name: string): void {
     const key = encode(name);
-    const status = nativeLibrary.symbols.zig_dom_element_remove_attribute(elementHandle, ptr(key), key.length);
+    const status = nativeLibrary.symbols.zig_dom_element_remove_attribute(elementHandle, ptr(key), encodedLength(name, key));
     assertStatus(status, "zig_dom_element_remove_attribute");
   },
   hasAttribute(elementHandle: number, name: string): boolean {
     const key = encode(name);
-    return nativeLibrary.symbols.zig_dom_element_has_attribute(elementHandle, ptr(key), key.length) === 1;
+    return nativeLibrary.symbols.zig_dom_element_has_attribute(elementHandle, ptr(key), encodedLength(name, key)) === 1;
   },
   elementAttributes(elementHandle: number): Array<{ name: string; value: string }> {
     const outPtr = new BigUint64Array(1);
@@ -455,12 +459,12 @@ export const native = {
   },
   setNodeTextContent(handle: number, value: string): void {
     const data = encode(value);
-    const status = nativeLibrary.symbols.zig_dom_node_set_text_content(handle, ptr(data), data.length);
+    const status = nativeLibrary.symbols.zig_dom_node_set_text_content(handle, ptr(data), encodedLength(value, data));
     assertStatus(status, "zig_dom_node_set_text_content");
   },
   setCharacterDataDirect(handle: number, value: string): void {
     const data = encode(value);
-    nativeLibrary.symbols.zig_dom_character_data_set_data_direct(handle, ptr(data), data.length);
+    nativeLibrary.symbols.zig_dom_character_data_set_data_direct(handle, ptr(data), encodedLength(value, data));
   },
   nodeOuterHtml(handle: number): string {
     const outPtr = new BigUint64Array(1);
@@ -472,14 +476,14 @@ export const native = {
   documentGetElementById(documentHandle: number, id: string): number {
     const data = encode(id);
     const out = createHandleOut();
-    const status = nativeLibrary.symbols.zig_dom_document_get_element_by_id(documentHandle, ptr(data), data.length, ptr(out));
+    const status = nativeLibrary.symbols.zig_dom_document_get_element_by_id(documentHandle, ptr(data), encodedLength(id, data), ptr(out));
     assertStatus(status, "zig_dom_document_get_element_by_id");
     return readHandle(out);
   },
   documentQuerySelector(documentHandle: number, selector: string): number {
     const data = encode(selector);
     const out = createHandleOut();
-    const status = nativeLibrary.symbols.zig_dom_document_query_selector(documentHandle, ptr(data), data.length, ptr(out));
+    const status = nativeLibrary.symbols.zig_dom_document_query_selector(documentHandle, ptr(data), encodedLength(selector, data), ptr(out));
     assertStatus(status, "zig_dom_document_query_selector");
     return readHandle(out);
   },
@@ -487,7 +491,7 @@ export const native = {
     const data = encode(selector);
     const outPtr = new BigUint64Array(1);
     const outLen = new BigUint64Array(1);
-    const status = nativeLibrary.symbols.zig_dom_document_query_selector_all(documentHandle, ptr(data), data.length, ptr(outPtr), ptr(outLen));
+    const status = nativeLibrary.symbols.zig_dom_document_query_selector_all(documentHandle, ptr(data), encodedLength(selector, data), ptr(outPtr), ptr(outLen));
     assertStatus(status, "zig_dom_document_query_selector_all");
     return readHandleArrayFromOutParams(outPtr, outLen);
   },
@@ -495,7 +499,7 @@ export const native = {
     const data = encode(selector);
     const outPtr = new BigUint64Array(1);
     const outLen = new BigUint64Array(1);
-    const status = nativeLibrary.symbols.zig_dom_node_query_selector_all(rootHandle, ptr(data), data.length, ptr(outPtr), ptr(outLen));
+    const status = nativeLibrary.symbols.zig_dom_node_query_selector_all(rootHandle, ptr(data), encodedLength(selector, data), ptr(outPtr), ptr(outLen));
     assertStatus(status, "zig_dom_node_query_selector_all");
     return readHandleArrayFromOutParams(outPtr, outLen);
   },

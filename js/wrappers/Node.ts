@@ -167,7 +167,7 @@ export class Node extends EventTargetBase {
 
       const document = this.nodeType === Node.DOCUMENT_NODE
         ? (this as unknown as Document)
-        : this.ownerDocument;
+        : this.ownerDocument ?? this._window.document;
 
       if (!document) {
         return;
@@ -315,7 +315,7 @@ export class Node extends EventTargetBase {
 
     const document = this.nodeType === Node.DOCUMENT_NODE
       ? (this as unknown as Document)
-      : this.ownerDocument;
+      : this.ownerDocument ?? this._window.document;
 
     if (!document) {
       throw new Error("append() requires an owner document");
@@ -337,7 +337,7 @@ export class Node extends EventTargetBase {
 
     const document = this.nodeType === Node.DOCUMENT_NODE
       ? (this as unknown as Document)
-      : this.ownerDocument;
+      : this.ownerDocument ?? this._window.document;
 
     if (!document) {
       throw new Error("prepend() requires an owner document");
@@ -360,7 +360,7 @@ export class Node extends EventTargetBase {
 
     const document = this.nodeType === Node.DOCUMENT_NODE
       ? (this as unknown as Document)
-      : this.ownerDocument;
+      : this.ownerDocument ?? this._window.document;
 
     if (!document) {
       throw new Error("replaceChildren() requires an owner document");
@@ -914,7 +914,7 @@ export class Node extends EventTargetBase {
       throw new Error("cloneNode() is not supported on Document nodes");
     }
 
-    const document = this.ownerDocument;
+    const document = this.ownerDocument ?? this._window.document;
     if (!document) {
       throw new Error("cloneNode() requires an owner document");
     }

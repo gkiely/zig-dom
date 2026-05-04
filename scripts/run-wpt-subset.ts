@@ -2,11 +2,42 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createContext, runInContext } from "node:vm";
+import { CharacterData } from "../js/wrappers/CharacterData";
+import { Comment } from "../js/wrappers/Comment";
+import { Document } from "../js/wrappers/Document";
+import { DocumentFragment } from "../js/wrappers/DocumentFragment";
+import { DocumentType } from "../js/wrappers/DocumentType";
+import { Element } from "../js/wrappers/Element";
+import { HTMLElement } from "../js/wrappers/HTMLElement";
+import { Node } from "../js/wrappers/Node";
 import { NodeList } from "../js/wrappers/NodeList";
+import { Text } from "../js/wrappers/Text";
 import { Window } from "../js/wrappers/Window";
 
 const globalAsyncErrors: string[] = [];
-const nodeListPrototypeDescriptors = Object.getOwnPropertyDescriptors(NodeList.prototype);
+
+type PrototypeSnapshot = {
+  prototype: object;
+  parent: object | null;
+  descriptors: PropertyDescriptorMap;
+};
+
+const sharedPrototypeSnapshots: PrototypeSnapshot[] = [
+  Node,
+  Element,
+  HTMLElement,
+  CharacterData,
+  Text,
+  Comment,
+  Document,
+  DocumentFragment,
+  DocumentType,
+  NodeList
+].map((constructor) => ({
+  prototype: constructor.prototype,
+  parent: Object.getPrototypeOf(constructor.prototype),
+  descriptors: Object.getOwnPropertyDescriptors(constructor.prototype)
+}));
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -469,13 +500,16 @@ function assignNamedElementGlobals(context: Record<string, unknown>, window: Win
 }
 
 function restoreSharedPrototypeState(): void {
-  const prototype = NodeList.prototype as Record<PropertyKey, unknown>;
-  for (const key of Reflect.ownKeys(prototype)) {
-    if (!(key in nodeListPrototypeDescriptors)) {
-      Reflect.deleteProperty(prototype, key);
+  for (const snapshot of sharedPrototypeSnapshots) {
+    const prototype = snapshot.prototype as Record<PropertyKey, unknown>;
+    for (const key of Reflect.ownKeys(prototype)) {
+      if (!(key in snapshot.descriptors)) {
+        Reflect.deleteProperty(prototype, key);
+      }
     }
+    Object.setPrototypeOf(snapshot.prototype, snapshot.parent);
+    Object.defineProperties(snapshot.prototype, snapshot.descriptors);
   }
-  Object.defineProperties(NodeList.prototype, nodeListPrototypeDescriptors);
 }
 
 async function runHtmlEntry(file: string, wptRootPath: string, variant?: string): Promise<SubtestResult[]> {
