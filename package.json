@@ -1,6 +1,6 @@
 {
   "name": "zig-dom",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bun-only Zig-backed DOM implementation with happy-dom-compatible surface",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,11 +18,20 @@
   },
   "files": [
     "dist",
+    "!dist/native",
     "build.zig",
     "build.zig.zon"
   ],
+  "optionalDependencies": {
+    "zig-dom-darwin-arm64": "0.1.1",
+    "zig-dom-darwin-x64": "0.1.1",
+    "zig-dom-linux-arm64": "0.1.1",
+    "zig-dom-linux-x64": "0.1.1",
+    "zig-dom-win32-x64": "0.1.1"
+  },
   "scripts": {
     "build:native": "bun run scripts/build-native.ts",
+    "build:native:packages": "bun run scripts/build-native-packages.ts",
     "build:js": "bunx tsc -p tsconfig.json",
     "build": "bun run build:native && bun run build:js",
     "wpt:sync": "bun run scripts/sync-wpt.ts",

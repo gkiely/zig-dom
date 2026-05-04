@@ -16,22 +16,7 @@ bun add zig-dom
 npm install zig-dom
 ```
 
-The current package ships a macOS native library. Linux and Windows builds are not published yet.
-
-## Direct Usage
-
-Use `Window` directly when you want an isolated DOM:
-
-```ts
-import { Window } from "zig-dom";
-
-const window = new Window({ url: "http://localhost/" });
-window.document.body.innerHTML = "<button>Save</button>";
-
-console.log(window.document.querySelector("button")?.textContent);
-
-window.close();
-```
+Native packages are published for macOS, Linux, and Windows.
 
 ## Test Setup
 
@@ -51,7 +36,7 @@ GlobalRegistrator.register();
 preload = ["./preload.ts"]
 ```
 
-### CLI fallback
+### CLI
 
 ```sh
 bun test --preload ./preload.ts
@@ -79,15 +64,3 @@ test("renders", () => {
   expect(screen.getByRole("button").textContent).toBe("Save");
 });
 ```
-
-## Development
-
-```sh
-bun install
-bun run build
-bun run verify:fast
-```
-
-## Status
-
-Early and incomplete, but already useful for Bun-based React and DOM tests.

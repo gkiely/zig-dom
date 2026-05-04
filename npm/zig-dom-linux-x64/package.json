@@ -1,0 +1,15 @@
+{
+  "name": "zig-dom-linux-x64",
+  "version": "0.1.1",
+  "description": "Native Linux x64 library for zig-dom",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "native"
+  ],
+  "license": "UNLICENSED"
+}

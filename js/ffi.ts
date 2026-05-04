@@ -41,12 +41,20 @@ function assertStatus(status: number, operation: string): void {
 }
 
 function resolveLibraryPath(): string {
+  const platform = `${process.platform}-${process.arch}`;
+  const libraryNames = process.platform === "win32" ? ["zig_dom.dll", "libzig_dom.dll"] : [`libzig_dom.${suffix}`];
+  const packageName = `zig-dom-${platform}`;
   const candidates = [
-    join(import.meta.dir, "native", `libzig_dom.${suffix}`),
-    join(import.meta.dir, "..", "dist", "native", `libzig_dom.${suffix}`),
-    join(import.meta.dir, "..", "zig-out", "lib", `libzig_dom.${suffix}`),
-    join(process.cwd(), "dist", "native", `libzig_dom.${suffix}`),
-    join(process.cwd(), "zig-out", "lib", `libzig_dom.${suffix}`)
+    ...libraryNames.map((name) => join(import.meta.dir, "native", platform, name)),
+    ...libraryNames.map((name) => join(import.meta.dir, "native", name)),
+    ...libraryNames.map((name) => join(import.meta.dir, "..", "dist", "native", platform, name)),
+    ...libraryNames.map((name) => join(import.meta.dir, "..", "dist", "native", name)),
+    ...libraryNames.map((name) => join(import.meta.dir, "..", "zig-out", "lib", name)),
+    ...libraryNames.map((name) => join(process.cwd(), "dist", "native", platform, name)),
+    ...libraryNames.map((name) => join(process.cwd(), "dist", "native", name)),
+    ...libraryNames.map((name) => join(process.cwd(), "zig-out", "lib", name)),
+    ...libraryNames.map((name) => join(process.cwd(), "node_modules", packageName, "native", platform, name)),
+    ...libraryNames.map((name) => join(import.meta.dir, "..", "node_modules", packageName, "native", platform, name))
   ];
 
   for (const candidate of candidates) {
@@ -55,7 +63,7 @@ function resolveLibraryPath(): string {
     }
   }
 
-  throw new Error(`Unable to locate native library libzig_dom.${suffix}`);
+  throw new Error(`Unable to locate native library for ${platform}. Install ${packageName}, or rebuild zig-dom for this platform.`);
 }
 
 const libraryPath = resolveLibraryPath();

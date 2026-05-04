@@ -1,0 +1,15 @@
+{
+  "name": "zig-dom-darwin-x64",
+  "version": "0.1.1",
+  "description": "Native macOS x64 library for zig-dom",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "native"
+  ],
+  "license": "UNLICENSED"
+}
