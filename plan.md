@@ -1,82 +1,378 @@
-# Bun-Specific Performance Plan
+# Plan: Zig Test Runner With A Built-In Zig DOM
 
-This is a short list of `zig-dom` library performance ideas that specifically use Bun or fit Bun-only constraints. The target workload is real React/Testing Library usage such as `../youneedawiki`'s DOM tests, not the benchmark harness itself.
+## Goal
 
-## 1. Try `Bun.escapeHTML()` in serialization
+Rewrite `zig-dom` into a standalone test runner written in Zig with a built-in DOM also written in Zig.
 
-`zig-dom` currently has JS-side escaping in serialization paths such as `outerHTML`. Bun exposes `Bun.escapeHTML()`, which is implemented natively and optimized for large strings.
+The target product is not another DOM shim loaded by `bun test`. It is a CLI that can run JavaScript DOM tests itself:
 
-Validation:
-- Compare text-node serialization, attribute serialization, and full `outerHTML` output against existing tests.
-- Attribute escaping may need a separate path if DOM attribute rules diverge from `Bun.escapeHTML()`.
-- Add focused benchmarks for large text nodes, many small text nodes, and React Testing Library debug-style output.
+```sh
+zig build run -- test tests/**/*.test.js
+zig build run -- wpt --manifest wpt/manifest/dom-core.json
+```
 
-## 2. Move bulk string work over the native boundary
+The first version should run a useful subset of DOM and WPT `testharness.js` tests. TypeScript, JSX, React Testing Library, coverage, snapshots, and full Jest compatibility are later milestones.
 
-Any hot path that walks many nodes in JS and concatenates strings is a candidate for a larger Zig/native operation. The key is to avoid many tiny FFI calls and prefer one bulk call returning a complete string or typed buffer.
+## Current Repo Facts
 
-Candidates:
-- Full subtree serialization.
-- Bulk `textContent` collection.
-- Larger `innerHTML` parse/replace operations.
+- The current package is a Bun-only JS wrapper over a Zig native library.
+- Zig currently owns a basic DOM tree and handles in `src/zig_dom.zig`.
+- JS currently owns the public `Window`, `Document`, `Node`, `Element`, event, collection, and compatibility classes under `js/wrappers`.
+- WPT support already exists through TypeScript scripts:
+  - `scripts/sync-wpt.ts`
+  - `scripts/generate-wpt-manifest.ts`
+  - `scripts/run-wpt-subset.ts`
+  - `wpt/manifest/*.json`
+  - `wpt/expected/*.json`
+- The existing WPT runner injects lightweight `test`, `promise_test`, `async_test`, assertions, and DOM globals around `Window`.
+- Keep the existing WPT manifests and expected-failure JSON format unless there is a clear reason to change them.
 
-Validation:
-- Profile `../youneedawiki` `test-dom` to confirm which serialization or string paths dominate.
-- Measure against both small DOM updates and large tree render/debug cases.
+## Bun Test Runner Notes To Copy
 
-## 3. Delegate compatible primitives to Bun-native Web APIs
+Sources read:
 
-Because `zig-dom` is Bun-only, it can use Bun's built-in Web APIs where behavior matches DOM expectations closely enough.
+- `https://github.com/oven-sh/bun/blob/main/src/cli/test_command.zig`
+- `https://github.com/oven-sh/bun/blob/main/src/test_runner/bun_test.zig`
+- `https://github.com/oven-sh/bun/blob/main/src/test_runner/Execution.zig`
+- `https://github.com/oven-sh/bun/blob/main/src/test_runner/ScopeFunctions.zig`
 
-Candidates:
-- `URL` and `URLSearchParams`.
-- `TextEncoder` and `TextDecoder`.
-- `Blob`, `File`, `FormData`, `Headers`, `Request`, and `Response`.
-- Possibly `EventTarget`, only if DOM propagation semantics can remain correct.
+Useful Bun architecture:
 
-Validation:
-- Keep compatibility tests around edge cases before replacing local implementations.
-- Prefer small targeted delegations over broad rewrites.
+- CLI discovery and reporting live outside the core runner.
+- Each file gets an active `BunTest` state object.
+- Test registration is a collection phase. `describe`, `test`, and hooks append entries into a scope tree.
+- Execution is a separate phase. Bun converts the collected scope tree into ordered execution groups and sequences.
+- Hooks are normal execution entries, not special one-off calls.
+- Results are represented as explicit enums: pending, pass, skip, todo, fail, timeout, assertion-count failure, etc.
+- Sync callbacks, returned promises, and `done` callbacks all funnel into the same completion path.
+- Timeouts are tracked per execution entry.
+- Unhandled errors are classified as collection errors, handled test errors, or errors between tests.
+- File isolation swaps the global object between files when enabled.
+- Preload hooks are stored separately and reset when the isolated global is swapped.
+- The reporter consumes normalized lifecycle events and writes terminal/JUnit output separately from execution.
 
-## 4. Add build-time fast-path constants
+Do not copy Bun's whole Jest compatibility surface. Copy the phase model and data ownership.
 
-Use Bun-compatible static constants or defines to strip slow debug or strict validation branches from production/test builds where appropriate.
+## Runtime Decision
 
-Possible constants:
-- `ZIG_DOM_COMPAT_DEBUG`
-- `ZIG_DOM_STRICT_SPEC_ERRORS`
-- `ZIG_DOM_TRACE_MUTATIONS`
+A Zig test runner still needs a JavaScript engine.
 
-Validation:
-- Only gate code that is measurably hot or noisy.
-- Keep default behavior spec-compatible unless an explicit fast mode is requested.
+Use QuickJS for the MVP because it has a small C API, can be embedded from Zig, and is enough for WPT `testharness.js` style tests. Keep the runtime boundary abstract so JavaScriptCore can be evaluated later if performance or compatibility requires it.
 
-## 5. Experiment with bundled bytecode for JS wrappers
+Add:
 
-Bun bytecode caching can reduce startup/import cost by avoiding repeated parse and compile work. `zig-dom` has a nontrivial JS wrapper layer imported by test preloads.
+```text
+src/runtime/
+  runtime.zig        # engine-neutral interface
+  quickjs.zig        # MVP implementation
+  value.zig          # JS value handles and conversions
+```
 
-Experiment:
-- Bundle the JS wrapper entrypoints for Bun.
-- Generate `.jsc` bytecode as part of the build.
-- Compare cold import time and full `../youneedawiki` `test-dom` wall time.
+The runtime API should support:
 
-Notes:
-- Bytecode is tied to Bun versions and should be regenerated, not hand-maintained.
-- This is more likely to improve startup than hot DOM operations.
+- Create/destroy VM.
+- Create/destroy per-file global context.
+- Evaluate module/script source with filename.
+- Call JS functions.
+- Resolve/reject promises or drain jobs.
+- Install native classes/functions.
+- Store opaque native pointers on JS objects.
+- Capture exceptions and stack traces.
 
-## 6. Revisit selector cache strategy after profiling
+## Target Architecture
 
-Selector matching is important in React tests, and `zig-dom` already caches parsed selectors. Bun utilities such as native hashing may or may not beat plain `Map<string, ...>`.
+```text
+src/
+  main.zig
+  runner/
+    cli.zig
+    discovery.zig
+    runner.zig
+    collection.zig
+    scope.zig
+    order.zig
+    execution.zig
+    hooks.zig
+    reporter.zig
+    junit.zig
+    expectations.zig
+  runtime/
+    runtime.zig
+    quickjs.zig
+    value.zig
+  dom/
+    window.zig
+    document.zig
+    node.zig
+    element.zig
+    text.zig
+    comment.zig
+    fragment.zig
+    document_type.zig
+    attributes.zig
+    collections.zig
+    event_target.zig
+    event.zig
+    mutation.zig
+    range.zig
+    selector.zig
+    parser.zig
+    serializer.zig
+    bindings.zig
+  wpt/
+    manifest.zig
+    harness.zig
+    html_loader.zig
+    expectations.zig
+```
 
-Validation:
-- Profile selector parse/cache churn before changing anything.
-- Benchmark repeated selectors from Testing Library queries, not only synthetic selector loops.
+The DOM should no longer require TypeScript wrappers for core behavior. JS-visible DOM constructors should be native classes installed by `dom/bindings.zig`.
 
-## Preferred Order
+## Runner Model
 
-1. `Bun.escapeHTML()` serialization experiment.
-2. Profile `../youneedawiki` `test-dom` and identify top `zig-dom` hot paths.
-3. Bulk native serialization/text operations if profiling supports it.
-4. Bun-native primitive delegation where compatibility is straightforward.
-5. Bytecode/bundled wrapper startup experiment.
-6. Selector cache tuning only if profiling points there.
+Implement the same core states as Bun:
+
+```text
+FileRunner.phase = collection | execution | done
+```
+
+Collection owns:
+
+- Root describe scope.
+- Active describe scope.
+- Tests.
+- `beforeAll`, `beforeEach`, `afterEach`, `afterAll`.
+- `only`, `skip`, `todo`, `failing`.
+- Optional line numbers.
+
+Execution owns:
+
+- Ordered groups.
+- Sequences.
+- Active entry.
+- Timeout deadline.
+- Result.
+- Assertion counts.
+- Retry/repeat counters later.
+
+MVP APIs:
+
+- `test(name, fn, options?)`
+- `it(name, fn, options?)`
+- `describe(name, fn)`
+- `beforeAll(fn)`
+- `beforeEach(fn)`
+- `afterEach(fn)`
+- `afterAll(fn)`
+- `test.skip`
+- `test.only`
+- `describe.skip`
+- `expect(value).toBe(value)`
+- `expect(value).toEqual(value)` for primitives/arrays/plain objects
+- `expect(value).toThrow()`
+
+WPT APIs are separate and should not require Jest `expect`:
+
+- `test(fn, name)`
+- `promise_test(fn, name)`
+- `async_test(fn?, name?)`
+- `assert_true`
+- `assert_false`
+- `assert_equals`
+- `assert_not_equals`
+- `assert_throws_dom`
+- `assert_array_equals`
+- `assert_own_property`
+- `assert_idl_attribute`
+
+## DOM MVP
+
+Implement enough DOM in Zig to run local smoke tests and the first WPT slice:
+
+- `Window`
+- `Document`
+- `DocumentFragment`
+- `DocumentType`
+- `Node`
+- `Element`
+- `HTMLElement`
+- `Text`
+- `Comment`
+- `EventTarget`
+- `Event`
+- `CustomEvent`
+- `NodeList`
+- `HTMLCollection`
+- Attributes
+- Tree mutation
+- `textContent`
+- `innerHTML` and `outerHTML` through the existing parser/serializer path
+- `querySelector` and `querySelectorAll` with the current selector subset
+- `document.createElement`
+- `document.createTextNode`
+- `document.createComment`
+- `document.implementation.createDocumentType`
+
+Preserve handle safety from the current Zig library, but remove the FFI-shaped API once native JS bindings exist.
+
+## WPT Integration
+
+Use `https://github.com/web-platform-tests/wpt` as the compliance source.
+
+Keep WPT out of the repo by default. Continue syncing to `.wpt-cache/web-platform-tests`.
+
+Required commands:
+
+```sh
+zig build test
+zig build run -- test tests/smoke
+zig build run -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json
+zig build run -- wpt-sync
+zig build run -- wpt-manifest --dir dom --out wpt/manifest/upstream-dom-smoke.json
+```
+
+WPT runner behavior:
+
+- Load HTML fixtures.
+- Parse static `<html>`, `<head>`, `<body>`, attributes, and doctype into the Zig DOM.
+- Install WPT harness globals in the JS context.
+- Evaluate `testharness.js` tests and referenced scripts.
+- Support variants such as `?foo`.
+- Record subtest results, not just file-level results.
+- Compare results to expected-failure JSON.
+- Fail only on unexpected failures and unexpected passes.
+- Every expected failure must include `file`, `subtest`, `reason`, and `owner`.
+
+Initial WPT scope:
+
+1. Local tiny tests under `wpt/runner/tests`.
+2. `wpt/manifest/dom-core.json`.
+3. `selectors`.
+4. `events`.
+5. `parser-fragments`.
+6. `forms`.
+7. `custom-elements-shadow` only after custom elements and shadow DOM have real Zig ownership.
+
+Skip for MVP:
+
+- Reftests.
+- WebDriver/testdriver tests.
+- Layout/CSS visual assertions.
+- Navigation/browsing-context isolation beyond simple iframes.
+- Network fetching beyond local fixture loading.
+
+## Milestones
+
+### M1: Standalone CLI Skeleton
+
+- Add `src/main.zig`.
+- Parse commands: `test`, `wpt`, `wpt-sync`, `wpt-manifest`.
+- Add file discovery for `.test.js`, `.spec.js`, `_test_`, and `_spec_`.
+- Add TAP-like or Bun-like terminal summary.
+- No DOM required yet.
+
+Done when:
+
+- `zig build run -- test tests/runner/basic.test.js` collects and runs sync tests.
+
+### M2: Embedded JS Runtime
+
+- Add QuickJS build integration.
+- Evaluate JS files.
+- Install `test`, `describe`, hooks, and basic `expect`.
+- Drain promise jobs.
+- Capture thrown errors and stack traces.
+
+Done when:
+
+- Sync tests, promise tests, and thrown failures report correctly.
+
+### M3: Bun-Style Collection And Execution
+
+- Implement scope tree.
+- Implement order generation.
+- Implement before/after hooks.
+- Implement skip/only.
+- Implement timeout handling.
+- Split collection errors from test failures.
+
+Done when:
+
+- Nested describe/hook order matches Bun/Jest behavior for the local runner tests.
+
+### M4: Native DOM Bindings
+
+- Move `Window`, `Document`, `Node`, `Element`, `Text`, `Comment`, collections, and events into Zig-native JS bindings.
+- Install DOM globals into each test file context.
+- Reset DOM per file.
+
+Done when:
+
+- Local DOM tests pass without importing `js/wrappers`.
+
+### M5: WPT Harness In Zig
+
+- Port the current TypeScript WPT harness into `src/wpt`.
+- Keep the existing manifest and expected-failure JSON shape.
+- Run local tiny WPT tests first.
+
+Done when:
+
+- `zig build run -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json` produces pass/fail/expected-fail/unexpected-pass counts.
+
+### M6: Upstream WPT Smoke
+
+- Port or replace `scripts/sync-wpt.ts` and `scripts/generate-wpt-manifest.ts`.
+- Run a max-200 upstream DOM smoke manifest.
+- Add expected failures with reasons.
+
+Done when:
+
+- Upstream DOM smoke has zero unexpected failures.
+
+### M7: Deprecate Bun FFI Package Shape
+
+- Decide whether `js/` remains as compatibility exports or moves to a separate package.
+- Remove FFI-only APIs that are no longer used by the runner.
+- Update README around the runner-first product.
+
+Done when:
+
+- The default development path is `zig build run -- test`, not `bun test`.
+
+## Verification Contract
+
+Keep feedback loops small:
+
+```sh
+zig build test
+zig build run -- test tests/runner
+zig build run -- test tests/dom
+zig build run -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json
+```
+
+Use the existing Bun package tests only as regression checks during migration:
+
+```sh
+bun run verify:fast
+bun run verify:wpt:tiny
+```
+
+Do not make upstream WPT sync part of the fast path.
+
+## Risks
+
+- A test runner written in Zig still needs a JS engine. Do not start by writing an interpreter.
+- QuickJS may diverge from browser JavaScript behavior. Keep `runtime/runtime.zig` abstract.
+- WPT can drown the project. Keep curated manifests and expected failures.
+- DOM bindings can become one-call-per-property overhead if modeled like FFI. Native JS classes should own opaque Zig pointers directly.
+- Full Jest compatibility is not the MVP. Bun's runner design is useful because of its collection/execution split, not because every Jest feature must be cloned.
+
+## Agent Start Here
+
+1. Add the CLI skeleton and one runner smoke test.
+2. Add QuickJS embedding behind `src/runtime/runtime.zig`.
+3. Implement collection/execution with no DOM.
+4. Port the current Zig DOM into native JS bindings.
+5. Port the current WPT TypeScript harness into Zig.
+6. Only then expand WPT coverage.
