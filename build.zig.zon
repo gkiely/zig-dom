@@ -1,11 +1,17 @@
 .{
     .name = .zig_dom,
     .version = "0.1.0",
+    .dependencies = .{
+        .quickjs_ng = .{
+            .path = "vendor/zig-quickjs-ng",
+        },
+    },
     .fingerprint = 0xdc4bb3517832c683,
     .minimum_zig_version = "0.16.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "vendor",
     },
 }
