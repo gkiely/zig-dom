@@ -2,6 +2,7 @@ const std = @import("std");
 const cli = @import("cli.zig");
 const discovery = @import("discovery.zig");
 const reporter = @import("reporter.zig");
+const transform = @import("transform.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -45,11 +46,18 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
         return 0;
     }
 
+    const prepared = try transform.runUpfront(allocator, io, discovered.paths);
+    defer prepared.deinit(allocator);
+
+    if (prepared.transformed_count > 0) {
+        reporter.printTransformed(prepared.transformed_count);
+    }
+
     var args: std.ArrayList([]const u8) = .empty;
     defer args.deinit(allocator);
 
     try args.appendSlice(allocator, &.{ "bun", "test" });
-    for (discovered.paths) |path| {
+    for (prepared.paths) |path| {
         try args.append(allocator, path);
     }
 

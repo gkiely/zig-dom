@@ -4,6 +4,10 @@ pub fn printDiscovered(count: usize) void {
     std.debug.print("Discovered {d} test file{s}.\n", .{ count, if (count == 1) "" else "s" });
 }
 
+pub fn printTransformed(count: usize) void {
+    std.debug.print("Upfront transformed {d} file{s}.\n", .{ count, if (count == 1) "" else "s" });
+}
+
 pub fn printNoTests(patterns: []const []const u8) void {
     std.debug.print("No test files matched patterns:\n", .{});
     for (patterns) |pattern| {
