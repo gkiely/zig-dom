@@ -16,6 +16,24 @@ bun add zig-dom
 npm install zig-dom
 ```
 
+## Experimental Zig CLI
+
+The repository now includes an early standalone CLI skeleton for the runner rewrite.
+
+```sh
+zig build run -- help
+zig build run -- test tests/runner/basic.test.js
+zig build run -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json
+zig build run -- wpt-sync
+zig build run -- wpt-manifest --dir dom --out wpt/manifest/upstream-dom-smoke.json
+```
+
+Current status:
+
+- `test` command discovers test files in Zig and currently delegates execution to `bun test`.
+- `wpt`, `wpt-sync`, and `wpt-manifest` bridge to existing scripts under `scripts/`.
+- The runtime abstraction files were added in `src/runtime/` for upcoming QuickJS embedding work.
+
 ## Test Setup
 
 Create a Bun preload file:

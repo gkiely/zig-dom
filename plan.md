@@ -11,7 +11,7 @@ zig build run -- test tests/**/*.test.js
 zig build run -- wpt --manifest wpt/manifest/dom-core.json
 ```
 
-The first version should run a useful subset of DOM and WPT `testharness.js` tests. TypeScript, JSX, React Testing Library, coverage, snapshots, and full Jest compatibility are later milestones.
+The first version should run `.js`, `.ts`, `.jsx`, and `.tsx` tests plus a useful subset of DOM and WPT `testharness.js` tests. React Testing Library, coverage, snapshots, and full Jest compatibility are later milestones.
 
 ## Current Repo Facts
 
@@ -57,14 +57,21 @@ Do not copy Bun's whole Jest compatibility surface. Copy the phase model and dat
 
 A Zig test runner still needs a JavaScript engine.
 
-Use QuickJS for the MVP because it has a small C API, can be embedded from Zig, and is enough for WPT `testharness.js` style tests. Keep the runtime boundary abstract so JavaScriptCore can be evaluated later if performance or compatibility requires it.
+Use `mitchellh/zig-quickjs-ng` for the MVP runtime:
+
+- Repo: `https://github.com/mitchellh/zig-quickjs-ng`
+- It provides Zig build integration and bindings for QuickJS-ng.
+- It currently has no GitHub releases or tags. Pin a specific commit in `build.zig.zon`; do not track `main`.
+- Verified upstream `HEAD` during planning: `eb1d44ce43fd64f8403c1a94fad242ebae04d1fb`.
+- Its current `build.zig.zon` declares `minimum_zig_version = "0.14.0"`. This repo currently declares and runs Zig `0.16.0`, so the metadata does not obviously conflict, but the first implementation step must verify it with a real build.
+- Treat it as the first backend, not the architecture. Keep the runtime boundary abstract so JavaScriptCore can be evaluated later if performance or compatibility requires it.
 
 Add:
 
 ```text
 src/runtime/
   runtime.zig        # engine-neutral interface
-  quickjs.zig        # MVP implementation
+  quickjs_ng.zig     # adapter over mitchellh/zig-quickjs-ng
   value.zig          # JS value handles and conversions
 ```
 
@@ -87,6 +94,7 @@ src/
   runner/
     cli.zig
     discovery.zig
+    transform.zig
     runner.zig
     collection.zig
     scope.zig
@@ -98,7 +106,7 @@ src/
     expectations.zig
   runtime/
     runtime.zig
-    quickjs.zig
+    quickjs_ng.zig
     value.zig
   dom/
     window.zig
@@ -127,6 +135,44 @@ src/
 ```
 
 The DOM should no longer require TypeScript wrappers for core behavior. JS-visible DOM constructors should be native classes installed by `dom/bindings.zig`.
+
+## TypeScript And JSX Transform
+
+Support these test file extensions from the start:
+
+- `.test.js`, `.spec.js`, `_test_*.js`, `_spec_*.js`
+- `.test.ts`, `.spec.ts`, `_test_*.ts`, `_spec_*.ts`
+- `.test.jsx`, `.spec.jsx`, `_test_*.jsx`, `_spec_*.jsx`
+- `.test.tsx`, `.spec.tsx`, `_test_*.tsx`, `_spec_*.tsx`
+
+Use Bun only as a transform tool, not as the runtime:
+
+- At the start of a test run, discover all test files.
+- Split files into plain JavaScript and transform-needed files.
+- For normal runs, upfront batch transform all `.ts`, `.tsx`, and `.jsx` files before collection or execution.
+- If any transform fails, fail the run before executing tests.
+- Prefer one Bun helper process per test run over one Bun process per file.
+- The helper should use `Bun.Transpiler.transformSync()` for per-file transforms first.
+- Cache transformed output by source path, loader, Bun version, transform options, and content hash or mtime+size.
+- Execute only the resulting JavaScript in QuickJS-ng.
+
+Initial transform scope:
+
+- Strip TypeScript syntax.
+- Convert JSX/TSX to plain JavaScript using the repo `tsconfig`/JSX settings where possible.
+- Preserve filenames in runtime error reporting.
+- Write transformed artifacts to a cache directory such as `.zig-dom-cache/transformed/`, or keep them in memory if the runner has a clean internal source-map story.
+
+Do not use Bun for:
+
+- Test scheduling.
+- DOM globals.
+- Assertions.
+- Runtime execution.
+
+Do not add lazy/on-demand transforms for the initial runner. Lazy transforms can be considered later for watch mode or very large suites, but they must still use the same cache and a persistent/batched Bun helper.
+
+Use `Bun.build()` later only if import resolution/bundling becomes necessary. Start with per-file transforms so the runner keeps ownership of module loading and test collection.
 
 ## Runner Model
 
@@ -267,7 +313,7 @@ Skip for MVP:
 
 - Add `src/main.zig`.
 - Parse commands: `test`, `wpt`, `wpt-sync`, `wpt-manifest`.
-- Add file discovery for `.test.js`, `.spec.js`, `_test_`, and `_spec_`.
+- Add file discovery for `.test.{js,ts,jsx,tsx}`, `.spec.{js,ts,jsx,tsx}`, `_test_*.{js,ts,jsx,tsx}`, and `_spec_*.{js,ts,jsx,tsx}`.
 - Add TAP-like or Bun-like terminal summary.
 - No DOM required yet.
 
@@ -277,7 +323,12 @@ Done when:
 
 ### M2: Embedded JS Runtime
 
-- Add QuickJS build integration.
+- Add `mitchellh/zig-quickjs-ng` to `build.zig.zon`, pinned to commit `eb1d44ce43fd64f8403c1a94fad242ebae04d1fb` unless a newer commit is deliberately selected and verified.
+- Link its `quickjs-ng` artifact in `build.zig`.
+- Add the `quickjs` Zig module import only to the runtime adapter.
+- Add `src/runtime/quickjs_ng.zig` as the only module that imports `quickjs`.
+- If `src/runtime/quickjs.zig` already exists from earlier agent work, rename or replace it with `quickjs_ng.zig` before wiring the dependency.
+- Immediately run `zig build test` after adding the dependency and link step. Do not build runner behavior on top of the dependency until this passes.
 - Evaluate JS files.
 - Install `test`, `describe`, hooks, and basic `expect`.
 - Drain promise jobs.
@@ -287,7 +338,22 @@ Done when:
 
 - Sync tests, promise tests, and thrown failures report correctly.
 
-### M3: Bun-Style Collection And Execution
+### M3: Batched Bun Transform For TS/JSX
+
+- Add `src/runner/transform.zig`.
+- Add a Bun helper script or inline helper entrypoint that accepts a batch of files and loaders.
+- Upfront transform every `.ts`, `.tsx`, and `.jsx` test file once at the start of the run, before test collection or execution.
+- Report transform errors and stop before running any tests.
+- Leave `.js` files unmodified.
+- Cache transform outputs by input content and transform options.
+- Feed transformed JavaScript into the QuickJS-ng runtime with original filenames preserved for errors.
+
+Done when:
+
+- `.test.ts`, `.test.jsx`, and `.test.tsx` runner smoke tests execute through QuickJS-ng.
+- The transform stage invokes Bun once per run, not once per file.
+
+### M4: Bun-Style Collection And Execution
 
 - Implement scope tree.
 - Implement order generation.
@@ -300,7 +366,7 @@ Done when:
 
 - Nested describe/hook order matches Bun/Jest behavior for the local runner tests.
 
-### M4: Native DOM Bindings
+### M5: Native DOM Bindings
 
 - Move `Window`, `Document`, `Node`, `Element`, `Text`, `Comment`, collections, and events into Zig-native JS bindings.
 - Install DOM globals into each test file context.
@@ -310,7 +376,7 @@ Done when:
 
 - Local DOM tests pass without importing `js/wrappers`.
 
-### M5: WPT Harness In Zig
+### M6: WPT Harness In Zig
 
 - Port the current TypeScript WPT harness into `src/wpt`.
 - Keep the existing manifest and expected-failure JSON shape.
@@ -320,7 +386,7 @@ Done when:
 
 - `zig build run -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json` produces pass/fail/expected-fail/unexpected-pass counts.
 
-### M6: Upstream WPT Smoke
+### M7: Upstream WPT Smoke
 
 - Port or replace `scripts/sync-wpt.ts` and `scripts/generate-wpt-manifest.ts`.
 - Run a max-200 upstream DOM smoke manifest.
@@ -330,7 +396,7 @@ Done when:
 
 - Upstream DOM smoke has zero unexpected failures.
 
-### M7: Deprecate Bun FFI Package Shape
+### M8: Deprecate Bun FFI Package Shape
 
 - Decide whether `js/` remains as compatibility exports or moves to a separate package.
 - Remove FFI-only APIs that are no longer used by the runner.
@@ -363,7 +429,11 @@ Do not make upstream WPT sync part of the fast path.
 ## Risks
 
 - A test runner written in Zig still needs a JS engine. Do not start by writing an interpreter.
-- QuickJS may diverge from browser JavaScript behavior. Keep `runtime/runtime.zig` abstract.
+- QuickJS-ng may diverge from browser JavaScript behavior. Keep `runtime/runtime.zig` abstract.
+- `mitchellh/zig-quickjs-ng` has no releases; pinned commits are required for reproducible builds.
+- `mitchellh/zig-quickjs-ng` documents support for released Zig versions only. Re-check compatibility whenever this repo upgrades Zig.
+- Bun transforms add a process/toolchain dependency. Batch transform once per run and cache outputs; do not spawn Bun per test file.
+- Bun's transpiler does not typecheck. Treat TS support as syntax stripping/transformation only.
 - WPT can drown the project. Keep curated manifests and expected failures.
 - DOM bindings can become one-call-per-property overhead if modeled like FFI. Native JS classes should own opaque Zig pointers directly.
 - Full Jest compatibility is not the MVP. Bun's runner design is useful because of its collection/execution split, not because every Jest feature must be cloned.
@@ -371,8 +441,9 @@ Do not make upstream WPT sync part of the fast path.
 ## Agent Start Here
 
 1. Add the CLI skeleton and one runner smoke test.
-2. Add QuickJS embedding behind `src/runtime/runtime.zig`.
-3. Implement collection/execution with no DOM.
-4. Port the current Zig DOM into native JS bindings.
-5. Port the current WPT TypeScript harness into Zig.
-6. Only then expand WPT coverage.
+2. Add `mitchellh/zig-quickjs-ng` embedding behind `src/runtime/runtime.zig`, pinned and verified with `zig build test`.
+3. Add the batched Bun transform stage for `.ts`, `.tsx`, and `.jsx`.
+4. Implement collection/execution with no DOM.
+5. Port the current Zig DOM into native JS bindings.
+6. Port the current WPT TypeScript harness into Zig.
+7. Only then expand WPT coverage.
