@@ -307,6 +307,50 @@ Skip for MVP:
 - Navigation/browsing-context isolation beyond simple iframes.
 - Network fetching beyond local fixture loading.
 
+## Downstream Compatibility Target
+
+The native DOM pass is not complete just because local DOM smoke tests pass. The practical downstream target is running `../youneedawiki` DOM tests with this runner.
+
+Add downstream compatibility in layers:
+
+1. React 18 render smoke using `react` and `react-dom/client`.
+2. Testing Library smoke using `@testing-library/react`.
+3. Browser global shim pass for common app-test assumptions:
+   - `HTMLElement`
+   - `HTMLInputElement`
+   - `SVGElement`
+   - `DOMRect`
+   - `getBoundingClientRect`
+   - `getClientRects`
+   - `getComputedStyle`
+   - `matchMedia`
+   - `ResizeObserver` stub if needed
+   - `MutationObserver`
+4. Form and event behavior required by React controlled inputs:
+   - `input`
+   - `change`
+   - `click`
+   - `focus`
+   - `blur`
+   - `value`
+   - `checked`
+   - `disabled`
+5. Runner compatibility for app test setup:
+   - setup/preload files
+   - transformed TS/TSX imports
+   - test globals
+   - `expect` extensions or a documented subset
+
+Do not edit `../youneedawiki` tests unless explicitly approved. Fix this runner and native DOM first.
+
+Target command shape:
+
+```sh
+zig build run -- test ../youneedawiki/src/**/*.test.{ts,tsx}
+```
+
+If glob expansion is not implemented yet, support equivalent explicit file paths or a `--root ../youneedawiki` plus discovery mode.
+
 ## Milestones
 
 ### M1: Standalone CLI Skeleton
@@ -371,12 +415,40 @@ Done when:
 - Move `Window`, `Document`, `Node`, `Element`, `Text`, `Comment`, collections, and events into Zig-native JS bindings.
 - Install DOM globals into each test file context.
 - Reset DOM per file.
+- Implement the broad native DOM pass in ordered slices:
+  - core tree operations
+  - collections
+  - text/comment/character data
+  - attributes and element basics
+  - document creation APIs
+  - parsing and serialization
+  - selectors
+  - events
+  - forms and common HTML elements
+  - window/document environment
+  - MutationObserver and Range
+  - custom elements and shadow DOM last
 
 Done when:
 
 - Local DOM tests pass without importing `js/wrappers`.
 
-### M6: WPT Harness In Zig
+### M6: React, Testing Library, And YouNeedAWiki Compatibility
+
+- Add native DOM smoke tests for React 18 rendering.
+- Add native DOM smoke tests for `@testing-library/react`.
+- Add browser-global shims needed by app tests: `SVGElement`, `DOMRect`, layout rect methods, `getComputedStyle`, `matchMedia`, and observer stubs where needed.
+- Add runner support for setup/preload files if app tests require it.
+- Add a downstream compatibility command or documented invocation for `../youneedawiki`.
+- Run a tiny copied or explicitly selected subset first, then expand toward the real `../youneedawiki` DOM test command.
+
+Done when:
+
+- React smoke passes under this runner.
+- Testing Library smoke passes under this runner.
+- A named small subset of `../youneedawiki` DOM tests passes without modifying `../youneedawiki` tests.
+
+### M7: WPT Harness In Zig
 
 - Port the current TypeScript WPT harness into `src/wpt`.
 - Keep the existing manifest and expected-failure JSON shape.
@@ -386,7 +458,7 @@ Done when:
 
 - `zig build run -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json` produces pass/fail/expected-fail/unexpected-pass counts.
 
-### M7: Upstream WPT Smoke
+### M8: Upstream WPT Smoke
 
 - Port or replace `scripts/sync-wpt.ts` and `scripts/generate-wpt-manifest.ts`.
 - Run a max-200 upstream DOM smoke manifest.
@@ -396,7 +468,7 @@ Done when:
 
 - Upstream DOM smoke has zero unexpected failures.
 
-### M8: Deprecate Bun FFI Package Shape
+### M9: Deprecate Bun FFI Package Shape
 
 - Decide whether `js/` remains as compatibility exports or moves to a separate package.
 - Remove FFI-only APIs that are no longer used by the runner.
@@ -414,7 +486,16 @@ Keep feedback loops small:
 zig build test
 zig build run -- test tests/runner
 zig build run -- test tests/dom
+zig build run -- test tests/runner/native-dom-*.test.js
 zig build run -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json
+```
+
+Downstream gates once M6 starts:
+
+```sh
+zig build run -- test tests/runner/react-*.test.{js,ts,tsx}
+zig build run -- test tests/runner/testing-library-*.test.{js,ts,tsx}
+zig build run -- test ../youneedawiki/<selected-dom-test-files>
 ```
 
 Use the existing Bun package tests only as regression checks during migration:
@@ -435,6 +516,7 @@ Do not make upstream WPT sync part of the fast path.
 - Bun transforms add a process/toolchain dependency. Batch transform once per run and cache outputs; do not spawn Bun per test file.
 - Bun's transpiler does not typecheck. Treat TS support as syntax stripping/transformation only.
 - WPT can drown the project. Keep curated manifests and expected failures.
+- `../youneedawiki` compatibility will likely fail on browser globals, React event semantics, Testing Library visibility/role behavior, setup files, and TS/TSX module loading before it fails on pure DOM tree APIs.
 - DOM bindings can become one-call-per-property overhead if modeled like FFI. Native JS classes should own opaque Zig pointers directly.
 - Full Jest compatibility is not the MVP. Bun's runner design is useful because of its collection/execution split, not because every Jest feature must be cloned.
 
@@ -445,5 +527,6 @@ Do not make upstream WPT sync part of the fast path.
 3. Add the batched Bun transform stage for `.ts`, `.tsx`, and `.jsx`.
 4. Implement collection/execution with no DOM.
 5. Port the current Zig DOM into native JS bindings.
-6. Port the current WPT TypeScript harness into Zig.
-7. Only then expand WPT coverage.
+6. Add React, Testing Library, and `../youneedawiki` compatibility gates.
+7. Port the current WPT TypeScript harness into Zig.
+8. Only then expand WPT coverage.
