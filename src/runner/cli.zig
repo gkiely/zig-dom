@@ -82,7 +82,7 @@ pub fn printHelp() void {
         \\  zig build run -- wpt-manifest --dir dom --out wpt/manifest/upstream-dom-smoke.json
         \\
         \\Notes:
-        \\  - test currently delegates execution to Bun while Zig runtime work is in progress.
+        \\  - test executes through the embedded QuickJS-ng runtime and Zig runner harness.
         \\  - wpt and wpt-manifest forward to existing scripts in scripts/.
         \\
         ,

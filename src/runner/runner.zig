@@ -1,6 +1,7 @@
 const std = @import("std");
 const cli = @import("cli.zig");
 const discovery = @import("discovery.zig");
+const execution = @import("execution.zig");
 const reporter = @import("reporter.zig");
 const transform = @import("transform.zig");
 
@@ -32,7 +33,7 @@ pub fn run(allocator: Allocator, io: std.Io, command: cli.ParsedCommand) !u8 {
 }
 
 fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u8 {
-    const discovered = try discovery.discoverTests(allocator, command.patterns);
+    const discovered = try discovery.discoverTests(allocator, io, command.patterns);
     defer discovered.deinit(allocator);
 
     if (discovered.paths.len == 0) {
@@ -53,15 +54,37 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
         reporter.printTransformed(prepared.transformed_count);
     }
 
-    var args: std.ArrayList([]const u8) = .empty;
-    defer args.deinit(allocator);
+    var summary = try execution.runFiles(allocator, io, prepared.paths);
+    defer summary.deinit(allocator);
 
-    try args.appendSlice(allocator, &.{ "bun", "test" });
-    for (prepared.paths) |path| {
-        try args.append(allocator, path);
+    for (summary.files) |file_result| {
+        reporter.printFileResult(
+            file_result.path,
+            file_result.passed,
+            file_result.failed,
+            file_result.skipped,
+            file_result.timed_out,
+            file_result.collection_errors,
+        );
+
+        if (file_result.collection_report) |collection_report| {
+            reporter.printCollectionReport(file_result.path, collection_report);
+        }
+
+        if (file_result.failure_report) |failure_report| {
+            reporter.printFailureReport(file_result.path, failure_report);
+        }
     }
 
-    return runProcess(io, args.items);
+    reporter.printSummary(
+        summary.total_passed,
+        summary.total_failed,
+        summary.total_skipped,
+        summary.total_timed_out,
+        summary.total_collection_errors,
+    );
+
+    return if (summary.hasFailures()) 1 else 0;
 }
 
 fn runSimpleScript(allocator: Allocator, io: std.Io, script_path: []const u8, extra_args: []const []const u8) !u8 {
