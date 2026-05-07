@@ -342,6 +342,12 @@ const max_module_source_bytes = 4 * 1024 * 1024;
 const max_tsconfig_bytes = 2 * 1024 * 1024;
 const max_package_json_bytes = 512 * 1024;
 
+const TransformBatchEntry = struct {
+    input_path: []const u8,
+    loader: []const u8,
+    output_path: []const u8,
+};
+
 pub const FileResult = struct {
     path: []u8,
     passed: usize,
@@ -487,35 +493,41 @@ const ModuleLoaderState = struct {
 
         var transform_targets: std.ArrayList([]const u8) = .empty;
         defer transform_targets.deinit(self.allocator);
+        var commonjs_targets: std.ArrayList([]const u8) = .empty;
+        defer commonjs_targets.deinit(self.allocator);
 
         for (graph) |module_id| {
             if (transform.needsTransform(module_id)) {
                 try transform_targets.append(self.allocator, module_id);
+            } else if (std.mem.eql(u8, transform.loaderForPath(module_id) orelse "", "js") and (try self.pathLooksCommonJs(module_id))) {
+                try commonjs_targets.append(self.allocator, module_id);
             }
         }
 
-        if (transform_targets.items.len == 0) {
-            return;
-        }
+        if (transform_targets.items.len > 0) {
+            const prepared = try transform.prepareModuleTransforms(self.allocator, self.io, transform_targets.items);
+            defer prepared.deinit(self.allocator);
 
-        const prepared = try transform.prepareModuleTransforms(self.allocator, self.io, transform_targets.items);
-        defer prepared.deinit(self.allocator);
-
-        if (prepared.outputs.len != transform_targets.items.len) {
-            return error.TransformCommandFailed;
-        }
-
-        for (transform_targets.items, prepared.outputs) |module_id, output_path| {
-            const key = try self.allocator.dupe(u8, module_id);
-            errdefer self.allocator.free(key);
-
-            const value = try self.allocator.dupe(u8, output_path);
-            errdefer self.allocator.free(value);
-
-            if (try self.transformed_outputs.fetchPut(key, value)) |previous| {
-                self.allocator.free(key);
-                self.allocator.free(previous.value);
+            if (prepared.outputs.len != transform_targets.items.len) {
+                return error.TransformCommandFailed;
             }
+
+            for (transform_targets.items, prepared.outputs) |module_id, output_path| {
+                const key = try self.allocator.dupe(u8, module_id);
+                errdefer self.allocator.free(key);
+
+                const value = try self.allocator.dupe(u8, output_path);
+                errdefer self.allocator.free(value);
+
+                if (try self.transformed_outputs.fetchPut(key, value)) |previous| {
+                    self.allocator.free(key);
+                    self.allocator.free(previous.value);
+                }
+            }
+        }
+
+        if (commonjs_targets.items.len > 0) {
+            try self.prepareCommonJsModuleTransforms(commonjs_targets.items);
         }
     }
 
@@ -706,6 +718,48 @@ const ModuleLoaderState = struct {
             self.allocator,
             .limited(max_module_source_bytes),
         );
+    }
+
+    fn prepareCommonJsModuleTransforms(self: *ModuleLoaderState, module_paths: []const []const u8) !void {
+        var pending: std.ArrayList(TransformBatchEntry) = .empty;
+        defer pending.deinit(self.allocator);
+
+        for (module_paths) |module_id| {
+            var output_path_owned: ?[]u8 = self.transformed_outputs.get(module_id);
+            if (output_path_owned == null) {
+                const output_path = try self.buildCommonJsOutputPath(module_id);
+                errdefer self.allocator.free(output_path);
+
+                const key = try self.allocator.dupe(u8, module_id);
+                errdefer self.allocator.free(key);
+
+                try self.transformed_outputs.put(key, output_path);
+                output_path_owned = output_path;
+            }
+
+            const output_path = output_path_owned.?;
+            const stat = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
+                error.FileNotFound => null,
+                else => return err,
+            };
+
+            if (stat == null or stat.?.kind != .file) {
+                try pending.append(self.allocator, .{
+                    .input_path = module_id,
+                    .loader = "cjs",
+                    .output_path = output_path,
+                });
+            }
+        }
+
+        if (pending.items.len == 0) {
+            return;
+        }
+
+        const exit_code = try self.runTransformBatch(pending.items);
+        if (exit_code != 0) {
+            return error.TransformCommandFailed;
+        }
     }
 
     fn buildCommonJsOutputPath(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
@@ -968,6 +1022,19 @@ const ModuleLoaderState = struct {
         );
         defer self.allocator.free(output_path);
 
+        const cached_output = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
+            error.FileNotFound => null,
+            else => return err,
+        };
+        if (cached_output != null and cached_output.?.kind == .file) {
+            return std.Io.Dir.cwd().readFileAlloc(
+                self.io,
+                output_path,
+                self.allocator,
+                .limited(max_module_source_bytes),
+            );
+        }
+
         {
             var atomic_input = try std.Io.Dir.cwd().createFileAtomic(self.io, input_path, .{
                 .make_path = true,
@@ -992,6 +1059,15 @@ const ModuleLoaderState = struct {
     }
 
     fn runSingleTransform(self: *ModuleLoaderState, input_path: []const u8, loader: []const u8, output_path: []const u8) !u8 {
+        const entry: TransformBatchEntry = .{
+            .input_path = input_path,
+            .loader = loader,
+            .output_path = output_path,
+        };
+        return self.runTransformBatch(&.{entry});
+    }
+
+    fn runTransformBatch(self: *ModuleLoaderState, entries: []const TransformBatchEntry) !u8 {
         var args: std.ArrayList([]const u8) = .empty;
         defer args.deinit(self.allocator);
 
@@ -1001,13 +1077,13 @@ const ModuleLoaderState = struct {
             "scripts/transform-tests.ts",
             "--cache-dir",
             ".zig-dom-cache/transformed",
-            "--file",
-            input_path,
-            "--loader",
-            loader,
-            "--out",
-            output_path,
         });
+
+        for (entries) |entry| {
+            try args.appendSlice(self.allocator, &.{ "--file", entry.input_path });
+            try args.appendSlice(self.allocator, &.{ "--loader", entry.loader });
+            try args.appendSlice(self.allocator, &.{ "--out", entry.output_path });
+        }
 
         var child = std.process.spawn(self.io, .{
             .argv = args.items,
