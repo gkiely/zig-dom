@@ -638,7 +638,14 @@ const ModuleLoaderState = struct {
         const folded_source = try foldNodeEnvConditionals(self.allocator, source);
         defer self.allocator.free(folded_source);
 
-        const specifiers = try collectCommonJsSpecifiers(self.allocator, folded_source);
+        try self.recordCommonJsRequirePropertyRequests(module_id, folded_source);
+
+        const pruned_source = if (self.requestedExportsFor(module_id)) |requested|
+            try pruneUnrequestedCommonJsExports(self.allocator, folded_source, requested)
+        else
+            try self.allocator.dupe(u8, folded_source);
+        defer self.allocator.free(pruned_source);
+        const specifiers = try collectCommonJsSpecifiers(self.allocator, pruned_source);
         defer {
             for (specifiers) |specifier| self.allocator.free(specifier);
             self.allocator.free(specifiers);
@@ -674,7 +681,7 @@ const ModuleLoaderState = struct {
             });
         }
 
-        const export_names = try self.collectCommonJsExportNamesDeep(module_id, folded_source);
+        const export_names = try self.collectCommonJsExportNamesDeep(module_id, pruned_source);
         defer {
             for (export_names) |name| self.allocator.free(name);
             self.allocator.free(export_names);
@@ -741,7 +748,7 @@ const ModuleLoaderState = struct {
             \\
         );
         try appendFmt(self.allocator, &out, "const __zigCommonJSExports = __zigLoadCommonJS('{s}', '{s}', __zigCjsDeps, function(module, exports, require, __filename, __dirname, global) {{\n", .{ module_literal, dirname_literal });
-        try out.appendSlice(self.allocator, folded_source);
+        try out.appendSlice(self.allocator, pruned_source);
         try out.appendSlice(self.allocator,
             \\
             \\});
@@ -755,6 +762,61 @@ const ModuleLoaderState = struct {
         }
 
         return out.toOwnedSlice(self.allocator);
+    }
+
+    fn recordCommonJsRequirePropertyRequests(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) !void {
+        var cursor: usize = 0;
+        while (std.mem.indexOfPos(u8, source, cursor, "require(")) |require_index| {
+            const specifier = parseRequireSpecifierAt(source, require_index) orelse {
+                cursor = require_index + "require(".len;
+                continue;
+            };
+
+            const local = findCommonJsRequireBinding(source, require_index) orelse {
+                cursor = require_index + "require(".len;
+                continue;
+            };
+
+            const resolved = self.normalizeSpecifier(module_id, specifier) catch {
+                cursor = require_index + "require(".len;
+                continue;
+            };
+            defer self.allocator.free(resolved);
+
+            var found_property = false;
+            if (commonJsRequireBindingNeedsAllExports(source, local)) {
+                try self.recordAllRequestedExports(resolved);
+                cursor = require_index + "require(".len;
+                continue;
+            }
+
+            var property_cursor: usize = 0;
+            while (std.mem.indexOfPos(u8, source, property_cursor, local)) |local_index| {
+                const after_local = local_index + local.len;
+                if ((local_index == 0 or !isIdentifierContinue(source[local_index - 1])) and
+                    after_local < source.len and
+                    source[after_local] == '.' and
+                    after_local + 1 < source.len and
+                    isIdentifierContinue(source[after_local + 1]))
+                {
+                    const name_start = after_local + 1;
+                    const name_end = readIdentifierEnd(source, name_start);
+                    if (name_end > name_start and !std.mem.eql(u8, source[name_start..name_end], "default")) {
+                        try self.recordRequestedExport(resolved, source[name_start..name_end]);
+                        found_property = true;
+                    }
+                    property_cursor = name_end;
+                    continue;
+                }
+                property_cursor = after_local;
+            }
+
+            if (!found_property) {
+                try self.recordAllRequestedExports(resolved);
+            }
+
+            cursor = require_index + "require(".len;
+        }
     }
 
     fn collectCommonJsExportNamesDeep(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]const []u8 {
@@ -3017,6 +3079,40 @@ fn parseImportQuotedSpecifier(source: []const u8) ?[]const u8 {
     return null;
 }
 
+fn parseRequireSpecifierAt(source: []const u8, require_index: usize) ?[]const u8 {
+    if (!std.mem.startsWith(u8, source[require_index..], "require(")) return null;
+    var cursor = require_index + "require(".len;
+    while (cursor < source.len and std.ascii.isWhitespace(source[cursor])) : (cursor += 1) {}
+    if (cursor >= source.len or (source[cursor] != '"' and source[cursor] != '\'')) return null;
+    return parseImportQuotedSpecifier(source[cursor..]);
+}
+
+fn findCommonJsRequireBinding(source: []const u8, require_index: usize) ?[]const u8 {
+    var line_start = require_index;
+    while (line_start > 0 and source[line_start - 1] != '\n' and source[line_start - 1] != ';') : (line_start -= 1) {}
+    const prefix = std.mem.trim(u8, source[line_start..require_index], " \t\r\n");
+    if (!std.mem.startsWith(u8, prefix, "var ")) return null;
+    const after_var = std.mem.trim(u8, prefix["var ".len..], " \t\r\n");
+    const name_end = readIdentifierEnd(after_var, 0);
+    if (name_end == 0) return null;
+    const after_name = std.mem.trim(u8, after_var[name_end..], " \t\r\n");
+    if (!std.mem.startsWith(u8, after_name, "=")) return null;
+    return after_var[0..name_end];
+}
+
+fn commonJsRequireBindingNeedsAllExports(source: []const u8, local: []const u8) bool {
+    var stack_buffer: [256]u8 = undefined;
+    if (local.len + "Object.keys()".len > stack_buffer.len) return true;
+    const object_keys = std.fmt.bufPrint(&stack_buffer, "Object.keys({s})", .{local}) catch return true;
+    if (std.mem.indexOf(u8, source, object_keys) != null) return true;
+
+    const object_entries = std.fmt.bufPrint(&stack_buffer, "Object.entries({s})", .{local}) catch return true;
+    if (std.mem.indexOf(u8, source, object_entries) != null) return true;
+
+    const own_names = std.fmt.bufPrint(&stack_buffer, "Object.getOwnPropertyNames({s})", .{local}) catch return true;
+    return std.mem.indexOf(u8, source, own_names) != null;
+}
+
 fn pruneUnrequestedTsExports(allocator: Allocator, source: []const u8, requested: *const ExportNameSet) ![]u8 {
     if (requested.all) return allocator.dupe(u8, source);
 
@@ -3032,6 +3128,75 @@ fn pruneUnrequestedTsExports(allocator: Allocator, source: []const u8, requested
                 const name = source[name_start..name_end];
                 const statement_end = findStatementEnd(source, cursor);
                 if (!requested.contains(name)) {
+                    cursor = statement_end;
+                    if (cursor < source.len and source[cursor] == ';') cursor += 1;
+                    continue;
+                }
+            }
+        }
+
+        try out.append(allocator, source[cursor]);
+        cursor += 1;
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn pruneUnrequestedCommonJsExports(allocator: Allocator, source: []const u8, requested: *const ExportNameSet) ![]u8 {
+    if (requested.all) return allocator.dupe(u8, source);
+    if (std.mem.indexOf(u8, source, "exports.") == null and
+        std.mem.indexOf(u8, source, "Object.defineProperty(exports") == null)
+    {
+        return allocator.dupe(u8, source);
+    }
+
+    const exports_pruned = try pruneUnrequestedCommonJsExportAssignments(allocator, source, requested);
+    defer allocator.free(exports_pruned);
+    const vars_pruned = try pruneUnusedVarDeclarations(allocator, exports_pruned);
+    defer allocator.free(vars_pruned);
+    return pruneUnusedVarDeclarations(allocator, vars_pruned);
+}
+
+fn pruneUnrequestedCommonJsExportAssignments(allocator: Allocator, source: []const u8, requested: *const ExportNameSet) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        if (std.mem.startsWith(u8, source[cursor..], "exports.")) {
+            const name_start = cursor + "exports.".len;
+            const name_end = readIdentifierEnd(source, name_start);
+            if (name_end > name_start) {
+                const name = source[name_start..name_end];
+                const after_name = std.mem.trim(u8, source[name_end..], " \t\r\n");
+                if (std.mem.startsWith(u8, after_name, "=") and !requested.contains(name)) {
+                    cursor = findStatementEnd(source, cursor);
+                    if (cursor < source.len and source[cursor] == ';') cursor += 1;
+                    continue;
+                }
+            }
+        }
+
+        try out.append(allocator, source[cursor]);
+        cursor += 1;
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn pruneUnusedVarDeclarations(allocator: Allocator, source: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        if (std.mem.startsWith(u8, source[cursor..], "var ")) {
+            const name_start = cursor + "var ".len;
+            const name_end = readIdentifierEnd(source, name_start);
+            if (name_end > name_start) {
+                const name = source[name_start..name_end];
+                const statement_end = findStatementEnd(source, cursor);
+                if (!identifierUsedAfter(source, statement_end, name)) {
                     cursor = statement_end;
                     if (cursor < source.len and source[cursor] == ';') cursor += 1;
                     continue;
@@ -3251,6 +3416,28 @@ test "onLoad tree shake prunes unrequested exports before transform" {
     try std.testing.expect(std.mem.indexOf(u8, import_pruned, "unused") == null);
     try std.testing.expect(std.mem.indexOf(u8, import_pruned, "helper") == null);
     try std.testing.expect(std.mem.indexOf(u8, import_pruned, "darken") == null);
+}
+
+test "CommonJS export pruning removes unrequested simple exports" {
+    var requested = ExportNameSet.init();
+    defer requested.deinit(std.testing.allocator);
+    try requested.add(std.testing.allocator, "used");
+
+    const source =
+        \\var _used = require("./used");
+        \\var _unused = require("./unused");
+        \\var used = _used.default;
+        \\exports.used = used;
+        \\var unused = _unused.default;
+        \\exports.unused = unused;
+    ;
+    const pruned = try pruneUnrequestedCommonJsExports(std.testing.allocator, source, &requested);
+    defer std.testing.allocator.free(pruned);
+
+    try std.testing.expect(std.mem.indexOf(u8, pruned, "./used") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pruned, "./unused") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pruned, "exports.used") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pruned, "exports.unused") == null);
 }
 
 fn canonicalizePath(allocator: Allocator, io: std.Io, path: []const u8) ![]u8 {
