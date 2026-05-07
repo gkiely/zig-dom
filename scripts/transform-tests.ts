@@ -167,6 +167,10 @@ const transpilers: Record<Loader, Bun.Transpiler> = {
 };
 
 for (const entry of entries) {
+  if (process.env.ZIG_DOM_TRANSFORM_DEBUG === "1") {
+    console.error(`[zig-dom transform] ${entry.loader} ${entry.file} -> ${entry.out}`);
+  }
+
   let normalized: string;
   if (entry.loader === "cjs") {
     const bundled = await Bun.build({

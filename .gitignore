@@ -8,6 +8,7 @@ bun.lockb
 # Zig
 .zig-cache/
 .zig-dom-cache/
+.zig-global-cache/
 zig-cache/
 zig-pkg/
 zig-out/

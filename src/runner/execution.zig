@@ -401,6 +401,7 @@ const ModuleLoaderState = struct {
     loaded_modules: std.StringHashMap(*ModuleDef),
     module_sources: std.StringHashMap([]u8),
     transformed_outputs: std.StringHashMap([]u8),
+    pending_onload_transforms: std.ArrayList(TransformBatchEntry),
     mock_module_sources: std.StringHashMap([]u8),
     path_alias_root: ?[]u8,
     path_aliases: std.ArrayList(PathAlias),
@@ -413,6 +414,7 @@ const ModuleLoaderState = struct {
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
             .module_sources = std.StringHashMap([]u8).init(allocator),
             .transformed_outputs = std.StringHashMap([]u8).init(allocator),
+            .pending_onload_transforms = .empty,
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
             .path_alias_root = null,
             .path_aliases = .empty,
@@ -435,6 +437,9 @@ const ModuleLoaderState = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.transformed_outputs.deinit();
+
+        self.clearPendingOnLoadTransforms();
+        self.pending_onload_transforms.deinit(self.allocator);
 
         var mock_iterator = self.mock_module_sources.iterator();
         while (mock_iterator.next()) |entry| {
@@ -504,30 +509,101 @@ const ModuleLoaderState = struct {
             }
         }
 
-        if (transform_targets.items.len > 0) {
-            const prepared = try transform.prepareModuleTransforms(self.allocator, self.io, transform_targets.items);
-            defer prepared.deinit(self.allocator);
+        var pending: std.ArrayList(TransformBatchEntry) = .empty;
+        defer pending.deinit(self.allocator);
 
-            if (prepared.outputs.len != transform_targets.items.len) {
-                return error.TransformCommandFailed;
+        for (transform_targets.items) |module_id| {
+            const loader = transform.loaderForPath(module_id) orelse return error.TransformCommandFailed;
+            const output_path = try transform.buildModuleOutputPath(self.allocator, self.io, module_id);
+            errdefer self.allocator.free(output_path);
+
+            const output_path_for_map = try self.allocator.dupe(u8, output_path);
+            errdefer self.allocator.free(output_path_for_map);
+
+            const key = try self.allocator.dupe(u8, module_id);
+            errdefer self.allocator.free(key);
+
+            if (try self.transformed_outputs.fetchPut(key, output_path_for_map)) |previous| {
+                self.allocator.free(key);
+                self.allocator.free(previous.value);
             }
 
-            for (transform_targets.items, prepared.outputs) |module_id, output_path| {
-                const key = try self.allocator.dupe(u8, module_id);
-                errdefer self.allocator.free(key);
+            const stat = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
+                error.FileNotFound => null,
+                else => return err,
+            };
 
-                const value = try self.allocator.dupe(u8, output_path);
-                errdefer self.allocator.free(value);
-
-                if (try self.transformed_outputs.fetchPut(key, value)) |previous| {
-                    self.allocator.free(key);
-                    self.allocator.free(previous.value);
-                }
+            if (stat == null or stat.?.kind != .file) {
+                try pending.append(self.allocator, .{
+                    .input_path = module_id,
+                    .loader = loader,
+                    .output_path = output_path,
+                });
+            } else {
+                self.allocator.free(output_path);
             }
         }
 
         if (commonjs_targets.items.len > 0) {
-            try self.prepareCommonJsModuleTransforms(commonjs_targets.items);
+            try self.appendCommonJsModuleTransforms(commonjs_targets.items, &pending);
+        }
+
+        for (self.pending_onload_transforms.items) |entry| {
+            try pending.append(self.allocator, entry);
+        }
+        self.pending_onload_transforms.clearRetainingCapacity();
+
+        defer {
+            for (pending.items) |entry| {
+                if (std.mem.startsWith(u8, entry.input_path, ".zig-dom-cache/transformed/onload/")) {
+                    self.allocator.free(entry.input_path);
+                    self.allocator.free(entry.loader);
+                    self.allocator.free(entry.output_path);
+                } else if (std.mem.startsWith(u8, entry.output_path, "./.zig-dom-cache/transformed/modules/")) {
+                    self.allocator.free(entry.output_path);
+                }
+            }
+        }
+
+        if (pending.items.len > 0) {
+            const exit_code = try self.runTransformBatch(pending.items);
+            if (exit_code != 0) {
+                return error.TransformCommandFailed;
+            }
+        }
+    }
+
+    fn appendCommonJsModuleTransforms(
+        self: *ModuleLoaderState,
+        module_paths: []const []const u8,
+        pending: *std.ArrayList(TransformBatchEntry),
+    ) !void {
+        for (module_paths) |module_id| {
+            var output_path_owned: ?[]u8 = self.transformed_outputs.get(module_id);
+            if (output_path_owned == null) {
+                const output_path = try self.buildCommonJsOutputPath(module_id);
+                errdefer self.allocator.free(output_path);
+
+                const key = try self.allocator.dupe(u8, module_id);
+                errdefer self.allocator.free(key);
+
+                try self.transformed_outputs.put(key, output_path);
+                output_path_owned = output_path;
+            }
+
+            const output_path = output_path_owned.?;
+            const stat = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
+                error.FileNotFound => null,
+                else => return err,
+            };
+
+            if (stat == null or stat.?.kind != .file) {
+                try pending.append(self.allocator, .{
+                    .input_path = module_id,
+                    .loader = "cjs",
+                    .output_path = output_path,
+                });
+            }
         }
     }
 
@@ -542,6 +618,14 @@ const ModuleLoaderState = struct {
 
         var seen = std.StringHashMap(void).init(self.allocator);
         defer seen.deinit();
+        var scanned_cjs = std.StringHashMap(void).init(self.allocator);
+        defer {
+            var scanned_iterator = scanned_cjs.iterator();
+            while (scanned_iterator.next()) |entry| {
+                self.allocator.free(entry.key_ptr.*);
+            }
+            scanned_cjs.deinit();
+        }
 
         const entry = try self.allocator.dupe(u8, entry_module_id);
         queue.append(self.allocator, entry) catch |err| {
@@ -594,14 +678,78 @@ const ModuleLoaderState = struct {
                 try seen.put(resolved, {});
                 try queue.append(self.allocator, resolved);
             }
+
+            if (isCommonJsSource(module_id, source)) {
+                try self.enqueueCommonJsBareDependencies(module_id, source, &seen, &queue, &scanned_cjs);
+            }
         }
 
         return queue.toOwnedSlice(self.allocator);
     }
 
+    fn enqueueCommonJsBareDependencies(
+        self: *ModuleLoaderState,
+        module_id: []const u8,
+        source: []const u8,
+        seen: *std.StringHashMap(void),
+        queue: *std.ArrayList([]u8),
+        scanned_cjs: *std.StringHashMap(void),
+    ) !void {
+        if (scanned_cjs.contains(module_id)) {
+            return;
+        }
+        const scanned_key = try self.allocator.dupe(u8, module_id);
+        errdefer self.allocator.free(scanned_key);
+        try scanned_cjs.put(scanned_key, {});
+
+        const cjs_specifiers = try collectCommonJsSpecifiers(self.allocator, source);
+        defer {
+            for (cjs_specifiers) |specifier| {
+                self.allocator.free(specifier);
+            }
+            self.allocator.free(cjs_specifiers);
+        }
+
+        for (cjs_specifiers) |specifier| {
+            if (isRelativeSpecifier(specifier)) {
+                const resolved_relative = self.normalizeSpecifier(module_id, specifier) catch continue;
+                defer self.allocator.free(resolved_relative);
+
+                if (scanned_cjs.contains(resolved_relative)) {
+                    continue;
+                }
+
+                const relative_source = self.loadModuleSourceForGraph(resolved_relative) catch continue;
+                defer self.allocator.free(relative_source);
+
+                if (isCommonJsSource(resolved_relative, relative_source)) {
+                    try self.enqueueCommonJsBareDependencies(resolved_relative, relative_source, seen, queue, scanned_cjs);
+                }
+                continue;
+            }
+
+            const resolved = self.normalizeSpecifier(module_id, specifier) catch |err| switch (err) {
+                error.UnsupportedExternalModule => continue,
+                error.ModuleNotFound => continue,
+                else => return err,
+            };
+            if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) {
+                self.allocator.free(resolved);
+                continue;
+            }
+
+            if (seen.contains(resolved)) {
+                self.allocator.free(resolved);
+                continue;
+            }
+
+            try seen.put(resolved, {});
+            try queue.append(self.allocator, resolved);
+        }
+    }
+
     fn loadModuleSourceForGraph(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
         const default_loader = transform.loaderForPath(module_id) orelse return error.UnsupportedModuleExtension;
-        _ = default_loader;
 
         if (std.fs.path.isAbsolute(module_id)) {
             if (self.runtime) |runtime| {
@@ -614,6 +762,15 @@ const ModuleLoaderState = struct {
                     );
                 };
                 defer hook_result.deinit(self.allocator);
+                const effective_loader = hook_result.loader orelse default_loader;
+                if (std.mem.eql(u8, effective_loader, "ts") or
+                    std.mem.eql(u8, effective_loader, "tsx") or
+                    std.mem.eql(u8, effective_loader, "jsx") or
+                    (std.mem.eql(u8, effective_loader, "js") and looksLikeJsxSource(hook_result.contents)))
+                {
+                    const transform_loader = if (std.mem.eql(u8, effective_loader, "js")) "jsx" else effective_loader;
+                    try self.queueOnLoadTransform(module_id, transform_loader, hook_result.contents);
+                }
                 return try self.allocator.dupe(u8, hook_result.contents);
             }
         }
@@ -1056,6 +1213,86 @@ const ModuleLoaderState = struct {
             self.allocator,
             .limited(max_module_source_bytes),
         );
+    }
+
+    fn queueOnLoadTransform(
+        self: *ModuleLoaderState,
+        module_id: []const u8,
+        loader: []const u8,
+        contents: []const u8,
+    ) !void {
+        const extension = onLoadTransformExtension(loader) orelse return error.UnsupportedTransformLoader;
+
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(module_id);
+        hasher.update(loader);
+        hasher.update(contents);
+        const digest = hasher.final();
+
+        const input_path = try std.fmt.allocPrint(
+            self.allocator,
+            ".zig-dom-cache/transformed/onload/{x}-input{s}",
+            .{ digest, extension },
+        );
+        errdefer self.allocator.free(input_path);
+
+        const output_path = try std.fmt.allocPrint(
+            self.allocator,
+            ".zig-dom-cache/transformed/onload/{x}-output.js",
+            .{digest},
+        );
+        errdefer self.allocator.free(output_path);
+
+        const cached_output = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
+            error.FileNotFound => null,
+            else => return err,
+        };
+        if (cached_output != null and cached_output.?.kind == .file) {
+            self.allocator.free(input_path);
+            self.allocator.free(output_path);
+            return;
+        }
+
+        {
+            var atomic_input = try std.Io.Dir.cwd().createFileAtomic(self.io, input_path, .{
+                .make_path = true,
+                .replace = true,
+            });
+            defer atomic_input.deinit(self.io);
+            try atomic_input.file.writeStreamingAll(self.io, contents);
+            try atomic_input.replace(self.io);
+        }
+
+        const loader_owned = try self.allocator.dupe(u8, loader);
+        errdefer self.allocator.free(loader_owned);
+
+        try self.pending_onload_transforms.append(self.allocator, .{
+            .input_path = input_path,
+            .loader = loader_owned,
+            .output_path = output_path,
+        });
+    }
+
+    fn preparePendingOnLoadTransforms(self: *ModuleLoaderState) !void {
+        defer self.clearPendingOnLoadTransforms();
+
+        if (self.pending_onload_transforms.items.len == 0) {
+            return;
+        }
+
+        const exit_code = try self.runTransformBatch(self.pending_onload_transforms.items);
+        if (exit_code != 0) {
+            return error.TransformCommandFailed;
+        }
+    }
+
+    fn clearPendingOnLoadTransforms(self: *ModuleLoaderState) void {
+        for (self.pending_onload_transforms.items) |entry| {
+            self.allocator.free(entry.input_path);
+            self.allocator.free(entry.loader);
+            self.allocator.free(entry.output_path);
+        }
+        self.pending_onload_transforms.clearRetainingCapacity();
     }
 
     fn runSingleTransform(self: *ModuleLoaderState, input_path: []const u8, loader: []const u8, output_path: []const u8) !u8 {
@@ -2038,6 +2275,58 @@ fn collectEsmSpecifiers(allocator: Allocator, source: []const u8) ![]const []u8 
     return specifiers.toOwnedSlice(allocator);
 }
 
+fn collectCommonJsSpecifiers(allocator: Allocator, source: []const u8) ![]const []u8 {
+    var specifiers: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (specifiers.items) |specifier| {
+            allocator.free(specifier);
+        }
+        specifiers.deinit(allocator);
+    }
+
+    var dedup = std.StringHashMap(void).init(allocator);
+    defer dedup.deinit();
+
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        const current = source[cursor];
+
+        if (current == '/') {
+            if (cursor + 1 < source.len and source[cursor + 1] == '/') {
+                cursor = skipLineComment(source, cursor);
+                continue;
+            }
+            if (cursor + 1 < source.len and source[cursor + 1] == '*') {
+                cursor = skipBlockComment(source, cursor);
+                continue;
+            }
+        }
+
+        if (current == '\'' or current == '"' or current == '`') {
+            cursor = skipQuotedLiteral(source, cursor);
+            continue;
+        }
+
+        if (hasWordAt(source, cursor, "require")) {
+            var value_index = cursor + "require".len;
+            skipTrivia(source, &value_index);
+            if (value_index < source.len and source[value_index] == '(') {
+                value_index += 1;
+                skipTrivia(source, &value_index);
+                if (parseQuotedSpecifier(source, value_index)) |literal| {
+                    try appendSpecifier(allocator, &specifiers, &dedup, literal.specifier);
+                    cursor = literal.next_index;
+                    continue;
+                }
+            }
+        }
+
+        cursor += 1;
+    }
+
+    return specifiers.toOwnedSlice(allocator);
+}
+
 fn parseImportSpecifier(
     allocator: Allocator,
     source: []const u8,
@@ -2816,6 +3105,22 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
 fn looksLikeJsxSource(source: []const u8) bool {
     return std.mem.indexOf(u8, source, "<") != null and
         (std.mem.indexOf(u8, source, "/>") != null or std.mem.indexOf(u8, source, "</") != null);
+}
+
+fn onLoadTransformExtension(loader: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, loader, "ts")) {
+        return ".ts";
+    }
+
+    if (std.mem.eql(u8, loader, "tsx")) {
+        return ".tsx";
+    }
+
+    if (std.mem.eql(u8, loader, "jsx")) {
+        return ".jsx";
+    }
+
+    return null;
 }
 
 fn canonicalizePath(allocator: Allocator, io: std.Io, path: []const u8) ![]u8 {
