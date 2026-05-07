@@ -4,6 +4,7 @@ import zigDOM, {
   Node,
   Element,
   Window,
+  PropertySymbol,
 } from "zig-dom";
 
 test("zig-dom builtin module exports native DOM globals", () => {
@@ -12,6 +13,7 @@ test("zig-dom builtin module exports native DOM globals", () => {
   expect(Window).toBe(globalThis.Window);
   expect(zigDOM.Window).toBe(Window);
   expect(zigDOM.GlobalRegistrator).toBe(GlobalRegistrator);
+  expect(zigDOM.PropertySymbol).toBe(PropertySymbol);
 
   const win = new Window({ url: "https://module.test/path?x=1#frag" });
   expect(win instanceof Window).toBe(true);
