@@ -4,7 +4,6 @@ const zig_dom = @import("../zig_dom.zig");
 const dom_classes = @import("dom_classes.zig");
 
 const Allocator = std.mem.Allocator;
-const dom_bootstrap_source = @embedFile("dom_bootstrap.js");
 var host_io: ?std.Io = null;
 
 pub const Context = quickjs.Context;
@@ -35,7 +34,7 @@ pub const Runtime = struct {
     rt: *quickjs.Runtime,
     ctx: *quickjs.Context,
     dom_window_handle: u64,
-    dom_classes_state: ?dom_classes.DomClasses,
+    dom_classes_state: ?*dom_classes.DomClasses,
 
     pub fn init(allocator: Allocator, io: std.Io) RuntimeError!Runtime {
         host_io = io;
@@ -60,8 +59,9 @@ pub const Runtime = struct {
     }
 
     pub fn deinit(self: *Runtime) void {
-        if (self.dom_classes_state) |*classes| {
+        if (self.dom_classes_state) |classes| {
             classes.deinit();
+            self.allocator.destroy(classes);
             self.dom_classes_state = null;
         }
         if (self.dom_window_handle != 0) {
@@ -333,7 +333,9 @@ pub const Runtime = struct {
         const global = self.ctx.getGlobalObject();
         defer global.deinit(self.ctx);
 
-        var classes_state = dom_classes.DomClasses.init(self.allocator, self.rt, self.ctx, global) catch |err| {
+        const classes_state = self.allocator.create(dom_classes.DomClasses) catch return error.OutOfMemory;
+        errdefer self.allocator.destroy(classes_state);
+        classes_state.* = dom_classes.DomClasses.init(self.allocator, self.rt, self.ctx, global) catch |err| {
             return switch (err) {
                 error.OutOfMemory => error.OutOfMemory,
                 else => error.EvaluationFailed,
@@ -341,6 +343,7 @@ pub const Runtime = struct {
         };
         errdefer classes_state.deinit();
         self.dom_classes_state = classes_state;
+        self.ctx.setOpaque(dom_classes.DomClasses, classes_state);
 
         const native = quickjs.Value.initObject(self.ctx);
         if (native.isException()) {
@@ -500,9 +503,8 @@ pub const Runtime = struct {
         global.setPropertyStr(self.ctx, "__zigDomWindowHandle", quickjs.Value.initInt64(@intCast(window_handle))) catch return error.EvaluationFailed;
         global.setPropertyStr(self.ctx, "__zigDomDocumentHandle", quickjs.Value.initInt64(@intCast(document_handle))) catch return error.EvaluationFailed;
 
-        try self.evalScript("<zig-dom-bootstrap>", dom_bootstrap_source);
-        if (self.dom_classes_state) |*classes| {
-            classes.installNodeSlice(self.ctx) catch |err| {
+        if (self.dom_classes_state) |classes| {
+            classes.installNativeGlobals(self.ctx, global, window_handle, document_handle) catch |err| {
                 return switch (err) {
                     error.OutOfMemory => error.OutOfMemory,
                     else => error.EvaluationFailed,
@@ -1023,7 +1025,7 @@ fn jsElementGetAttribute(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args:
     defer zig_dom.zig_dom_free_string(out_ptr, out_len);
 
     if (out_exists == 0) {
-        return quickjs.Value.@"null";
+        return quickjs.Value.null;
     }
     if (out_ptr == null or out_len == 0) {
         return quickjs.Value.initStringLen(ctx, "");
