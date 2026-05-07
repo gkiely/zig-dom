@@ -63,6 +63,8 @@ const node_stream_web_colon_specifier = "node:stream/web";
 const node_vm_specifier = "vm";
 const node_vm_colon_specifier = "node:vm";
 const node_perf_hooks_colon_specifier = "node:perf_hooks";
+const zig_dom_global_registrator_specifier = "zig-dom/global-registrator";
+const zig_dom_global_registrar_specifier = "zig-dom/global-registrar";
 const react_specifier = "react";
 const react_dom_client_specifier = "react-dom/client";
 const testing_library_specifier = "@testing-library/react";
@@ -98,6 +100,60 @@ const bun_test_shim_source =
     \\export const afterAll = api.afterAll;
     \\const bunTest = { test, it, describe, expect, mock, spyOn, beforeAll, beforeEach, afterEach, afterAll };
     \\export default bunTest;
+;
+
+const zig_dom_global_registrator_shim_source =
+    \\function applyLocation(urlValue) {
+    \\  if (!urlValue || !globalThis.location) {
+    \\    return;
+    \\  }
+    \\
+    \\  try {
+    \\    const next = new URL(String(urlValue));
+    \\    globalThis.location.href = next.href;
+    \\    globalThis.location.protocol = next.protocol;
+    \\    globalThis.location.host = next.host;
+    \\    globalThis.location.hostname = next.hostname;
+    \\    globalThis.location.port = next.port;
+    \\    globalThis.location.pathname = next.pathname;
+    \\    globalThis.location.search = next.search;
+    \\    globalThis.location.hash = next.hash;
+    \\  } catch {
+    \\    // Ignore invalid URL input to keep setup resilient.
+    \\  }
+    \\}
+    \\
+    \\class GlobalRegistrator {
+    \\  static register(options = {}) {
+    \\    const target = globalThis.window && typeof globalThis.window === "object" ? globalThis.window : globalThis;
+    \\    GlobalRegistrator._window = target;
+    \\
+    \\    if (options && typeof options === "object") {
+    \\      applyLocation(options.url);
+    \\    }
+    \\
+    \\    return target;
+    \\  }
+    \\
+    \\  static reset() {
+    \\    if (globalThis.document && globalThis.document.body) {
+    \\      globalThis.document.body.innerHTML = "";
+    \\    }
+    \\  }
+    \\
+    \\  static unregister() {
+    \\    GlobalRegistrator._window = null;
+    \\  }
+    \\
+    \\  static currentWindow() {
+    \\    return GlobalRegistrator._window;
+    \\  }
+    \\}
+    \\
+    \\GlobalRegistrator._window = null;
+    \\
+    \\export { GlobalRegistrator };
+    \\export default { GlobalRegistrator };
 ;
 
 const node_url_shim_source =
@@ -2661,6 +2717,13 @@ fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
 
     if (std.mem.eql(u8, module_name, node_perf_hooks_colon_specifier)) {
         return node_perf_hooks_shim_source;
+    }
+
+    if (
+        std.mem.eql(u8, module_name, zig_dom_global_registrator_specifier) or
+        std.mem.eql(u8, module_name, zig_dom_global_registrar_specifier)
+    ) {
+        return zig_dom_global_registrator_shim_source;
     }
 
     return null;
