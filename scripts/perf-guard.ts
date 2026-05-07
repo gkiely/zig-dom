@@ -76,7 +76,7 @@ function listTestFiles(dir: string): string[] {
       continue;
     }
 
-    if (/\.(test|spec)\.[cm]?[tj]sx?$/.test(entry.name)) {
+    if (/\.test\.[cm]?[tj]sx?$/.test(entry.name)) {
       files.push(path);
     }
   }
@@ -90,22 +90,21 @@ function resolveTestFile(input: string): string {
   if (existsSync(rooted)) return rooted;
 
   const normalizedInput = input.toLowerCase();
+  const pathLikeInput = normalizedInput.includes("/") || normalizedInput.includes("\\");
   const matches = listTestFiles(rootDir)
     .filter((file) => {
       const normalized = file.toLowerCase();
       const basename = file.split(sep).at(-1)?.toLowerCase() ?? "";
-      return normalized.includes(normalizedInput) || basename.startsWith(normalizedInput);
+      if (pathLikeInput) {
+        return normalized.includes(normalizedInput);
+      }
+      return basename.startsWith(normalizedInput);
     })
     .sort();
 
   if (matches.length === 0) {
     throw new Error(`Could not find downstream test file matching "${input}" under ${rootDir}.`);
   }
-  const testMatches = matches.filter((file) => /\.test\.[cm]?[tj]sx?$/.test(file));
-  if (testMatches.length === 1) {
-    return testMatches[0]!;
-  }
-
   if (matches.length > 1) {
     throw new Error(`Ambiguous downstream test file "${input}". Matches:\n${matches.map((file) => `- ${file}`).join("\n")}`);
   }
@@ -123,7 +122,7 @@ function targetFromArgs(): PerfTarget {
       expectedFail: 0,
       timing: {
         cold: { max: 1 },
-        warm: { max: 0.16 }
+        warm: { max: 0.15 }
       }
     };
   }

@@ -10,6 +10,12 @@ const Exception = runtime_pkg.Exception;
 const ModuleContext = runtime_pkg.ModuleContext;
 const ModuleDef = runtime_pkg.ModuleDef;
 
+pub const DomMode = enum {
+    auto,
+    always,
+    never,
+};
+
 const run_bootstrap_source =
     \\globalThis.__zigDone = false;
     \\globalThis.__zigRunError = "";
@@ -1380,10 +1386,20 @@ const ModuleLoaderState = struct {
             std.debug.print("[zig-dom onload] hit {s} loader={s} requested={s} bytes={d}\n", .{ module_id, effective_loader, requested_text, hook_result.contents.len });
         }
         if (std.mem.eql(u8, effective_loader, "js")) {
-            if (looksLikeJsxSource(hook_result.contents)) {
-                return try self.transformOnLoadContents(module_id, "jsx", hook_result.contents);
+            const js_onload_source = blk: {
+                const requested = self.requestedExportsFor(module_id) orelse break :blk try self.allocator.dupe(u8, hook_result.contents);
+                if (requested.all) break :blk try self.allocator.dupe(u8, hook_result.contents);
+                break :blk try pruneUnrequestedTsExports(self.allocator, hook_result.contents, requested);
+            };
+            defer self.allocator.free(js_onload_source);
+
+            if (looksLikeJsxSource(js_onload_source)) {
+                return try self.transformOnLoadContents(module_id, "jsx", js_onload_source);
             }
-            return try pruneUnusedImports(self.allocator, hook_result.contents);
+
+            const rewritten = try self.rewriteBarePackageNamedImports(module_id, js_onload_source);
+            defer self.allocator.free(rewritten);
+            return try pruneUnusedImports(self.allocator, rewritten);
         }
 
         if (
@@ -2895,7 +2911,7 @@ fn appendFmt(allocator: Allocator, out: *std.ArrayList(u8), comptime fmt: []cons
     try out.appendSlice(allocator, text);
 }
 
-pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8, setup_paths: []const []const u8) !Summary {
+pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8, setup_paths: []const []const u8, dom_mode: DomMode) !Summary {
     var results: std.ArrayList(FileResult) = .empty;
     errdefer {
         for (results.items) |*item| {
@@ -2914,7 +2930,7 @@ pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8, setup_pat
     };
 
     for (paths) |path| {
-        var file_result = try runSingleFile(allocator, io, path, setup_paths);
+        var file_result = try runSingleFile(allocator, io, path, setup_paths, dom_mode);
         errdefer file_result.deinit(allocator);
 
         totals.total_passed += file_result.passed;
@@ -2930,7 +2946,63 @@ pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8, setup_pat
     return totals;
 }
 
-fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths: []const []const u8) !FileResult {
+fn shouldInstallDom(
+    allocator: Allocator,
+    io: std.Io,
+    dom_mode: DomMode,
+    entry_module_id: []const u8,
+    setup_module_ids: []const []u8,
+) bool {
+    return switch (dom_mode) {
+        .always => true,
+        .never => false,
+        .auto => blk: {
+            if (pathImpliesDom(entry_module_id)) break :blk true;
+
+            if (sourceImpliesDom(allocator, io, entry_module_id)) break :blk true;
+            for (setup_module_ids) |setup_module_id| {
+                if (pathImpliesDom(setup_module_id) or sourceImpliesDom(allocator, io, setup_module_id)) break :blk true;
+            }
+
+            break :blk false;
+        },
+    };
+}
+
+fn pathImpliesDom(path: []const u8) bool {
+    return std.mem.endsWith(u8, path, ".jsx") or
+        std.mem.endsWith(u8, path, ".tsx") or
+        std.mem.startsWith(u8, std.fs.path.basename(path), "native-dom-");
+}
+
+fn sourceImpliesDom(allocator: Allocator, io: std.Io, path: []const u8) bool {
+    const source = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_module_source_bytes)) catch return false;
+    defer allocator.free(source);
+
+    const markers = [_][]const u8{
+        "@testing-library/react",
+        "@testing-library/dom",
+        "react-dom",
+        "zig-dom",
+        "GlobalRegistrator",
+        "document",
+        "window",
+        "HTMLElement",
+        "Element",
+        "Node",
+        "MutationObserver",
+        "ResizeObserver",
+        "happyDOM",
+    };
+
+    for (markers) |marker| {
+        if (std.mem.indexOf(u8, source, marker) != null) return true;
+    }
+
+    return false;
+}
+
+fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths: []const []const u8, dom_mode: DomMode) !FileResult {
     const entry_module_id = canonicalizePath(allocator, io, path) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
@@ -2954,7 +3026,9 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         };
     }
 
-    var vm = try Runtime.init(allocator, io);
+    const install_dom = shouldInstallDom(allocator, io, dom_mode, entry_module_id, setup_module_ids.items);
+
+    var vm = try Runtime.initWithDom(allocator, io, install_dom);
     defer vm.deinit();
 
     vm.evalScript(
@@ -3820,6 +3894,8 @@ fn commonJsRequireBindingNeedsAllExports(source: []const u8, local: []const u8) 
 fn pruneUnrequestedTsExports(allocator: Allocator, source: []const u8, requested: *const ExportNameSet) ![]u8 {
     if (requested.all) return allocator.dupe(u8, source);
 
+    const preserve_dependencies = shouldPreserveExportDependencyScan(source);
+
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
 
@@ -3831,7 +3907,8 @@ fn pruneUnrequestedTsExports(allocator: Allocator, source: []const u8, requested
             if (name_end > name_start) {
                 const name = source[name_start..name_end];
                 const statement_end = findStatementEnd(source, cursor);
-                if (!requested.contains(name)) {
+                // Keep exported declarations that are still referenced by retained code.
+                if (!requested.contains(name) and (!preserve_dependencies or !identifierUsedAfter(source, statement_end, name))) {
                     cursor = statement_end;
                     if (cursor < source.len and source[cursor] == ';') cursor += 1;
                     continue;
@@ -3844,6 +3921,23 @@ fn pruneUnrequestedTsExports(allocator: Allocator, source: []const u8, requested
     }
 
     return out.toOwnedSlice(allocator);
+}
+
+fn shouldPreserveExportDependencyScan(source: []const u8) bool {
+    // Avoid quadratic scans for very large generated export files (for example,
+    // icon barrels created by onLoad hooks). For regular source files we still
+    // preserve transitive exported-const dependencies.
+    if (source.len <= 128 * 1024) return true;
+
+    var export_count: usize = 0;
+    var cursor: usize = 0;
+    while (std.mem.indexOfPos(u8, source, cursor, "export const ")) |start| {
+        export_count += 1;
+        if (export_count >= 256) return false;
+        cursor = start + "export const ".len;
+    }
+
+    return true;
 }
 
 fn pruneUnrequestedCommonJsExports(allocator: Allocator, source: []const u8, requested: *const ExportNameSet) ![]u8 {
@@ -4148,6 +4242,26 @@ test "onLoad tree shake prunes unrequested exports before transform" {
     try std.testing.expect(std.mem.indexOf(u8, import_pruned, "unused") == null);
     try std.testing.expect(std.mem.indexOf(u8, import_pruned, "helper") == null);
     try std.testing.expect(std.mem.indexOf(u8, import_pruned, "darken") == null);
+}
+
+test "onLoad tree shake keeps referenced exported const dependencies" {
+    var requested = ExportNameSet.init();
+    defer requested.deinit(std.testing.allocator);
+    try requested.add(std.testing.allocator, "derived");
+
+    const source =
+        \\export const base = { color: "#fff" };
+        \\const local = base.color;
+        \\export const derived = local;
+    ;
+
+    const export_pruned = try pruneUnrequestedTsExports(std.testing.allocator, source, &requested);
+    defer std.testing.allocator.free(export_pruned);
+    const const_pruned = try pruneUnusedTsConstDeclarations(std.testing.allocator, export_pruned);
+    defer std.testing.allocator.free(const_pruned);
+
+    try std.testing.expect(std.mem.indexOf(u8, const_pruned, "export const base") != null);
+    try std.testing.expect(std.mem.indexOf(u8, const_pruned, "export const derived") != null);
 }
 
 test "CommonJS export pruning removes unrequested simple exports" {

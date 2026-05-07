@@ -30,9 +30,13 @@ pub const Runtime = struct {
     adapter: quickjs_ng.Runtime,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io) RuntimeError!Runtime {
+        return initWithDom(allocator, io, true);
+    }
+
+    pub fn initWithDom(allocator: std.mem.Allocator, io: std.Io, install_dom: bool) RuntimeError!Runtime {
         return .{
             .allocator = allocator,
-            .adapter = try quickjs_ng.Runtime.init(allocator, io),
+            .adapter = try quickjs_ng.Runtime.initWithDom(allocator, io, install_dom),
         };
     }
 

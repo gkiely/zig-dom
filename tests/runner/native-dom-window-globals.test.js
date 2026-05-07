@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 
 test("native DOM window and global constructors", () => {
   expect(window).toBe(self);
@@ -25,4 +25,11 @@ test("native DOM window and global constructors", () => {
 
   const resize = new ResizeObserver(() => {});
   expect(typeof resize.observe).toBe("function");
+});
+
+test("spying on window.fetch intercepts global fetch", async () => {
+  const fetchSpy = spyOn(window, "fetch").mockResolvedValueOnce(new Response("ok"));
+  const response = await fetch("/api/test");
+  expect(await response.text()).toBe("ok");
+  fetchSpy.mockRestore();
 });

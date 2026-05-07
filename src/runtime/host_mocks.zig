@@ -28,6 +28,7 @@ const MockState = struct {
 
     fn deinit(self: *MockState, rt: *quickjs.Runtime) void {
         if (self.disposed) return;
+        self.disposed = true;
         self.calls.deinitRT(rt);
         self.once_implementations.deinitRT(rt);
         self.implementation.deinitRT(rt);
@@ -38,7 +39,6 @@ const MockState = struct {
         self.restore_target.deinitRT(rt);
         self.restore_property.deinitRT(rt);
         self.restore_value.deinitRT(rt);
-        self.disposed = true;
     }
 };
 
@@ -306,8 +306,11 @@ pub const HostMocks = struct {
         installMockMethod(ctx, func, "mockImplementation", .implementation, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockImplementationOnce", .implementation_once, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockReturnValue", .return_value, state) catch return quickjs.Value.exception;
+        installMockMethod(ctx, func, "mockReturnValueOnce", .return_value_once, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockResolvedValue", .resolved_value, state) catch return quickjs.Value.exception;
+        installMockMethod(ctx, func, "mockResolvedValueOnce", .resolved_value_once, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockRejectedValue", .rejected_value, state) catch return quickjs.Value.exception;
+        installMockMethod(ctx, func, "mockRejectedValueOnce", .rejected_value_once, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockClear", .clear, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockReset", .reset, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockRestore", .restore, state) catch return quickjs.Value.exception;
@@ -364,6 +367,15 @@ const MockMethod = enum(i32) {
     reset = 6,
     restore = 7,
     implementation_once = 8,
+    return_value_once = 9,
+    resolved_value_once = 10,
+    rejected_value_once = 11,
+};
+
+const OnceMode = enum(i32) {
+    return_value = 1,
+    resolved_value = 2,
+    rejected_value = 3,
 };
 
 fn jsMockFinalizer(rt: ?*quickjs.c.JSRuntime, value: quickjs.c.JSValue) callconv(.c) void {
@@ -390,11 +402,24 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
     const args_slice: []const quickjs.Value = if (argc > 0) @ptrCast(argv[0..@intCast(argc)]) else &.{};
     const once_length = state.once_implementations.getLength(real_ctx) catch 0;
     if (once_length > 0) {
-        const once_impl = state.once_implementations.getPropertyUint32(real_ctx, 0);
+        const once_impl = shiftArrayValue(real_ctx, state.once_implementations) catch return quickjs.Value.exception.cval();
         defer once_impl.deinit(real_ctx);
-        shiftArrayLeft(real_ctx, state.once_implementations, @intCast(once_length)) catch return quickjs.Value.exception.cval();
         if (once_impl.isFunction(real_ctx)) {
             return once_impl.call(real_ctx, wrapped_this, args_slice).cval();
+        }
+
+        if (once_impl.isObject()) {
+            const mode_value = once_impl.getPropertyStr(real_ctx, "__zigMockOnceMode");
+            defer mode_value.deinit(real_ctx);
+            const mode_raw = mode_value.toInt32(real_ctx) catch 0;
+            const once_value = once_impl.getPropertyStr(real_ctx, "value");
+            defer once_value.deinit(real_ctx);
+            switch (mode_raw) {
+                @intFromEnum(OnceMode.return_value) => return once_value.dup(real_ctx).cval(),
+                @intFromEnum(OnceMode.resolved_value) => return resolvedPromise(real_ctx, once_value).cval(),
+                @intFromEnum(OnceMode.rejected_value) => return rejectedPromise(real_ctx, once_value).cval(),
+                else => {},
+            }
         }
     }
     if (state.implementation.isFunction(real_ctx)) {
@@ -406,15 +431,30 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
     return quickjs.Value.undefined.cval();
 }
 
-fn shiftArrayLeft(ctx: *quickjs.Context, array: quickjs.Value, length: usize) !void {
-    if (length == 0) return;
-    var index: usize = 1;
-    while (index < length) : (index += 1) {
-        const value = array.getPropertyUint32(ctx, @intCast(index));
-        defer value.deinit(ctx);
-        try array.setPropertyUint32(ctx, @intCast(index - 1), value.dup(ctx));
+fn shiftArrayValue(ctx: *quickjs.Context, array: quickjs.Value) !quickjs.Value {
+    const shift_fn = array.getPropertyStr(ctx, "shift");
+    defer shift_fn.deinit(ctx);
+    if (!shift_fn.isFunction(ctx)) return error.JSError;
+
+    var call_args = [_]quickjs.Value{};
+    const shifted = shift_fn.call(ctx, array, &call_args);
+    if (shifted.isException()) {
+        shifted.deinit(ctx);
+        return error.JSError;
     }
-    try array.setLength(ctx, @intCast(length - 1));
+    return shifted;
+}
+
+fn pushArrayValue(ctx: *quickjs.Context, array: quickjs.Value, value: quickjs.Value) !void {
+    const push_fn = array.getPropertyStr(ctx, "push");
+    defer push_fn.deinit(ctx);
+    if (!push_fn.isFunction(ctx)) return error.JSError;
+
+    var call_args = [_]quickjs.Value{value.dup(ctx)};
+    defer call_args[0].deinit(ctx);
+    const push_result = push_fn.call(ctx, array, &call_args);
+    defer push_result.deinit(ctx);
+    if (push_result.isException()) return error.JSError;
 }
 
 fn jsMock(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
@@ -468,6 +508,13 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
 
     const current = target.getProperty(ctx, quickjs.Atom.fromValue(ctx, property_key));
     defer current.deinit(ctx);
+
+    // Bun-compatible behavior: repeated spyOn on the same property should
+    // return the existing mock wrapper instead of stacking nested wrappers.
+    if (current.isFunction(ctx) and current.getOpaque(MockState, mocks.mock_class_id) != null) {
+        return current.dup(ctx);
+    }
+
     if (!current.isFunction(ctx)) {
         const descriptor = getOwnPropertyDescriptor(ctx, target, property_key);
         defer descriptor.deinit(ctx);
@@ -488,7 +535,33 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
     const atom = quickjs.Atom.fromValue(ctx, property_key);
     defer atom.deinit(ctx);
     _ = quickjs.c.JS_DefinePropertyValue(ctx.cval(), target.cval(), @intFromEnum(atom), wrapped.dup(ctx).cval(), quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_WRITABLE | quickjs.c.JS_PROP_ENUMERABLE);
+    mirrorGlobalWindowProperty(ctx, target, property_key, current, wrapped);
     return wrapped;
+}
+
+fn mirrorGlobalWindowProperty(ctx: *quickjs.Context, target: quickjs.Value, property_key: quickjs.Value, expected_current: quickjs.Value, replacement: quickjs.Value) void {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const window = global.getPropertyStr(ctx, "window");
+    defer window.deinit(ctx);
+    if (!window.isObject()) return;
+    if (!target.isSameValue(ctx, window)) return;
+
+    const atom = quickjs.Atom.fromValue(ctx, property_key);
+    defer atom.deinit(ctx);
+    const global_current = global.getProperty(ctx, atom);
+    defer global_current.deinit(ctx);
+    if (global_current.isException()) return;
+    if (!global_current.isSameValue(ctx, expected_current)) return;
+
+    _ = quickjs.c.JS_DefinePropertyValue(
+        ctx.cval(),
+        global.cval(),
+        @intFromEnum(atom),
+        replacement.dup(ctx).cval(),
+        quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_WRITABLE | quickjs.c.JS_PROP_ENUMERABLE,
+    );
 }
 
 fn jsBunPlugin(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
@@ -584,8 +657,11 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
         .implementation_once => {
             const next = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
             if (!next.isFunction(ctx)) return ctx.throwInternalError("mockImplementationOnce() requires a function");
-            const length = state.once_implementations.getLength(ctx) catch 0;
-            state.once_implementations.setPropertyUint32(ctx, @intCast(@max(length, 0)), next.dup(ctx)) catch return quickjs.Value.exception;
+            pushArrayValue(ctx, state.once_implementations, next) catch return quickjs.Value.exception;
+        },
+        .return_value_once => {
+            const next = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+            appendOnceValue(ctx, state, .return_value, next) catch return quickjs.Value.exception;
         },
         .return_value => {
             const next = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
@@ -596,6 +672,10 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
             state.has_resolved_value = false;
             state.has_rejected_value = false;
         },
+        .resolved_value_once => {
+            const next = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+            appendOnceValue(ctx, state, .resolved_value, next) catch return quickjs.Value.exception;
+        },
         .resolved_value => {
             const next = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
             replaceValue(ctx, &state.resolved_value, next);
@@ -604,6 +684,10 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
             state.has_return_value = false;
             state.has_resolved_value = true;
             state.has_rejected_value = false;
+        },
+        .rejected_value_once => {
+            const next = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+            appendOnceValue(ctx, state, .rejected_value, next) catch return quickjs.Value.exception;
         },
         .rejected_value => {
             const next = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
@@ -629,6 +713,7 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
                     _ = quickjs.c.JS_DefinePropertyGetSet(ctx.cval(), state.restore_target.cval(), @intFromEnum(atom), state.restore_value.dup(ctx).cval(), quickjs.Value.undefined.cval(), quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_ENUMERABLE);
                 } else {
                     _ = quickjs.c.JS_DefinePropertyValue(ctx.cval(), state.restore_target.cval(), @intFromEnum(atom), state.restore_value.dup(ctx).cval(), quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_WRITABLE | quickjs.c.JS_PROP_ENUMERABLE);
+                    mirrorGlobalWindowProperty(ctx, state.restore_target, state.restore_property, this_value, state.restore_value);
                 }
             }
             state.calls.setLength(ctx, 0) catch return quickjs.Value.exception;
@@ -646,6 +731,15 @@ fn installMockMethod(ctx: *quickjs.Context, object: quickjs.Value, comptime name
     const func = quickjs.Value.initCFunctionData2(ctx, jsMockMethod, name, 1, @intFromEnum(method), &data);
     if (func.isException()) return error.JSError;
     object.setPropertyStr(ctx, name, func) catch return error.JSError;
+}
+
+fn appendOnceValue(ctx: *quickjs.Context, state: *MockState, mode: OnceMode, value: quickjs.Value) !void {
+    const entry = quickjs.Value.initObject(ctx);
+    if (entry.isException()) return error.JSError;
+    defer entry.deinit(ctx);
+    entry.setPropertyStr(ctx, "__zigMockOnceMode", quickjs.Value.initInt32(@intFromEnum(mode))) catch return error.JSError;
+    entry.setPropertyStr(ctx, "value", value.dup(ctx)) catch return error.JSError;
+    pushArrayValue(ctx, state.once_implementations, entry) catch return error.JSError;
 }
 
 fn replaceValue(ctx: *quickjs.Context, slot: *quickjs.Value, next: quickjs.Value) void {

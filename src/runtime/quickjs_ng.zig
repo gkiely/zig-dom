@@ -44,6 +44,10 @@ pub const Runtime = struct {
     host_mocks_state: ?*host_mocks.HostMocks,
 
     pub fn init(allocator: Allocator, io: std.Io) RuntimeError!Runtime {
+        return initWithDom(allocator, io, true);
+    }
+
+    pub fn initWithDom(allocator: Allocator, io: std.Io, install_dom: bool) RuntimeError!Runtime {
         host_io = io;
 
         const rt = quickjs.Runtime.init() catch return error.OutOfMemory;
@@ -63,7 +67,9 @@ pub const Runtime = struct {
         };
 
         try runtime.installHostGlobals();
-        try runtime.installNativeDomGlobals();
+        if (install_dom) {
+            try runtime.installNativeDomGlobals();
+        }
         try runtime.installHostPlatformGlobals();
         try runtime.installHostAssertions();
         try runtime.installHostMocks();

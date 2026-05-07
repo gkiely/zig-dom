@@ -31,6 +31,26 @@ test("mock tracks calls and supports return/resolve/reject controls", async () =
   expect(adder(1, 2)).toBe(3);
 });
 
+test("mock supports once return/resolve/reject helpers", async () => {
+  const fn = mock(() => "base");
+
+  fn.mockReturnValueOnce("first");
+  fn.mockResolvedValueOnce("second");
+  fn.mockRejectedValueOnce(new Error("third"));
+
+  expect(fn()).toBe("first");
+  expect(await fn()).toBe("second");
+
+  let rejectionMessage = "";
+  try {
+    await fn();
+  } catch (error) {
+    rejectionMessage = error instanceof Error ? error.message : String(error);
+  }
+  expect(rejectionMessage).toBe("third");
+  expect(fn()).toBe("base");
+});
+
 test("spyOn wraps method calls and restores original descriptor", () => {
   const calculator = {
     add(left: number, right: number) {
@@ -68,4 +88,20 @@ test("spyOn supports getter replacement and reset", () => {
 
   getterSpy.mockRestore();
   expect(state.computed).toBe(13);
+});
+
+test("stacked spyOn with once values preserves sequential fetch results", async () => {
+  const first = spyOn(window, "fetch").mockResolvedValueOnce(new Response("one"));
+  const second = spyOn(window, "fetch").mockResolvedValueOnce(new Response("two"));
+
+  const a = await fetch("/a");
+  const b = await fetch("/b");
+
+  expect(await a.text()).toBe("one");
+  expect(await b.text()).toBe("two");
+  expect(first).toBe(second);
+  expect(second.mock.calls.length).toBe(2);
+
+  second.mockRestore();
+  first.mockRestore();
 });

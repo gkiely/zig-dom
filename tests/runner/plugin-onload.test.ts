@@ -35,3 +35,23 @@ test("plugin onLoad can replace json module source", async () => {
   const hooked = await import("./fixtures/plugin/onload-data.json");
   expect(hooked.default.value).toBe("hooked-json");
 });
+
+plugin({
+  name: "replace-onload-js-tree-shake",
+  setup(build) {
+    build.onLoad({ filter: /onload-js-tree-shake\.js$/ }, () => {
+      return {
+        loader: "js",
+        contents: [
+          "export const kept = 77;",
+          "export const dropped = (() => { throw new Error('unrequested onLoad export executed'); })();"
+        ].join("\n")
+      };
+    });
+  }
+});
+
+test("plugin onLoad js keeps requested exports only", async () => {
+  const hooked = await import("./fixtures/plugin/onload-js-tree-shake-consumer.ts");
+  expect(hooked.result).toBe(77);
+});

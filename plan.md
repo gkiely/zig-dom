@@ -4,7 +4,7 @@
 
 Broaden `zig-dom` runner support against real downstream usage and WPT while preserving the current fast iteration loop.
 
-Primary tracks in order:
+Primary tracks:
 
 1. Keep runner performance stable, especially `Edit.test.tsx`.
 2. Broaden `../youneedawiki` component support without editing downstream tests.
@@ -13,24 +13,13 @@ Primary tracks in order:
 
 Prefer generic fixes in the runner, native DOM, module loader, setup/plugin handling, mocks, and platform globals. Do not add package-specific hacks unless explicitly approved.
 
-## No Downstream-Specific Logic
+## Guardrails
 
 `../youneedawiki` is a compatibility suite, not an implementation target.
 
-Do not hardcode any `youneedawiki`-specific behavior in `zig-dom`, including:
+Do not hardcode downstream-specific behavior in `zig-dom`, including component names, file paths, package names, module specifiers, setup file names, environment variables, CSS/runtime bypasses, plugin names, test names, or downstream library shims.
 
-- component names
-- file paths
-- package names
-- module specifiers
-- setup file names
-- environment variables
-- CSS/runtime bypasses
-- plugin names
-- test names
-- downstream library shims
-
-If a `youneedawiki` test needs special setup behavior, implement the generic mechanism that Bun/browser-compatible tests expect:
+If a downstream test needs special setup behavior, implement the generic mechanism that Bun/browser-compatible tests expect:
 
 - `Bun.plugin(...).onLoad`
 - `mock.module`
@@ -40,21 +29,26 @@ If a `youneedawiki` test needs special setup behavior, implement the generic mec
 - DOM and Testing Library compatible behavior
 - standard environment/config flags supplied by the user
 
-Allowed downstream references:
+Allowed downstream references: commands in this plan, regression test names used for validation, and comments in tests that explain downstream behavior being generalized.
 
-- commands in this plan
-- regression test names used for validation
-- comments in tests that explain the downstream behavior being generalized
+## Validation Loop
 
-Not allowed:
+Use the Debug development build for local and downstream single-file validation:
 
-- `if specifier contains "@mui/icons-material"` style code
-- `process.env.SOME_YOUNEEDAWIKI_FLAG = ...` in runtime/platform setup
-- package-specific fallback modules
-- component-specific selector, role, or DOM behavior
-- hardcoded skip/transform logic for `.css.ts`, icons, style systems, or app modules
+```sh
+bun run build:dev
+```
 
-## Current Baseline
+Run the ReleaseFast perf guard at the end of every milestone and any substantial sub-chunk:
+
+```sh
+bun run perf:guard
+bun run perf:guard <test-file-token>
+```
+
+Use ReleaseFast only for the perf guard or performance comparisons. If the default perf guard regresses, stop and find the change before continuing.
+
+## Baseline
 
 Known passing downstream files:
 
@@ -84,216 +78,51 @@ WPT manifests already present:
 - `wpt/manifest/upstream-dom-smoke.json`
 - `wpt/manifest/upstream-dom.json`
 
-## Non-Negotiable Perf Guard
+The recent perf regression was caused by bypassing setup/onLoad pruning for `@mui/icons-material`. Keep plugin/onLoad ownership intact and preserve generic requested-export pruning.
 
-Run this at the end of every milestone and any substantial sub-chunk:
+## Milestones
 
-```sh
-bun run perf:guard
-```
+### 1. Simple Downstream Components
 
-Acceptance:
-- If it regresses, stop and find the commit/change before continuing.
+- `WikiDomainSelector.test.tsx`
+- `ShareModal.legacy.test.tsx`
+- `AddMenu.test.tsx`
+- `AddMenuLegacy.test.tsx`
+- `AvatarMenu.test.tsx`
+- `PrevNext.test.tsx`
+- `Breadcrumbs.test.tsx`
+- `Outline.test.tsx`
 
-The recent regression was caused by bypassing setup/onLoad pruning for `@mui/icons-material`. Keep plugin/onLoad ownership intact and preserve generic requested-export pruning.
+Likely areas: Testing Library role/name compatibility, user-event/fireEvent form behavior, focus/selection/activeElement behavior, fetch/Response/Headers, mock lifecycle, URL semantics, QuickJS shutdown cleanup, and module loader/onLoad behavior.
 
-## General Validation Commands
+### 2. Platform Globals
 
-Use the combined fast incremental Debug test loop:
+Fill browser/node compatibility gaps generically as exposed by downstream tests:
 
-```sh
-zig build test run -Doptimize=Debug -fincremental --summary none -- test tests/runner/native-dom-*.test.js tests/runner/mock-spy.test.ts tests/runner/plugin-onload.test.ts tests/runner/testing-library-role.test.js
-```
+- `fetch`, `Request`, `Response`, `Headers`, `Blob`
+- `URL`, `URLSearchParams`
+- `Image`
+- `ResizeObserver`, `MutationObserver`, `matchMedia`
+- `localStorage`, `sessionStorage`
+- minimal `node:*` shims only when needed by real dependency graphs
 
-Use `zig build run -- test ...` for runner-only validations so the CLI is built incrementally as part of the test command.
-For downstream single-file validations, wrap the runner with `/usr/bin/time -p timeout 10s ...`; exit code 124 means the test timed out and should be treated as a hang.
+Keep unsupported APIs explicit and diagnosable. Avoid fake network behavior unless the browser API shape requires a resolved or rejected promise.
 
-Use ReleaseFast only for the perf guard or performance comparisons.
+### 3. Fast WPT Iteration
 
-Anything in downstream single-file test execution over 10s should be treated as a likely hang, async timeout, or Zig/runtime error.
+Implement:
 
-## Milestone 1: Broaden Simple YouNeedAWiki Components
+- one-file WPT execution
+- manifest filtering to one file or a small subset
+- tiny smoke manifests or filters for `dom-core`, `events`, `forms`, `selectors`, and `parser`
+- concise failure output with file path, test name, first failing assertion, expected/actual when available, and stack when available
+- expected-failure reporting for newly passing, newly failing, and still expected-failing tests
 
-Start with smaller leaf component tests before the larger app-style suites. These usually expose focused DOM, Testing Library, module-loader, and platform gaps without pulling the whole app graph.
+Keep full harness dumps behind an explicit debug flag.
 
-Already passing simple baselines:
+### 4. WPT DOM Core
 
-- `../youneedawiki/src/elements/PoweredBy/PoweredBy.test.tsx`
-- `../youneedawiki/src/elements/Buttons/ViewInDrive.test.tsx`
-- `../youneedawiki/src/elements/Buttons/Edit.test.tsx`
-- `../youneedawiki/src/elements/Title/Title.test.tsx`
-- `../youneedawiki/src/elements/Icon/Icon.test.tsx`
-- `../youneedawiki/src/components/LastModified/LastModified.test.tsx`
-
-Suggested next simple targets:
-
-- `../youneedawiki/src/components/Settings/WikiDomainSelector.test.tsx`
-- `../youneedawiki/src/components/ShareModal/ShareModal.legacy.test.tsx`
-- `../youneedawiki/src/components/AddMenu/AddMenu.test.tsx`
-- `../youneedawiki/src/components/AddMenuLegacy/AddMenuLegacy.test.tsx`
-- `../youneedawiki/src/components/AvatarMenu/AvatarMenu.test.tsx`
-- `../youneedawiki/src/components/PrevNext/PrevNext.test.tsx`
-- `../youneedawiki/src/elements/Breadcrumbs/Breadcrumbs.test.tsx`
-- `../youneedawiki/src/components/Outline/Outline.test.tsx`
-
-Defer larger complex suites until after the WPT fast/core milestones:
-
-- `../youneedawiki/src/components/Search/Search.test.tsx`
-- `../youneedawiki/src/components/Page/Page.test.tsx`
-- `../youneedawiki/src/components/Header/Header.test.tsx`
-- `../youneedawiki/src/elements/OrderedListChecklistMacro.test.tsx`
-- `../youneedawiki/src/components/FileModal/FileModal.test.tsx`
-- `../youneedawiki/src/components/SupportAdmin/SupportAdmin.test.tsx`
-- `../youneedawiki/src/components/WikiSelector/WikiSelector.test.tsx`
-- `../youneedawiki/src/components/Create/Create.test.tsx`
-- `../youneedawiki/src/components/ShareModal/ShareModal.test.tsx`
-- `../youneedawiki/src/components/Invite/Invite.test.tsx`
-- `../youneedawiki/src/components/Tree/Tree.test.tsx`
-
-Rules:
-
-- Do not edit downstream tests.
-- Do not hardcode downstream package names, module paths, environment variables, setup files, library names, or component names in runner/runtime code.
-- Prefer happy-dom/browser-compatible behavior where possible.
-- If a test exceeds 30s, treat it as a likely hang/timeout and profile before behavior work.
-- If a setup plugin should transform or skip a module, fix generic `Bun.plugin(...).onLoad` support instead of special-casing that module.
-
-Likely areas:
-
-- Testing Library role/name compatibility.
-- User-event/fireEvent form behavior.
-- Focus/selection/activeElement behavior.
-- Fetch/Response/Headers completeness.
-- Mock lifecycle and `mock.module` cleanup.
-- URL/URLSearchParams semantics.
-- QuickJS shutdown cleanup for leaked globals/cycles.
-- Module loader/onLoad performance and correctness.
-
-Validation after each fixed file:
-
-```sh
-/usr/bin/time -p timeout 10s zig build run -Doptimize=Debug -fincremental --summary none -- test --root ../youneedawiki <fixed-test-file>
-```
-
-Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
-
-## Milestone 2: Platform Globals
-
-Fill browser/node compatibility gaps generically as they are exposed by `../youneedawiki`.
-
-- `fetch`, `Request`, `Response`, `Headers`, `Blob`.
-- `URL`, `URLSearchParams`.
-- `Image`.
-- `ResizeObserver`, `MutationObserver`, `matchMedia`.
-- `localStorage`, `sessionStorage`.
-- Minimal `node:*` shims only when needed by real dependency graphs.
-
-Rules:
-
-- Keep unsupported APIs explicit and diagnosable.
-- Avoid fake network behavior unless the browser API shape requires a resolved/rejected promise.
-- Downstream setup should be able to mock/spy on globals.
-
-Validation:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- test tests/runner/native-dom-window-globals.test.js tests/runner/mock-spy.test.ts tests/runner/setup-preload.test.ts tests/runner/plugin-onload.test.ts
-```
-
-Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
-
-## Milestone 3: DOM Loading Configuration
-
-The runner should not always pay DOM startup cost for plain non-DOM tests.
-
-Target behavior:
-
-- Default to installing DOM globals for `.jsx` and `.tsx` test files.
-- Default to not installing DOM globals for plain `.js` and `.ts` tests unless needed by setup or config.
-- Add a CLI/config flag to override this behavior.
-
-Suggested flags:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- test --dom auto tests/runner/basic.test.ts
-zig build run -Doptimize=Debug -fincremental --summary none -- test --dom always tests/runner/native-dom-smoke.test.js
-zig build run -Doptimize=Debug -fincremental --summary none -- test --dom never tests/runner/basic.test.ts
-```
-
-Tasks:
-
-- Add runner config plumbing for `dom = auto | always | never`.
-- In `auto`, enable DOM for JSX/TSX files and for WPT.
-- Make setup/preload behavior explicit: if setup expects DOM in a `.ts` suite, users can pass `--dom always`.
-- Keep `zig-dom` builtin imports working even when global DOM auto-load is disabled, or fail with a clear message if the import requires DOM.
-- Measure whether non-DOM `.ts` tests get faster with DOM disabled.
-
-Validation:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- test --dom never tests/runner/basic.test.ts
-zig build run -Doptimize=Debug -fincremental --summary none -- test --dom auto tests/runner/basic.test.tsx
-zig build run -Doptimize=Debug -fincremental --summary none -- test --dom always tests/runner/native-dom-smoke.test.js
-```
-
-Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
-
-## Milestone 4: Fast WPT Iteration
-
-Before expanding WPT coverage, make WPT debugging fast enough for normal development.
-
-Tasks:
-
-- Add a way to run one WPT file directly.
-- Add a way to filter a manifest to one file or one small subset.
-- Add tiny smoke manifests or filters for each area:
-  - `dom-core-smoke`
-  - `events-smoke`
-  - `forms-smoke`
-  - `selectors-smoke`
-  - `parser-smoke`
-- Improve WPT failure output so the default report shows:
-  - file path
-  - test name
-  - first failing assertion
-  - expected/actual when available
-  - stack when available
-- Keep full harness dumps behind an explicit debug flag.
-- Add expected-failure tooling for selected manifests only, with clear reporting for:
-  - newly passing tests
-  - newly failing tests
-  - still expected-failing tests
-
-Target command shapes:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --file wpt/runner/tests/events-basic.any.ts
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/events.json --filter events-basic
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/fast-smoke.json --expected wpt/expected/fast-smoke.json
-```
-
-These flags/manifests are not all implemented yet. Implement them in this milestone before relying on them in later WPT work.
-
-Acceptance:
-
-- A single WPT file runs in Debug mode without requiring ReleaseFast.
-- A small smoke manifest
-- Full upstream manifests are not required during normal fix/debug loops.
-
-Validation:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --file wpt/runner/tests/events-basic.any.ts
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/fast-smoke.json --expected wpt/expected/fast-smoke.json
-```
-
-Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
-
-## Milestone 5: Expand WPT DOM Core
-
-Start with the smallest manifests and keep expected failures explicit.
-
-Recommended order:
+Expand from the smallest manifests and keep expected failures explicit:
 
 1. `dom-core`
 2. `events`
@@ -301,152 +130,37 @@ Recommended order:
 4. `selectors`
 5. `parser-fragments`
 
-Commands:
+Add or update expected failures only when the failure is understood. Prefer implementing missing standards behavior over widening expectations. Add focused `tests/runner/native-dom-*.test.js` regressions for every WPT behavior fixed.
 
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/events.json --expected wpt/expected/events.json
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/forms.json --expected wpt/expected/forms.json
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/selectors.json --expected wpt/expected/selectors.json
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/parser-fragments.json --expected wpt/expected/parser-fragments.json
-```
+### 5. Events And Forms Depth
 
-Rules:
+Expand event semantics and form behavior:
 
-- Add or update expected failures only when the failure is understood.
-- Prefer implementing missing standards behavior over widening expectations.
-- Keep each WPT slice small enough to debug quickly.
-- Add focused `tests/runner/native-dom-*.test.js` regressions for every WPT behavior fixed.
+- `addEventListener` options: capture, once, passive
+- `stopPropagation`, `stopImmediatePropagation`, `preventDefault`
+- event target/currentTarget/eventPhase ordering
+- input, change, submit, click defaults
+- form ownership, `form.elements`, disabled controls, labels
+- text selection APIs needed by user-event
 
-Run the mandatory `Edit.test.tsx` ReleaseFast perf guard after each WPT slice.
+Use `native-dom-events`, `native-dom-forms-elements`, and the `events` / `forms` WPT manifests as focused checks.
 
-## Milestone 6: Broaden Complex YouNeedAWiki Components
+### 6. Selectors, Parsing, Serialization
 
-After simple downstream tests and WPT fast/core coverage are stable, move to the larger component suites that pull more of the app and dependency graph.
+Expand support for selector and HTML parsing behavior:
 
-Suggested order:
+- common selector combinations used by Testing Library and WPT
+- attribute selectors and simple negation without unnecessary slow paths
+- `matches`, `closest`, `querySelector`, `querySelectorAll`
+- `innerHTML`, `outerHTML`, `insertAdjacentHTML`, text/entity serialization
+- fragment parsing
 
-1. `../youneedawiki/src/components/Search/Search.test.tsx`
-2. `../youneedawiki/src/components/Header/Header.test.tsx`
-3. `../youneedawiki/src/components/Page/Page.test.tsx`
-4. `../youneedawiki/src/elements/OrderedListChecklistMacro.test.tsx`
-5. `../youneedawiki/src/components/FileModal/FileModal.test.tsx`
-6. `../youneedawiki/src/components/SupportAdmin/SupportAdmin.test.tsx`
-7. `../youneedawiki/src/components/WikiSelector/WikiSelector.test.tsx`
-8. `../youneedawiki/src/components/Create/Create.test.tsx`
-9. `../youneedawiki/src/components/ShareModal/ShareModal.test.tsx`
-10. `../youneedawiki/src/components/Invite/Invite.test.tsx`
-11. `../youneedawiki/src/components/Tree/Tree.test.tsx`
+Use `native-dom-querying`, `native-dom-parsing-serialization`, `testing-library-role`, and the `selectors` / `parser-fragments` WPT manifests as focused checks.
 
-Rules:
-
-- If one of these exceeds 30s, treat it as a hang/async/runtime issue and profile first.
-- Prefer generic runner and native DOM fixes over downstream-specific patches.
-- Do not hardcode downstream package names, module paths, environment variables, setup files, library names, or component names in runner/runtime code.
-- Keep setup/onLoad, mock cleanup, user-event behavior, and QuickJS shutdown cleanup generic.
-- Do not edit downstream tests unless explicitly approved.
-
-Validation after each fixed file:
-
-```sh
-/usr/bin/time -p timeout 10s zig build run -Doptimize=Debug -fincremental --summary none -- test --root ../youneedawiki <fixed-test-file>
-```
-
-Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
-
-## Milestone 7: Events And Forms Depth
-
-Expand coverage for:
-
-- `addEventListener` options: capture, once, passive.
-- `stopPropagation`, `stopImmediatePropagation`, `preventDefault`.
-- Event target/currentTarget/eventPhase ordering.
-- Input, change, submit, click defaults.
-- Form ownership, `form.elements`, disabled controls, labels.
-- Text selection APIs needed by user-event.
-
-Validation:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- test tests/runner/native-dom-events.test.js tests/runner/native-dom-forms-elements.test.js
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/events.json --expected wpt/expected/events.json
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/forms.json --expected wpt/expected/forms.json
-```
-
-Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
-
-## Milestone 8: Selectors, Parsing, Serialization
-
-Expand support for:
-
-- Common selector combinations used by Testing Library and WPT.
-- Attribute selectors and simple negation without falling back to slow paths unnecessarily.
-- `matches`, `closest`, `querySelector`, `querySelectorAll` consistency.
-- `innerHTML`, `outerHTML`, `insertAdjacentHTML`, text/entity serialization.
-- Fragment parsing.
-
-Validation:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- test tests/runner/native-dom-querying.test.js tests/runner/native-dom-parsing-serialization.test.js tests/runner/testing-library-role.test.js
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/selectors.json --expected wpt/expected/selectors.json
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/parser-fragments.json --expected wpt/expected/parser-fragments.json
-```
-
-Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
-
-## Milestone 9: WPT Upstream Smoke
-
-Once local WPT slices improve, run broader upstream smoke:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/upstream-dom-smoke.json --expected wpt/expected/upstream-dom-smoke.json
-```
-
-Then start reducing failures in:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/upstream-dom.json --expected wpt/expected/upstream-dom.json
-```
-
-Do not try to make all upstream WPT green in one pass. Pick a cluster, fix it, add local regression tests, update expected failures only when justified, then run the perf guard.
-
-## Milestone 10: Remove Legacy JS Package Layer
-
-The runner and native DOM should be the source of truth. The old Bun FFI package layer should be removed or reduced to thin compatibility exports after downstream and WPT coverage is strong enough.
-
-Current files to audit:
-
-- `js/ffi.ts`
-- `js/wrappers/*`
-- `js/global-registrator.ts`
-- `js/index.ts`
-- `src/runner/builtins/zig-dom/index.js`
-- `src/runner/builtins/zig-dom/global-registrator.js`
-- `package.json` exports and scripts
-
-Tasks:
-
-- Remove `bun:ffi` from the package module path.
-- Consolidate duplicate global registrators into one source of truth.
-- Keep `src/runner/builtins/zig-dom/index.js` only if imports still need a thin compatibility module.
-- Prefer native runtime global installation over JS wrapper behavior.
-- Update package exports, README notes, and tests around the new native-only API.
-- Delete obsolete wrapper/bootstrap files only after local runner tests, WPT slices, and downstream smoke tests prove they are unused.
-
-Validation:
-
-```sh
-zig build run -Doptimize=Debug -fincremental --summary none -- test tests/runner/global-registrator-builtin.test.js tests/runner/zig-dom-builtin-module.test.js tests/runner/native-dom-*.test.js
-```
-
-Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
-
-## Done Criteria For This Phase
+## Done Criteria
 
 - More `../youneedawiki` component tests pass without downstream edits.
 - WPT manifests have narrower or better-understood expected-failure files.
 - Local runner/DOM suites stay green.
 - `Edit.test.tsx` ReleaseFast perf guard remains stable after every milestone and substantial sub-chunk.
 - No new package-specific module hacks are added.
-- Legacy Bun FFI wrapper code is either deleted or clearly isolated from the native runner path.

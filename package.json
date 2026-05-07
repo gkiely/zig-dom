@@ -23,6 +23,7 @@
     "build.zig.zon"
   ],
   "scripts": {
+    "build:dev": "bun run scripts/build-dev.ts",
     "perf:guard": "bun run scripts/perf-guard.ts",
     "build:native": "bun run scripts/build-native.ts",
     "build:native:packages": "bun run scripts/build-native-packages.ts",

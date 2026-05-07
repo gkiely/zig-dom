@@ -158,12 +158,60 @@ fn installImportMetaEnv(ctx: *quickjs.Context, global: quickjs.Value) PlatformEr
     const env = quickjs.Value.initObject(ctx);
     if (env.isException()) return error.JSError;
     errdefer env.deinit(ctx);
-    env.setPropertyStr(ctx, "DEV", quickjs.Value.initBool(false)) catch return error.JSError;
-    env.setPropertyStr(ctx, "PROD", quickjs.Value.initBool(false)) catch return error.JSError;
-    try setString(ctx, env, "VITE_LEGACY", "false");
-    try setString(ctx, env, "VITE_PLAYWRIGHT_TEST", "false");
+
+    const process = global.getPropertyStr(ctx, "process");
+    defer process.deinit(ctx);
+    if (!process.isException() and process.isObject()) {
+        const process_env = process.getPropertyStr(ctx, "env");
+        defer process_env.deinit(ctx);
+        if (!process_env.isException() and process_env.isObject()) {
+            try copyImportMetaEnvEntries(ctx, env, process_env);
+        }
+    }
 
     global.setPropertyStr(ctx, "__zigImportMetaEnv", env) catch return error.JSError;
+}
+
+fn copyImportMetaEnvEntries(ctx: *quickjs.Context, target_env: quickjs.Value, source_env: quickjs.Value) PlatformError!void {
+    const keys_fn = getObjectKeys(ctx) catch return error.JSError;
+    defer keys_fn.deinit(ctx);
+
+    var call_args = [_]quickjs.Value{source_env.dup(ctx)};
+    defer call_args[0].deinit(ctx);
+    const keys = keys_fn.call(ctx, quickjs.Value.undefined, &call_args);
+    defer keys.deinit(ctx);
+    if (keys.isException()) return error.JSError;
+
+    const length_value = keys.getPropertyStr(ctx, "length");
+    defer length_value.deinit(ctx);
+    const length = length_value.toInt32(ctx) catch 0;
+    var index: i32 = 0;
+    while (index < length) : (index += 1) {
+        const key_value = keys.getPropertyUint32(ctx, @intCast(index));
+        defer key_value.deinit(ctx);
+        if (key_value.isException()) return error.JSError;
+
+        const key_text = key_value.toCStringLen(ctx) orelse return error.JSError;
+        defer ctx.freeCString(key_text.ptr);
+
+        const raw_value = source_env.getPropertyStr(ctx, key_text.ptr);
+        defer raw_value.deinit(ctx);
+        if (raw_value.isException() or raw_value.isUndefined()) continue;
+
+        const normalized = normalizeImportMetaEnvValue(ctx, raw_value);
+        errdefer normalized.deinit(ctx);
+        target_env.setPropertyStr(ctx, key_text.ptr, normalized) catch return error.JSError;
+    }
+}
+
+fn normalizeImportMetaEnvValue(ctx: *quickjs.Context, value: quickjs.Value) quickjs.Value {
+    const text = value.toCStringLen(ctx) orelse return value.dup(ctx);
+    defer ctx.freeCString(text.ptr);
+
+    const slice = text.ptr[0..text.len];
+    if (std.ascii.eqlIgnoreCase(slice, "true")) return quickjs.Value.initBool(true);
+    if (std.ascii.eqlIgnoreCase(slice, "false")) return quickjs.Value.initBool(false);
+    return quickjs.Value.initStringLen(ctx, slice);
 }
 
 fn installGlobals(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -378,9 +426,9 @@ fn jsReturnFalse(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JS
     return quickjs.Value.initBool(false);
 }
 
-fn jsKeyboardEventCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+fn jsKeyboardEventCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
 
     const type_text = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
@@ -401,9 +449,9 @@ fn jsKeyboardEventCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, 
     return obj;
 }
 
-fn jsUrlSearchParamsCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+fn jsUrlSearchParamsCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
     const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
     defer if (input) |text| ctx.freeCString(text.ptr);
@@ -482,9 +530,9 @@ fn jsUrlSearchParamsToString(maybe_ctx: ?*quickjs.Context, this_value: quickjs.V
     return raw;
 }
 
-fn jsUrlCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+fn jsUrlCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
     const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
     defer if (input) |text| ctx.freeCString(text.ptr);
@@ -527,9 +575,9 @@ fn jsUrlToString(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []c
     return href;
 }
 
-fn jsHeadersCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+fn jsHeadersCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
     const store = quickjs.Value.initObject(ctx);
     if (store.isException()) return quickjs.Value.exception;
@@ -639,9 +687,9 @@ fn lowerHeaderName(input: []const u8) [:0]u8 {
     return buffer;
 }
 
-fn jsRequestCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+fn jsRequestCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
     const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
     defer if (input) |text| ctx.freeCString(text.ptr);
@@ -651,9 +699,9 @@ fn jsRequestCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: 
     return obj;
 }
 
-fn jsResponseCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+fn jsResponseCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
     const body = if (args.len > 0 and !quickjs.Value.fromCVal(args[0]).isUndefined() and !quickjs.Value.fromCVal(args[0]).isNull())
         quickjs.Value.fromCVal(args[0]).toCStringLen(ctx)
@@ -681,9 +729,9 @@ fn jsResponseCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args:
     return obj;
 }
 
-fn jsBlobCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+fn jsBlobCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
     const body = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
     defer if (body) |text| ctx.freeCString(text.ptr);
@@ -739,7 +787,7 @@ fn jsFetch(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.
     return ctx.throwInternalError("fetch is not implemented in this runner; mock global.fetch in setup");
 }
 
-fn jsImageCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsImageCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
@@ -756,15 +804,15 @@ fn jsImageCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []con
             image.deinit(ctx);
         }
     }
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "complete", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     return obj;
 }
 
-fn jsCollatorCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsCollatorCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
     setFunction(ctx, obj, "compare", jsCollatorCompare, 2) catch return quickjs.Value.exception;
     return obj;
@@ -786,9 +834,9 @@ fn jsCollatorCompare(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []con
     return quickjs.Value.initInt32(order);
 }
 
-fn jsDomParserCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsDomParserCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
     setFunction(ctx, obj, "parseFromString", jsDomParserParseFromString, 1) catch return quickjs.Value.exception;
     return obj;

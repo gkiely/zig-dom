@@ -12,7 +12,11 @@ pub const RunnerError = error{
     MissingValueAfterOut,
     MissingValueAfterSetup,
     MissingValueAfterRoot,
+    MissingValueAfterDom,
+    InvalidDomMode,
 };
+
+const DomMode = execution.DomMode;
 
 const ParsedTestArgs = struct {
     dry_run: bool,
@@ -20,6 +24,7 @@ const ParsedTestArgs = struct {
     setup_files: []const []const u8,
     root_dir: []const u8,
     has_root: bool,
+    dom_mode: DomMode,
 
     fn deinit(self: ParsedTestArgs, allocator: Allocator) void {
         allocator.free(self.patterns);
@@ -82,7 +87,7 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
         reporter.printTransformed(prepared.transformed_count);
     }
 
-    var summary = try execution.runFiles(allocator, io, prepared.paths, resolved_setup_files);
+    var summary = try execution.runFiles(allocator, io, prepared.paths, resolved_setup_files, parsed.dom_mode);
     defer summary.deinit(allocator);
 
     for (summary.files) |file_result| {
@@ -125,6 +130,7 @@ fn parseTestArgs(allocator: Allocator, raw_args: []const []const u8) !ParsedTest
     var dry_run = false;
     var root_dir: []const u8 = ".";
     var has_root = false;
+    var dom_mode: DomMode = .auto;
     var index: usize = 0;
     while (index < raw_args.len) {
         const current = raw_args[index];
@@ -156,6 +162,22 @@ fn parseTestArgs(allocator: Allocator, raw_args: []const []const u8) !ParsedTest
             continue;
         }
 
+        if (std.mem.eql(u8, current, "--dom")) {
+            if (index + 1 >= raw_args.len) {
+                return error.MissingValueAfterDom;
+            }
+
+            dom_mode = parseDomMode(raw_args[index + 1]) orelse return error.InvalidDomMode;
+            index += 2;
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, current, "--dom=")) {
+            dom_mode = parseDomMode(current["--dom=".len..]) orelse return error.InvalidDomMode;
+            index += 1;
+            continue;
+        }
+
         try patterns.append(allocator, current);
         index += 1;
     }
@@ -174,7 +196,15 @@ fn parseTestArgs(allocator: Allocator, raw_args: []const []const u8) !ParsedTest
         .setup_files = owned_setup_files,
         .root_dir = owned_root_dir,
         .has_root = has_root,
+        .dom_mode = dom_mode,
     };
+}
+
+fn parseDomMode(value: []const u8) ?DomMode {
+    if (std.mem.eql(u8, value, "auto")) return .auto;
+    if (std.mem.eql(u8, value, "always")) return .always;
+    if (std.mem.eql(u8, value, "never")) return .never;
+    return null;
 }
 
 fn resolveTestPatterns(

@@ -56,7 +56,7 @@ pub fn printHelp() void {
         \\
         \\Usage:
         \\  zig build run -- help
-        \\  zig build run -- test [--root <dir>] [--setup <file>]... [--dry-run] [patterns...]
+        \\  zig build run -- test [--root <dir>] [--setup <file>]... [--dom auto|always|never] [--dry-run] [patterns...]
         \\  zig build run -- wpt [args...]
         \\  zig build run -- wpt-sync
         \\  zig build run -- wpt-manifest [args...]
