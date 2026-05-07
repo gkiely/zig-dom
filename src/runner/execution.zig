@@ -817,7 +817,7 @@ const ModuleLoaderState = struct {
             if (looksLikeJsxSource(hook_result.contents)) {
                 return try self.transformOnLoadContents(module_id, "jsx", hook_result.contents);
             }
-            return try self.allocator.dupe(u8, hook_result.contents);
+            return try pruneUnusedImports(self.allocator, hook_result.contents);
         }
 
         if (
@@ -847,9 +847,9 @@ const ModuleLoaderState = struct {
         else
             return error.UnsupportedTransformLoader;
         _ = extension;
-        const pruned = try pruneUnusedImports(self.allocator, contents);
-        defer self.allocator.free(pruned);
-        return yuku_transform.transformSource(self.allocator, module_id, pruned, loader);
+        const transformed = try yuku_transform.transformSource(self.allocator, module_id, contents, loader);
+        defer self.allocator.free(transformed);
+        return pruneUnusedImports(self.allocator, transformed);
     }
 
     fn clearMockModules(self: *ModuleLoaderState) void {
@@ -2574,20 +2574,47 @@ fn pruneUnusedImports(allocator: Allocator, source: []const u8) ![]u8 {
 
     var cursor: usize = 0;
     while (cursor < source.len) {
-        const line_end = std.mem.indexOfScalarPos(u8, source, cursor, '\n') orelse source.len;
-        const line = source[cursor..line_end];
-        if (!isUnusedImportLine(source, line, line_end)) {
-            try out.appendSlice(allocator, line);
-            if (line_end < source.len) try out.append(allocator, '\n');
+        if (source[cursor] == ' ' or source[cursor] == '\t' or source[cursor] == '\n' or source[cursor] == '\r') {
+            try out.append(allocator, source[cursor]);
+            cursor += 1;
+            continue;
         }
-        cursor = if (line_end < source.len) line_end + 1 else source.len;
+
+        if (std.mem.startsWith(u8, source[cursor..], "import ")) {
+            const statement_end = findImportStatementEnd(source, cursor);
+            const statement = source[cursor..statement_end];
+            if (isUnusedImportStatement(source, statement, statement_end)) {
+                cursor = statement_end;
+                if (cursor < source.len and source[cursor] == ';') cursor += 1;
+                continue;
+            }
+
+            try out.appendSlice(allocator, source[cursor..statement_end]);
+            cursor = statement_end;
+            if (cursor < source.len and source[cursor] == ';') {
+                try out.append(allocator, source[cursor]);
+                cursor += 1;
+            }
+            continue;
+        }
+
+        try out.append(allocator, source[cursor]);
+        cursor += 1;
     }
 
     return out.toOwnedSlice(allocator);
 }
 
-fn isUnusedImportLine(source: []const u8, line: []const u8, line_end: usize) bool {
-    const trimmed = std.mem.trim(u8, line, " \t");
+fn findImportStatementEnd(source: []const u8, start: usize) usize {
+    var cursor = start;
+    while (cursor < source.len) : (cursor += 1) {
+        if (source[cursor] == ';' or source[cursor] == '\n') return cursor;
+    }
+    return source.len;
+}
+
+fn isUnusedImportStatement(source: []const u8, statement: []const u8, statement_end: usize) bool {
+    const trimmed = std.mem.trim(u8, statement, " \t\r\n");
     if (!std.mem.startsWith(u8, trimmed, "import ")) return false;
     if (std.mem.indexOf(u8, trimmed, " from ") == null) return false;
 
@@ -2602,17 +2629,17 @@ fn isUnusedImportLine(source: []const u8, line: []const u8, line_end: usize) boo
             if (part.len == 0 or std.mem.startsWith(u8, part, "type ")) continue;
             const as_index = std.mem.indexOf(u8, part, " as ");
             const name = std.mem.trim(u8, if (as_index) |idx| part[idx + " as ".len ..] else part, " \t");
-            if (identifierUsedAfter(source, line_end, name)) return false;
+            if (identifierUsedAfter(source, statement_end, name)) return false;
         }
         return true;
     }
 
     if (std.mem.startsWith(u8, bindings, "* as ")) {
-        return !identifierUsedAfter(source, line_end, std.mem.trim(u8, bindings["* as ".len..], " \t"));
+        return !identifierUsedAfter(source, statement_end, std.mem.trim(u8, bindings["* as ".len..], " \t"));
     }
 
     if (std.mem.indexOfScalar(u8, bindings, ',') == null) {
-        return !identifierUsedAfter(source, line_end, bindings);
+        return !identifierUsedAfter(source, statement_end, bindings);
     }
 
     return false;
