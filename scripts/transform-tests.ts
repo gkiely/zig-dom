@@ -66,6 +66,13 @@ function addCommonJsNamedExports(source: string): string {
     }
   }
 
+  for (const match of source.matchAll(/Object\.defineProperty\(\s*exports\s*,\s*["']([A-Za-z_$][\w$]*)["']/g)) {
+    const name = match[1];
+    if (name !== "default" && name !== "__esModule") {
+      names.add(name);
+    }
+  }
+
   if (names.size === 0) {
     return source;
   }
@@ -78,13 +85,47 @@ function addCommonJsNamedExports(source: string): string {
   const defaultExpression = defaultExport[1];
   const replacement = [
     `const __zigCommonJsDefault = ${defaultExpression};`,
-    "export default __zigCommonJsDefault;",
+    `export default __zigCommonJsDefault && Object.prototype.hasOwnProperty.call(__zigCommonJsDefault, "default") ? __zigCommonJsDefault.default : __zigCommonJsDefault;`,
     ...Array.from(names)
       .sort()
       .map((name) => `export const ${name} = __zigCommonJsDefault.${name};`)
   ].join("\n");
 
   return source.slice(0, defaultExport.index) + replacement + "\n";
+}
+
+function normalizeCommonJsDefaultExport(source: string): string {
+  if (source.includes("const __zigCommonJsDefault =")) {
+    return source;
+  }
+
+  const defaultExport = source.match(/export default ([^;\n]+);?\s*$/);
+  if (!defaultExport) {
+    return source;
+  }
+
+  const defaultExpression = defaultExport[1];
+  const replacement = [
+    `const __zigCommonJsDefault = ${defaultExpression};`,
+    `export default __zigCommonJsDefault && Object.prototype.hasOwnProperty.call(__zigCommonJsDefault, "default") ? __zigCommonJsDefault.default : __zigCommonJsDefault;`
+  ].join("\n");
+
+  return source.slice(0, defaultExport.index) + replacement + "\n";
+}
+
+function allowAssignedNamespaceImports(source: string): string {
+  return source.replace(
+    /^import \* as ([A-Za-z_$][\w$]*) from (["'][^"']+["']);$/gm,
+    (statement, local: string, specifier: string) => {
+      const assignment = new RegExp(`(^|[^\\w$])${local}\\s*=`, "m");
+      if (!assignment.test(source)) {
+        return statement;
+      }
+
+      const alias = `__zigCjsImport_${local}`;
+      return `import * as ${alias} from ${specifier};\nvar ${local} = ${alias};`;
+    }
+  );
 }
 
 function ensureClassicReactImport(source: string): string {
@@ -145,7 +186,9 @@ for (const entry of entries) {
     normalized = (await bundled.outputs[0].text())
       .replaceAll("import.meta.env", "globalThis.__zigImportMetaEnv")
       .replaceAll("import.meta.require", "globalThis.__zigImportMetaRequire");
+    normalized = allowAssignedNamespaceImports(normalized);
     normalized = addCommonJsNamedExports(normalized);
+    normalized = normalizeCommonJsDefaultExport(normalized);
   } else {
     const source = await Bun.file(resolve(entry.file)).text();
     const transformed = transpilers[entry.loader].transformSync(source);

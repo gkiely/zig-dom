@@ -73,6 +73,8 @@ pub const DomClasses = struct {
         try installGetter(ctx, node_proto, "outerHTML", jsNodeOuterHtmlGet);
         try installMethod(ctx, node_proto, "contains", jsNodeContains, 1);
         try installMethod(ctx, node_proto, "appendChild", jsNodeAppendChild, 1);
+        try installMethod(ctx, node_proto, "append", jsNodeAppend, 1);
+        try installMethod(ctx, node_proto, "prepend", jsNodePrepend, 1);
         try installMethod(ctx, node_proto, "insertBefore", jsNodeInsertBefore, 2);
         try installMethod(ctx, node_proto, "removeChild", jsNodeRemoveChild, 1);
         try installMethod(ctx, node_proto, "replaceChild", jsNodeReplaceChild, 2);
@@ -2341,6 +2343,41 @@ fn jsNodeAppendChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_
     return args[0].dup(ctx);
 }
 
+fn jsNodeAppend(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const this_handle = parseThisHandle(ctx, this_value, "append") orelse return quickjs.Value.exception;
+
+    for (args) |arg| {
+        const child_handle = nodeOrTextHandle(ctx, this_handle, arg, "append") orelse return quickjs.Value.exception;
+        const status = if (zig_dom.zig_dom_node_type(child_handle) == 11)
+            zig_dom.zig_dom_node_append_fragment(this_handle, child_handle)
+        else
+            zig_dom.zig_dom_node_append_child(this_handle, child_handle);
+        if (status != 0) return throwStatus(ctx, "append", status);
+    }
+
+    return quickjs.Value.undefined;
+}
+
+fn jsNodePrepend(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const this_handle = parseThisHandle(ctx, this_value, "prepend") orelse return quickjs.Value.exception;
+    const reference_handle = zig_dom.zig_dom_node_first_child(this_handle);
+
+    for (args) |arg| {
+        const child_handle = nodeOrTextHandle(ctx, this_handle, arg, "prepend") orelse return quickjs.Value.exception;
+        const status = if (zig_dom.zig_dom_node_type(child_handle) == 11)
+            insertFragmentBefore(this_handle, child_handle, reference_handle)
+        else
+            zig_dom.zig_dom_node_insert_before(this_handle, child_handle, reference_handle);
+        if (status != 0) return throwStatus(ctx, "prepend", status);
+    }
+
+    return quickjs.Value.undefined;
+}
+
 fn jsNodeInsertBefore(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -2389,6 +2426,37 @@ fn jsNodeReplaceChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw
     }
 
     return args[1].dup(ctx);
+}
+
+fn nodeOrTextHandle(ctx: *quickjs.Context, parent_handle: u64, value: quickjs.Value, operation: []const u8) ?u64 {
+    if (parseValueNodeHandle(ctx, value)) |handle_i64| {
+        if (handle_i64 <= 0) {
+            _ = throwOperationMessage(ctx, operation, "node argument has an invalid native handle");
+            return null;
+        }
+        return @intCast(handle_i64);
+    }
+
+    var document_handle: u64 = 0;
+    const owner_status = zig_dom.zig_dom_node_owner_document(parent_handle, &document_handle);
+    if (owner_status != 0 or document_handle == 0) {
+        _ = throwOperationMessage(ctx, operation, "could not resolve owner document");
+        return null;
+    }
+
+    const text = value.toCStringLen(ctx) orelse {
+        _ = throwOperationMessage(ctx, operation, "argument could not be converted to string");
+        return null;
+    };
+    defer ctx.freeCString(text.ptr);
+
+    var text_handle: u64 = 0;
+    const create_status = zig_dom.zig_dom_document_create_text_node(document_handle, text.ptr, text.len, &text_handle);
+    if (create_status != 0) {
+        _ = throwStatus(ctx, operation, create_status);
+        return null;
+    }
+    return text_handle;
 }
 
 fn parseThisHandle(ctx: *quickjs.Context, this_value: quickjs.Value, operation: []const u8) ?u64 {

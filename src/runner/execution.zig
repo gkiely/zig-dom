@@ -730,7 +730,7 @@ const ModuleLoaderState = struct {
 
         var hasher = std.hash.Wyhash.init(0);
         hasher.update(module_id);
-        hasher.update("cjs-external-react-v1");
+        hasher.update("cjs-default-interop-v4");
         hasher.update(std.mem.asBytes(&stat.size));
         hasher.update(std.mem.asBytes(&stat.mtime.nanoseconds));
         const digest = hasher.final();

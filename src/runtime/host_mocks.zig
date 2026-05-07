@@ -57,11 +57,17 @@ pub const HostMocks = struct {
     mock_class_id: quickjs.ClassId = .invalid,
     on_load_hooks: std.ArrayList(OnLoadHook) = .empty,
     mock_states: std.ArrayList(*MockState) = .empty,
+    mock_module_sources: std.StringHashMap([]u8),
 
     pub fn init(allocator: Allocator, rt: *quickjs.Runtime, ctx: *quickjs.Context) HostMocksError!*HostMocks {
         const mocks = allocator.create(HostMocks) catch return error.OutOfMemory;
         errdefer allocator.destroy(mocks);
-        mocks.* = .{ .allocator = allocator, .rt = rt, .ctx = ctx };
+        mocks.* = .{
+            .allocator = allocator,
+            .rt = rt,
+            .ctx = ctx,
+            .mock_module_sources = std.StringHashMap([]u8).init(allocator),
+        };
         active_mocks = mocks;
         try mocks.installGlobals();
         return mocks;
@@ -70,7 +76,9 @@ pub const HostMocks = struct {
     pub fn deinit(self: *HostMocks) void {
         if (active_mocks == self) active_mocks = null;
         self.clearHooks();
+        self.clearMockModuleSources();
         self.on_load_hooks.deinit(self.allocator);
+        self.mock_module_sources.deinit();
         for (self.mock_states.items) |state| {
             state.deinit(self.rt);
             self.allocator.destroy(state);
@@ -81,7 +89,9 @@ pub const HostMocks = struct {
 
     pub fn destroyAfterRuntimeFree(self: *HostMocks) void {
         if (active_mocks == self) active_mocks = null;
+        self.clearMockModuleSources();
         self.on_load_hooks.deinit(self.allocator);
+        self.mock_module_sources.deinit();
         for (self.mock_states.items) |state| self.allocator.destroy(state);
         self.mock_states.deinit(self.allocator);
         self.allocator.destroy(self);
@@ -94,6 +104,15 @@ pub const HostMocks = struct {
 
     pub fn clearMockStates(self: *HostMocks) void {
         for (self.mock_states.items) |state| state.deinit(self.rt);
+    }
+
+    pub fn clearMockModuleSources(self: *HostMocks) void {
+        var iterator = self.mock_module_sources.iterator();
+        while (iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.mock_module_sources.clearRetainingCapacity();
     }
 
     pub fn clearGlobals(self: *HostMocks) void {
@@ -190,17 +209,44 @@ pub const HostMocks = struct {
         return func;
     }
 
-    fn setManifest(self: *HostMocks, specifier: []const u8, source: []const u8) !void {
+    fn putMockModuleSource(self: *HostMocks, specifier: []const u8, source: []const u8) !void {
+        const key = try self.allocator.dupe(u8, specifier);
+        errdefer self.allocator.free(key);
+        const value = try self.allocator.dupe(u8, source);
+        errdefer self.allocator.free(value);
+
+        if (try self.mock_module_sources.fetchPut(key, value)) |previous| {
+            self.allocator.free(previous.key);
+            self.allocator.free(previous.value);
+        }
+
+        try self.publishMockModuleManifest();
+    }
+
+    fn publishMockModuleManifest(self: *HostMocks) !void {
+        var manifest: std.ArrayList(u8) = .empty;
+        defer manifest.deinit(self.allocator);
+
+        try manifest.append(self.allocator, '[');
+        var iterator = self.mock_module_sources.iterator();
+        var first = true;
+        while (iterator.next()) |entry| {
+            if (!first) try manifest.append(self.allocator, ',');
+            first = false;
+
+            const escaped_specifier = try jsonString(self.allocator, entry.key_ptr.*);
+            defer self.allocator.free(escaped_specifier);
+            const escaped_source = try jsonString(self.allocator, entry.value_ptr.*);
+            defer self.allocator.free(escaped_source);
+
+            try manifest.print(self.allocator, "{{\"specifier\":{s},\"source\":{s}}}", .{ escaped_specifier, escaped_source });
+        }
+        try manifest.append(self.allocator, ']');
+
         const ctx = self.ctx;
         const global = ctx.getGlobalObject();
         defer global.deinit(ctx);
-        const escaped_specifier = try jsonString(self.allocator, specifier);
-        defer self.allocator.free(escaped_specifier);
-        const escaped_source = try jsonString(self.allocator, source);
-        defer self.allocator.free(escaped_source);
-        const manifest = try std.fmt.allocPrint(self.allocator, "[{{\"specifier\":{s},\"source\":{s}}}]", .{ escaped_specifier, escaped_source });
-        defer self.allocator.free(manifest);
-        global.setPropertyStr(ctx, "__zigMockModuleManifestJson", quickjs.Value.initStringLen(ctx, manifest)) catch return error.JSError;
+        global.setPropertyStr(ctx, "__zigMockModuleManifestJson", quickjs.Value.initStringLen(ctx, manifest.items)) catch return error.JSError;
     }
 };
 
@@ -279,7 +325,7 @@ fn jsMockModule(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const qu
 
     const source = buildMockModuleSource(mocks.allocator, ctx, specifier, produced) catch return quickjs.Value.exception;
     defer mocks.allocator.free(source);
-    mocks.setManifest(specifier, source) catch return quickjs.Value.exception;
+    mocks.putMockModuleSource(specifier, source) catch return quickjs.Value.exception;
     return produced.dup(ctx);
 }
 
