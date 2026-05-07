@@ -4,6 +4,7 @@ const zig_dom = @import("../zig_dom.zig");
 const dom_classes = @import("dom_classes.zig");
 const host_platform = @import("host_platform.zig");
 const host_assertions = @import("host_assertions.zig");
+const host_runner = @import("host_runner.zig");
 
 const Allocator = std.mem.Allocator;
 var host_io: ?std.Io = null;
@@ -37,6 +38,7 @@ pub const Runtime = struct {
     ctx: *quickjs.Context,
     dom_window_handle: u64,
     dom_classes_state: ?*dom_classes.DomClasses,
+    host_runner_state: ?*host_runner.HostRunner,
 
     pub fn init(allocator: Allocator, io: std.Io) RuntimeError!Runtime {
         host_io = io;
@@ -53,16 +55,22 @@ pub const Runtime = struct {
             .ctx = ctx,
             .dom_window_handle = 0,
             .dom_classes_state = null,
+            .host_runner_state = null,
         };
 
         try runtime.installHostGlobals();
         try runtime.installNativeDomGlobals();
         try runtime.installHostPlatformGlobals();
         try runtime.installHostAssertions();
+        try runtime.installHostRunner();
         return runtime;
     }
 
     pub fn deinit(self: *Runtime) void {
+        if (self.host_runner_state) |runner| {
+            runner.deinit();
+            self.host_runner_state = null;
+        }
         if (self.dom_classes_state) |classes| {
             classes.deinit();
             self.allocator.destroy(classes);
@@ -525,6 +533,15 @@ pub const Runtime = struct {
 
     fn installHostAssertions(self: *Runtime) RuntimeError!void {
         host_assertions.install(self.ctx) catch return error.EvaluationFailed;
+    }
+
+    fn installHostRunner(self: *Runtime) RuntimeError!void {
+        self.host_runner_state = host_runner.HostRunner.init(self.allocator, self.rt, self.ctx) catch |err| {
+            return switch (err) {
+                error.OutOfMemory => error.OutOfMemory,
+                else => error.EvaluationFailed,
+            };
+        };
     }
 };
 

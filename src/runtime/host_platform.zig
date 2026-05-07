@@ -15,6 +15,7 @@ pub fn install(ctx: *quickjs.Context) PlatformError!void {
     try installProcess(ctx, global);
     try installImportMetaEnv(ctx, global);
     try installGlobals(ctx, global);
+    try installTimers(ctx, global);
     try installMatchMedia(ctx, global);
     try installKeyboardEvent(ctx, global);
     try installUrl(ctx, global);
@@ -42,6 +43,13 @@ pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
     try linkWindowProperty(ctx, global, window, "DOMParser");
     try linkWindowProperty(ctx, global, window, "localStorage");
     try linkWindowProperty(ctx, global, window, "sessionStorage");
+    try linkWindowProperty(ctx, global, window, "queueMicrotask");
+    try linkWindowProperty(ctx, global, window, "setTimeout");
+    try linkWindowProperty(ctx, global, window, "clearTimeout");
+    try linkWindowProperty(ctx, global, window, "setInterval");
+    try linkWindowProperty(ctx, global, window, "clearInterval");
+    try linkWindowProperty(ctx, global, window, "setImmediate");
+    try linkWindowProperty(ctx, global, window, "clearImmediate");
 }
 
 fn linkWindowProperty(ctx: *quickjs.Context, global: quickjs.Value, window: quickjs.Value, comptime name: [:0]const u8) PlatformError!void {
@@ -153,6 +161,23 @@ fn installGlobals(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
     global.setPropertyStr(ctx, "global", global.dup(ctx)) catch return error.JSError;
 }
 
+fn installTimers(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
+    try setFunctionIfMissing(ctx, global, "queueMicrotask", jsCallFirstArg, 1);
+    try setFunctionIfMissing(ctx, global, "setTimeout", jsCallFirstArg, 1);
+    try setFunctionIfMissing(ctx, global, "setInterval", jsCallFirstArg, 1);
+    try setFunctionIfMissing(ctx, global, "setImmediate", jsCallFirstArg, 1);
+    try setFunctionIfMissing(ctx, global, "clearTimeout", jsNoop, 1);
+    try setFunctionIfMissing(ctx, global, "clearInterval", jsNoop, 1);
+    try setFunctionIfMissing(ctx, global, "clearImmediate", jsNoop, 1);
+}
+
+fn setFunctionIfMissing(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]const u8, comptime func: quickjs.cfunc.Func, arg_count: i32) PlatformError!void {
+    const current = object.getPropertyStr(ctx, name);
+    defer current.deinit(ctx);
+    if (!current.isUndefined() and !current.isNull()) return;
+    try setFunction(ctx, object, name, func, arg_count);
+}
+
 fn installMatchMedia(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
     const current = global.getPropertyStr(ctx, "matchMedia");
     defer current.deinit(ctx);
@@ -249,6 +274,24 @@ fn installStorageObject(ctx: *quickjs.Context, global: quickjs.Value, comptime n
 
 fn jsNoop(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     return quickjs.Value.undefined;
+}
+
+fn jsCallFirstArg(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    if (args.len == 0) return quickjs.Value.initInt32(1);
+    const callback = quickjs.Value.fromCVal(args[0]);
+    if (callback.isFunction(ctx)) {
+        var call_args_buf: [8]quickjs.Value = undefined;
+        const count = @min(args.len - 1, call_args_buf.len);
+        for (0..count) |index| {
+            call_args_buf[index] = quickjs.Value.fromCVal(args[index + 1]).dup(ctx);
+        }
+        defer for (call_args_buf[0..count]) |value| value.deinit(ctx);
+        const result = callback.call(ctx, quickjs.Value.undefined, call_args_buf[0..count]);
+        defer result.deinit(ctx);
+        if (result.isException()) return quickjs.Value.exception;
+    }
+    return quickjs.Value.initInt32(1);
 }
 
 fn jsProcessCwd(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
