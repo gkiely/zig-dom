@@ -10,6 +10,11 @@ type TestTarget = {
   file: string;
 };
 
+type TestTargetGroup = {
+  root: string | null;
+  files: string[];
+};
+
 function parsePositiveSeconds(value: string | undefined): number | null {
   const parsed = Number.parseFloat(value ?? "");
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
@@ -97,11 +102,24 @@ function targetForPath(path: string): TestTarget {
   };
 }
 
-function resolveTestFile(input: string): TestTarget {
-  if (existsSync(input)) return targetForPath(input);
+function groupTargets(targets: TestTarget[]): TestTargetGroup[] {
+  const groups: TestTargetGroup[] = [];
+  for (const target of targets) {
+    let group = groups.find((candidate) => candidate.root === target.root);
+    if (!group) {
+      group = { root: target.root, files: [] };
+      groups.push(group);
+    }
+    group.files.push(target.file);
+  }
+  return groups;
+}
+
+function resolveTestFiles(input: string): TestTargetGroup[] {
+  if (existsSync(input)) return groupTargets([targetForPath(input)]);
 
   const downstreamPath = join(downstreamRoot, input);
-  if (existsSync(downstreamPath)) return targetForPath(downstreamPath);
+  if (existsSync(downstreamPath)) return groupTargets([targetForPath(downstreamPath)]);
 
   const normalizedInput = input.toLowerCase();
   const pathLikeInput = normalizedInput.includes("/") || normalizedInput.includes("\\");
@@ -120,14 +138,11 @@ function resolveTestFile(input: string): TestTarget {
   if (matches.length === 0) {
     throw new Error(`Could not find .test file matching "${input}".`);
   }
-  if (matches.length > 1) {
-    throw new Error(`Ambiguous .test file "${input}". Matches:\n${matches.map((file) => `- ${file}`).join("\n")}`);
-  }
 
-  return targetForPath(matches[0]!);
+  return groupTargets(matches.map(targetForPath));
 }
 
-function run(args: string[], timeoutMs: number): void {
+function run(args: string[], timeoutMs: number): number {
   const result = spawnSync("zig", args, {
     encoding: "utf8",
     stdio: "inherit",
@@ -136,18 +151,28 @@ function run(args: string[], timeoutMs: number): void {
 
   if (result.error && 'code' in result.error && result.error.code === "ETIMEDOUT") {
     console.error(`build:dev timed out after ${(timeoutMs / 1000).toFixed(1)}s. Increase with --timeout <seconds>.`);
-    process.exit(124);
+    return 124;
   }
   if (result.error) throw result.error;
-  process.exit(result.status ?? 1);
+  return result.status ?? 1;
 }
 
 const { input, runnerArgs, timeoutMs } = splitArgs();
-const testArgs = input
+const testArgGroups = input
   ? (() => {
-      const target = resolveTestFile(input);
-      return target.root ? [...runnerArgs, "--root", target.root, target.file] : [...runnerArgs, target.file];
+      const groups = resolveTestFiles(input);
+      if (groups.length > 1) {
+        const matches = groups.flatMap((group) => group.files).map((file) => `- ${file}`).join("\n");
+        throw new Error(`Matched tests from multiple roots. Use a more specific token.\n${matches}`);
+      }
+      const group = groups[0]!;
+      return [group.root ? [...runnerArgs, "--root", group.root, ...group.files] : [...runnerArgs, ...group.files]];
     })()
-  : [...runnerArgs, ...defaultTests()];
+  : [[...runnerArgs, ...defaultTests()]];
 
-run(["build", "test", "run", "-Doptimize=Debug", "--summary", "none", "--", "test", ...testArgs], timeoutMs);
+let exitCode = 0;
+for (const testArgs of testArgGroups) {
+  const result = run(["build", "test", "run", "-Doptimize=Debug", "--summary", "none", "--", "test", ...testArgs], timeoutMs);
+  if (result !== 0) exitCode = result;
+}
+process.exit(exitCode);

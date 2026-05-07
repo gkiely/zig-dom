@@ -31,6 +31,8 @@ If a downstream test needs special setup behavior, implement the generic mechani
 
 Allowed downstream references: commands in this plan, regression test names used for validation, and comments in tests that explain downstream behavior being generalized.
 
+Agents may add dev-only dependencies with `--save-dev` when they are needed for focused compatibility tests, for example `swr`.
+
 ## Validation Loop
 
 Use the Debug development build for local and downstream single-file validation:
@@ -42,8 +44,8 @@ bun run build:dev
 Run the ReleaseFast perf guard at the end of every milestone and any substantial sub-chunk:
 
 ```sh
-bun run perf:guard
-bun run perf:guard <test-file-token>
+bun run build:perf
+bun run build:perf <test-file-token>
 ```
 
 Use ReleaseFast only for the perf guard or performance comparisons. If the default perf guard regresses, stop and find the change before continuing.
