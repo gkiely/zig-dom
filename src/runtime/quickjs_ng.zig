@@ -5,6 +5,7 @@ const dom_classes = @import("dom_classes.zig");
 const host_platform = @import("host_platform.zig");
 const host_assertions = @import("host_assertions.zig");
 const host_runner = @import("host_runner.zig");
+const host_mocks = @import("host_mocks.zig");
 
 const Allocator = std.mem.Allocator;
 var host_io: ?std.Io = null;
@@ -39,6 +40,7 @@ pub const Runtime = struct {
     dom_window_handle: u64,
     dom_classes_state: ?*dom_classes.DomClasses,
     host_runner_state: ?*host_runner.HostRunner,
+    host_mocks_state: ?*host_mocks.HostMocks,
 
     pub fn init(allocator: Allocator, io: std.Io) RuntimeError!Runtime {
         host_io = io;
@@ -56,12 +58,14 @@ pub const Runtime = struct {
             .dom_window_handle = 0,
             .dom_classes_state = null,
             .host_runner_state = null,
+            .host_mocks_state = null,
         };
 
         try runtime.installHostGlobals();
         try runtime.installNativeDomGlobals();
         try runtime.installHostPlatformGlobals();
         try runtime.installHostAssertions();
+        try runtime.installHostMocks();
         try runtime.installHostRunner();
         return runtime;
     }
@@ -80,8 +84,19 @@ pub const Runtime = struct {
             zig_dom.zig_dom_destroy_window(self.dom_window_handle);
             self.dom_window_handle = 0;
         }
+        if (self.host_mocks_state) |mocks| {
+            mocks.clearGlobals();
+            mocks.clearHooks();
+            mocks.clearMockStates();
+        }
+        self.rt.runGC();
         self.ctx.deinit();
+        self.rt.runGC();
         self.rt.deinit();
+        if (self.host_mocks_state) |mocks| {
+            mocks.destroyAfterRuntimeFree();
+            self.host_mocks_state = null;
+        }
     }
 
     pub fn evalScript(self: *Runtime, filename: []const u8, source: []const u8) RuntimeError!void {
@@ -533,6 +548,15 @@ pub const Runtime = struct {
 
     fn installHostAssertions(self: *Runtime) RuntimeError!void {
         host_assertions.install(self.ctx) catch return error.EvaluationFailed;
+    }
+
+    fn installHostMocks(self: *Runtime) RuntimeError!void {
+        self.host_mocks_state = host_mocks.HostMocks.init(self.allocator, self.rt, self.ctx) catch |err| {
+            return switch (err) {
+                error.OutOfMemory => error.OutOfMemory,
+                else => error.EvaluationFailed,
+            };
+        };
     }
 
     fn installHostRunner(self: *Runtime) RuntimeError!void {
