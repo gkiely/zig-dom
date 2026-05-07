@@ -1426,7 +1426,17 @@ const ModuleLoaderState = struct {
         else
             return error.UnsupportedTransformLoader;
         _ = extension;
-        const source = try self.rewriteBarePackageNamedImports(module_id, contents);
+        const can_tree_shake = std.mem.eql(u8, loader, "ts") or
+            std.mem.eql(u8, loader, "tsx") or
+            std.mem.eql(u8, loader, "jsx");
+        const source = if (can_tree_shake) blk: {
+            const requested = self.requestedExportsFor(module_id) orelse break :blk try self.rewriteBarePackageNamedImports(module_id, contents);
+            const export_pruned = try pruneUnrequestedTsExports(self.allocator, contents, requested);
+            defer self.allocator.free(export_pruned);
+            const const_pruned = try pruneUnusedTsConstDeclarations(self.allocator, export_pruned);
+            defer self.allocator.free(const_pruned);
+            break :blk try self.rewriteBarePackageNamedImports(module_id, const_pruned);
+        } else try self.rewriteBarePackageNamedImports(module_id, contents);
         defer self.allocator.free(source);
 
         const transformed = try yuku_transform.transformSource(self.allocator, module_id, source, loader);
@@ -1484,6 +1494,7 @@ const ModuleLoaderState = struct {
         if (parsed.all or !isBarePackageRootSpecifier(parsed.specifier)) return null;
         const bindings = std.mem.trim(u8, parsed.bindings, " \t\r\n");
         if (!std.mem.startsWith(u8, bindings, "{") or !std.mem.endsWith(u8, bindings, "}")) return null;
+        if (try self.hasOnLoadForSpecifier(module_id, parsed.specifier)) return null;
 
         var imports: std.ArrayList(NamedImportPart) = .empty;
         defer {
@@ -1527,6 +1538,13 @@ const ModuleLoaderState = struct {
         }
         const owned = try out.toOwnedSlice(self.allocator);
         return owned;
+    }
+
+    fn hasOnLoadForSpecifier(self: *ModuleLoaderState, module_id: []const u8, specifier: []const u8) anyerror!bool {
+        const runtime = self.runtime orelse return false;
+        const resolved = self.normalizeSpecifier(module_id, specifier) catch return false;
+        defer self.allocator.free(resolved);
+        return try runtime.matchesOnLoad(resolved);
     }
 
     fn recordStaticImportRequests(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) !void {

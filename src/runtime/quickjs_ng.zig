@@ -267,6 +267,15 @@ pub const Runtime = struct {
         };
     }
 
+    pub fn matchesOnLoad(self: *Runtime, path: []const u8) RuntimeError!bool {
+        const mocks = self.host_mocks_state orelse return false;
+        if (!mocks.hasOnLoadHooks()) return false;
+        return mocks.matchesOnLoad(path) catch |err| switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+            error.JSError => error.EvaluationFailed,
+        };
+    }
+
     pub fn getGlobalBool(self: *Runtime, name: []const u8) RuntimeError!bool {
         const global = self.ctx.getGlobalObject();
         defer global.deinit(self.ctx);

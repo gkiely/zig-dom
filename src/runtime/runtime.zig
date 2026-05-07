@@ -70,6 +70,10 @@ pub const Runtime = struct {
         return self.adapter.loadFromOnLoad(path);
     }
 
+    pub fn matchesOnLoad(self: *Runtime, path: []const u8) RuntimeError!bool {
+        return self.adapter.matchesOnLoad(path);
+    }
+
     pub fn getGlobalBool(self: *Runtime, name: []const u8) RuntimeError!bool {
         return self.adapter.getGlobalBool(name);
     }

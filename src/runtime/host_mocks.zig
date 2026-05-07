@@ -103,6 +103,30 @@ pub const HostMocks = struct {
         return self.on_load_hooks.items.len > 0;
     }
 
+    pub fn matchesOnLoad(self: *HostMocks, path: []const u8) HostMocksError!bool {
+        if (self.on_load_hooks.items.len == 0) return false;
+
+        const ctx = self.ctx;
+        const path_value = quickjs.Value.initStringLen(ctx, path);
+        if (path_value.isException()) return error.JSError;
+        defer path_value.deinit(ctx);
+
+        for (self.on_load_hooks.items) |hook| {
+            const test_fn = hook.filter.getPropertyStr(ctx, "test");
+            defer test_fn.deinit(ctx);
+            if (!test_fn.isFunction(ctx)) continue;
+
+            var test_args = [_]quickjs.Value{path_value.dup(ctx)};
+            defer test_args[0].deinit(ctx);
+            const matched = test_fn.call(ctx, hook.filter, &test_args);
+            defer matched.deinit(ctx);
+            if (matched.isException()) return error.JSError;
+            if (matched.toBool(ctx) catch return error.JSError) return true;
+        }
+
+        return false;
+    }
+
     pub fn applyOnLoad(self: *HostMocks, path: []const u8) HostMocksError!?OnLoadResult {
         if (self.on_load_hooks.items.len == 0) return null;
 
