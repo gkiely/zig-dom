@@ -35,6 +35,22 @@ Current status:
 - `wpt`, `wpt-sync`, and `wpt-manifest` bridge to existing scripts under `scripts/`.
 - The runtime abstraction files were added in `src/runtime/` for upcoming QuickJS embedding work.
 
+## Perf Guard (Edit.test.tsx)
+
+Milestone work should run the ReleaseFast guard for `../youneedawiki/src/elements/Buttons/Edit.test.tsx`.
+
+```sh
+bun run perf:edit-guard
+```
+
+The helper script builds with ReleaseFast first, then runs two timed test invocations so build time is not included in runtime timing.
+
+Optional strict timing mode fails the command when a run is slower than the current baseline windows:
+
+```sh
+bun run perf:edit-guard --strict-timing
+```
+
 ## Test Setup
 
 Create a Bun preload file:
