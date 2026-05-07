@@ -303,13 +303,19 @@ fn isRuntimeUnsupportedImport(trimmed_line: []const u8) bool {
     return std.mem.indexOf(u8, trimmed_line, "\"bun:test\"") != null or
         std.mem.indexOf(u8, trimmed_line, "'bun:test'") != null or
         std.mem.indexOf(u8, trimmed_line, "\"react\"") != null or
-        std.mem.indexOf(u8, trimmed_line, "'react'") != null;
+        std.mem.indexOf(u8, trimmed_line, "'react'") != null or
+        std.mem.indexOf(u8, trimmed_line, "\"react-dom/client\"") != null or
+        std.mem.indexOf(u8, trimmed_line, "'react-dom/client'") != null or
+        std.mem.indexOf(u8, trimmed_line, "\"@testing-library/react\"") != null or
+        std.mem.indexOf(u8, trimmed_line, "'@testing-library/react'") != null;
 }
 
 test "sanitizeSourceForQuickJs strips bun:test and react imports" {
     const allocator = std.testing.allocator;
     const source =
         \\import React from "react";
+        \\import * as ReactDOMClient from "react-dom/client";
+        \\import { render } from "@testing-library/react";
         \\import { expect, test } from "bun:test";
         \\test("ok", () => expect(1).toBe(1));
     ;
@@ -319,5 +325,7 @@ test "sanitizeSourceForQuickJs strips bun:test and react imports" {
 
     try std.testing.expect(std.mem.indexOf(u8, sanitized, "bun:test") == null);
     try std.testing.expect(std.mem.indexOf(u8, sanitized, "import React") == null);
+    try std.testing.expect(std.mem.indexOf(u8, sanitized, "react-dom/client") == null);
+    try std.testing.expect(std.mem.indexOf(u8, sanitized, "@testing-library/react") == null);
     try std.testing.expect(std.mem.indexOf(u8, sanitized, "test(\"ok\"") != null);
 }

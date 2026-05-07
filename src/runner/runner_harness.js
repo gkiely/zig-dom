@@ -245,6 +245,229 @@
     }
   };
 
+  function normalizeChildren(children) {
+    if (children == null) {
+      return [];
+    }
+    return Array.isArray(children) ? children : [children];
+  }
+
+  function clearChildren(node) {
+    while (node.firstChild) {
+      node.removeChild(node.firstChild);
+    }
+  }
+
+  function applyProps(element, props) {
+    if (!props || typeof props !== "object") {
+      return;
+    }
+
+    for (const [key, value] of Object.entries(props)) {
+      if (key === "children") {
+        continue;
+      }
+
+      if (key === "className") {
+        element.setAttribute("class", String(value));
+        continue;
+      }
+
+      if (key.startsWith("on") && typeof value === "function") {
+        element.addEventListener(key.slice(2).toLowerCase(), value);
+        continue;
+      }
+
+      if (key === "style" && value && typeof value === "object") {
+        const cssText = Object.entries(value)
+          .map(([name, cssValue]) => `${name}: ${String(cssValue)}`)
+          .join("; ");
+        element.setAttribute("style", cssText);
+        continue;
+      }
+
+      if (value === true) {
+        element.setAttribute(key, "");
+        continue;
+      }
+
+      if (value === false || value == null) {
+        continue;
+      }
+
+      if (key in element) {
+        try {
+          element[key] = value;
+          continue;
+        } catch {
+          // Fall back to attribute assignment.
+        }
+      }
+
+      element.setAttribute(key, String(value));
+    }
+  }
+
+  function mountVNode(vnode, ownerDocument) {
+    if (vnode == null || vnode === false || vnode === true) {
+      return ownerDocument.createTextNode("");
+    }
+
+    if (typeof vnode === "string" || typeof vnode === "number") {
+      return ownerDocument.createTextNode(String(vnode));
+    }
+
+    if (Array.isArray(vnode)) {
+      const fragment = ownerDocument.createDocumentFragment();
+      for (const child of vnode) {
+        fragment.appendChild(mountVNode(child, ownerDocument));
+      }
+      return fragment;
+    }
+
+    if (typeof vnode === "object" && vnode.$$typeof === Symbol.for("react.element")) {
+      if (typeof vnode.type === "function") {
+        return mountVNode(vnode.type(vnode.props || {}), ownerDocument);
+      }
+
+      if (vnode.type === React.Fragment) {
+        const fragment = ownerDocument.createDocumentFragment();
+        for (const child of normalizeChildren(vnode.props ? vnode.props.children : undefined)) {
+          fragment.appendChild(mountVNode(child, ownerDocument));
+        }
+        return fragment;
+      }
+
+      if (typeof vnode.type === "string") {
+        const element = ownerDocument.createElement(vnode.type);
+        const props = vnode.props || {};
+        applyProps(element, props);
+        for (const child of normalizeChildren(props.children)) {
+          element.appendChild(mountVNode(child, ownerDocument));
+        }
+        return element;
+      }
+    }
+
+    return ownerDocument.createTextNode("");
+  }
+
+  const ReactDOMClient = {
+    createRoot(container) {
+      return {
+        render(vnode) {
+          clearChildren(container);
+          container.appendChild(mountVNode(vnode, container.ownerDocument || document));
+        },
+        unmount() {
+          clearChildren(container);
+        }
+      };
+    }
+  };
+
+  function findByText(root, expectedText) {
+    const expected = String(expectedText);
+    if (!root) {
+      return null;
+    }
+
+    function hasElementChildWithText(node) {
+      if (!node.children || typeof node.children.length !== "number") {
+        return false;
+      }
+      for (let index = 0; index < node.children.length; index += 1) {
+        const child = node.children[index];
+        if (child && child.nodeType === 1 && child.textContent === expected) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    if (root.nodeType === 1 && root.textContent === expected && !hasElementChildWithText(root)) {
+      return root;
+    }
+
+    const stack = [];
+    if (root.children && typeof root.children.length === "number") {
+      for (let index = 0; index < root.children.length; index += 1) {
+        stack.push(root.children[index]);
+      }
+    }
+
+    while (stack.length > 0) {
+      const node = stack.shift();
+      if (!node) {
+        continue;
+      }
+
+      if (node.nodeType === 1 && node.textContent === expected && !hasElementChildWithText(node)) {
+        return node;
+      }
+
+      if (node.children && typeof node.children.length === "number") {
+        for (let index = 0; index < node.children.length; index += 1) {
+          stack.push(node.children[index]);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function createTestingLibraryHelpers() {
+    function getByTextFrom(root, text) {
+      const node = findByText(root, text);
+      if (!node) {
+        throw new Error(`Unable to find text: ${String(text)}`);
+      }
+      return node;
+    }
+
+    function render(ui, options = {}) {
+      const container = options.container || document.createElement("div");
+      if (!container.parentNode) {
+        document.body.appendChild(container);
+      }
+
+      const root = ReactDOMClient.createRoot(container);
+      root.render(ui);
+
+      return {
+        container,
+        rerender(nextUi) {
+          root.render(nextUi);
+        },
+        unmount() {
+          root.unmount();
+          if (container.parentNode) {
+            container.parentNode.removeChild(container);
+          }
+        },
+        getByText(text) {
+          return getByTextFrom(container, text);
+        }
+      };
+    }
+
+    const screen = {
+      getByText(text) {
+        return getByTextFrom(document.body, text);
+      }
+    };
+
+    const fireEvent = {
+      click(target) {
+        target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      }
+    };
+
+    return { render, screen, fireEvent };
+  }
+
+  const testingLibrary = createTestingLibraryHelpers();
+
   function gatherScopeChain(scope) {
     const chain = [];
     let cursor = scope;
@@ -510,6 +733,10 @@
   }
 
   globalThis.React = React;
+  globalThis.ReactDOMClient = ReactDOMClient;
+  globalThis.render = testingLibrary.render;
+  globalThis.screen = testingLibrary.screen;
+  globalThis.fireEvent = testingLibrary.fireEvent;
   globalThis.expect = expect;
   globalThis.test = test;
   globalThis.it = test;

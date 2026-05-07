@@ -3,78 +3,7 @@ const quickjs = @import("quickjs");
 const zig_dom = @import("../zig_dom.zig");
 
 const Allocator = std.mem.Allocator;
-
-const dom_bootstrap_source =
-    \\(() => {
-    \\  const native = globalThis.__zigDomNative;
-    \\  const windowHandle = globalThis.__zigDomWindowHandle;
-    \\  const documentHandle = globalThis.__zigDomDocumentHandle;
-    \\  const handleSymbol = Symbol("zigDomHandle");
-    \\  const ownerDocumentSymbol = Symbol("zigDomOwnerDocument");
-    \\
-    \\  function getHandle(value, typeName) {
-    \\    if (!value || typeof value !== "object" || typeof value[handleSymbol] !== "number") {
-    \\      throw new TypeError(typeName + " is not a native zig-dom node");
-    \\    }
-    \\    return value[handleSymbol];
-    \\  }
-    \\
-    \\  class Node {
-    \\    constructor(handle, ownerDocumentHandle) {
-    \\      this[handleSymbol] = handle;
-    \\      this[ownerDocumentSymbol] = ownerDocumentHandle;
-    \\    }
-    \\
-    \\    appendChild(child) {
-    \\      native.nodeAppendChild(getHandle(this, "this"), getHandle(child, "child"));
-    \\      return child;
-    \\    }
-    \\
-    \\    get textContent() {
-    \\      return native.nodeTextContent(getHandle(this, "this"));
-    \\    }
-    \\
-    \\    set textContent(value) {
-    \\      native.nodeSetTextContent(getHandle(this, "this"), value == null ? "" : String(value));
-    \\    }
-    \\  }
-    \\
-    \\  class Element extends Node {}
-    \\
-    \\  class Text extends Node {
-    \\    constructor(data = "") {
-    \\      const handle = native.documentCreateTextNode(documentHandle, String(data));
-    \\      super(handle, documentHandle);
-    \\    }
-    \\  }
-    \\
-    \\  class Document extends Node {
-    \\    constructor(handle) {
-    \\      super(handle, handle);
-    \\    }
-    \\
-    \\    createElement(name) {
-    \\      const handle = native.documentCreateElement(getHandle(this, "this"), String(name));
-    \\      return new Element(handle, this[ownerDocumentSymbol]);
-    \\    }
-    \\  }
-    \\
-    \\  class Window {
-    \\    constructor(handle, document) {
-    \\      this[handleSymbol] = handle;
-    \\      this.document = document;
-    \\    }
-    \\  }
-    \\
-    \\  const document = new Document(documentHandle);
-    \\  const window = new Window(windowHandle, document);
-    \\  Object.assign(globalThis, { Window, Document, Node, Element, Text, window, document });
-    \\
-    \\  delete globalThis.__zigDomNative;
-    \\  delete globalThis.__zigDomWindowHandle;
-    \\  delete globalThis.__zigDomDocumentHandle;
-    \\})();
-;
+const dom_bootstrap_source = @embedFile("dom_bootstrap.js");
 
 pub const RuntimeError = error{
     OutOfMemory,
@@ -264,6 +193,26 @@ pub const Runtime = struct {
             return error.OutOfMemory;
         }
 
+        installNativeFunction(self.ctx, native, "createWindow", jsCreateWindow, 0) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "windowDocument", jsWindowDocument, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "windowDocumentElement", jsWindowDocumentElement, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "windowHead", jsWindowHead, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "windowBody", jsWindowBody, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
         installNativeFunction(self.ctx, native, "documentCreateElement", jsDocumentCreateElement, 2) catch |err| {
             native.deinit(self.ctx);
             return err;
@@ -272,7 +221,79 @@ pub const Runtime = struct {
             native.deinit(self.ctx);
             return err;
         };
+        installNativeFunction(self.ctx, native, "documentCreateComment", jsDocumentCreateComment, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "documentCreateDocumentFragment", jsDocumentCreateDocumentFragment, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "documentGetElementById", jsDocumentGetElementById, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "documentQuerySelector", jsDocumentQuerySelector, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "documentQuerySelectorAll", jsDocumentQuerySelectorAll, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeType", jsNodeType, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeOwnerDocument", jsNodeOwnerDocument, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeParent", jsNodeParent, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeFirstChild", jsNodeFirstChild, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeLastChild", jsNodeLastChild, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodePreviousSibling", jsNodePreviousSibling, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeNextSibling", jsNodeNextSibling, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeContains", jsNodeContains, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeName", jsNodeName, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
         installNativeFunction(self.ctx, native, "nodeAppendChild", jsNodeAppendChild, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeAppendFragment", jsNodeAppendFragment, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeInsertBefore", jsNodeInsertBefore, 3) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeRemoveChild", jsNodeRemoveChild, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeReplaceChild", jsNodeReplaceChild, 3) catch |err| {
             native.deinit(self.ctx);
             return err;
         };
@@ -281,6 +302,42 @@ pub const Runtime = struct {
             return err;
         };
         installNativeFunction(self.ctx, native, "nodeSetTextContent", jsNodeSetTextContent, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeOuterHtml", jsNodeOuterHtml, 1) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeSetInnerHtml", jsNodeSetInnerHtml, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeQuerySelector", jsNodeQuerySelector, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "nodeQuerySelectorAll", jsNodeQuerySelectorAll, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "elementGetAttribute", jsElementGetAttribute, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "elementSetAttribute", jsElementSetAttribute, 3) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "elementRemoveAttribute", jsElementRemoveAttribute, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "elementHasAttribute", jsElementHasAttribute, 2) catch |err| {
+            native.deinit(self.ctx);
+            return err;
+        };
+        installNativeFunction(self.ctx, native, "elementAttributesJson", jsElementAttributesJson, 1) catch |err| {
             native.deinit(self.ctx);
             return err;
         };
@@ -343,6 +400,231 @@ fn jsDocumentCreateTextNode(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_ar
     return quickjs.Value.initInt64(@intCast(out_handle));
 }
 
+fn jsCreateWindow(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+
+    var out_window: u64 = 0;
+    const status = zig_dom.zig_dom_create_window(&out_window);
+    if (status != 0) {
+        return throwStatus(ctx, "createWindow", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_window));
+}
+
+fn jsWindowDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const window_handle = parseHandleArg(ctx, args, 0, "windowDocument") orelse return quickjs.Value.exception;
+    var out_document: u64 = 0;
+    const status = zig_dom.zig_dom_window_document(window_handle, &out_document);
+    if (status != 0) {
+        return throwStatus(ctx, "windowDocument", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_document));
+}
+
+fn jsWindowDocumentElement(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const window_handle = parseHandleArg(ctx, args, 0, "windowDocumentElement") orelse return quickjs.Value.exception;
+    var out_handle: u64 = 0;
+    const status = zig_dom.zig_dom_window_document_element(window_handle, &out_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "windowDocumentElement", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_handle));
+}
+
+fn jsWindowHead(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const window_handle = parseHandleArg(ctx, args, 0, "windowHead") orelse return quickjs.Value.exception;
+    var out_handle: u64 = 0;
+    const status = zig_dom.zig_dom_window_head(window_handle, &out_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "windowHead", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_handle));
+}
+
+fn jsWindowBody(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const window_handle = parseHandleArg(ctx, args, 0, "windowBody") orelse return quickjs.Value.exception;
+    var out_handle: u64 = 0;
+    const status = zig_dom.zig_dom_window_body(window_handle, &out_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "windowBody", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_handle));
+}
+
+fn jsDocumentCreateComment(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const document_handle = parseHandleArg(ctx, args, 0, "documentCreateComment") orelse return quickjs.Value.exception;
+    const text_value = parseStringArg(ctx, args, 1, "documentCreateComment") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(text_value.ptr);
+
+    var out_handle: u64 = 0;
+    const status = zig_dom.zig_dom_document_create_comment(document_handle, text_value.ptr, text_value.len, &out_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "documentCreateComment", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_handle));
+}
+
+fn jsDocumentCreateDocumentFragment(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const document_handle = parseHandleArg(ctx, args, 0, "documentCreateDocumentFragment") orelse return quickjs.Value.exception;
+    var out_handle: u64 = 0;
+    const status = zig_dom.zig_dom_document_create_document_fragment(document_handle, &out_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "documentCreateDocumentFragment", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_handle));
+}
+
+fn jsDocumentGetElementById(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const document_handle = parseHandleArg(ctx, args, 0, "documentGetElementById") orelse return quickjs.Value.exception;
+    const id_value = parseStringArg(ctx, args, 1, "documentGetElementById") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(id_value.ptr);
+
+    var out_handle: u64 = 0;
+    const status = zig_dom.zig_dom_document_get_element_by_id(document_handle, id_value.ptr, id_value.len, &out_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "documentGetElementById", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_handle));
+}
+
+fn jsDocumentQuerySelector(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const document_handle = parseHandleArg(ctx, args, 0, "documentQuerySelector") orelse return quickjs.Value.exception;
+    const selector_value = parseStringArg(ctx, args, 1, "documentQuerySelector") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(selector_value.ptr);
+
+    var out_handle: u64 = 0;
+    const status = zig_dom.zig_dom_document_query_selector(document_handle, selector_value.ptr, selector_value.len, &out_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "documentQuerySelector", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_handle));
+}
+
+fn jsDocumentQuerySelectorAll(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const document_handle = parseHandleArg(ctx, args, 0, "documentQuerySelectorAll") orelse return quickjs.Value.exception;
+    const selector_value = parseStringArg(ctx, args, 1, "documentQuerySelectorAll") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(selector_value.ptr);
+
+    var out_ptr: [*c]u64 = null;
+    var out_len: usize = 0;
+    const status = zig_dom.zig_dom_document_query_selector_all(document_handle, selector_value.ptr, selector_value.len, &out_ptr, &out_len);
+    if (status != 0) {
+        return throwStatus(ctx, "documentQuerySelectorAll", status);
+    }
+    defer zig_dom.zig_dom_free_handle_array(out_ptr, out_len);
+
+    return handleArrayToJs(ctx, out_ptr, out_len);
+}
+
+fn jsNodeType(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const node_handle = parseHandleArg(ctx, args, 0, "nodeType") orelse return quickjs.Value.exception;
+    return quickjs.Value.initInt64(@intCast(zig_dom.zig_dom_node_type(node_handle)));
+}
+
+fn jsNodeOwnerDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const node_handle = parseHandleArg(ctx, args, 0, "nodeOwnerDocument") orelse return quickjs.Value.exception;
+    var out_document: u64 = 0;
+    const status = zig_dom.zig_dom_node_owner_document(node_handle, &out_document);
+    if (status != 0) {
+        return throwStatus(ctx, "nodeOwnerDocument", status);
+    }
+    return quickjs.Value.initInt64(@intCast(out_document));
+}
+
+fn jsNodeParent(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const node_handle = parseHandleArg(ctx, args, 0, "nodeParent") orelse return quickjs.Value.exception;
+    return quickjs.Value.initInt64(@intCast(zig_dom.zig_dom_node_parent(node_handle)));
+}
+
+fn jsNodeFirstChild(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const node_handle = parseHandleArg(ctx, args, 0, "nodeFirstChild") orelse return quickjs.Value.exception;
+    return quickjs.Value.initInt64(@intCast(zig_dom.zig_dom_node_first_child(node_handle)));
+}
+
+fn jsNodeLastChild(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const node_handle = parseHandleArg(ctx, args, 0, "nodeLastChild") orelse return quickjs.Value.exception;
+    return quickjs.Value.initInt64(@intCast(zig_dom.zig_dom_node_last_child(node_handle)));
+}
+
+fn jsNodePreviousSibling(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const node_handle = parseHandleArg(ctx, args, 0, "nodePreviousSibling") orelse return quickjs.Value.exception;
+    return quickjs.Value.initInt64(@intCast(zig_dom.zig_dom_node_previous_sibling(node_handle)));
+}
+
+fn jsNodeNextSibling(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const node_handle = parseHandleArg(ctx, args, 0, "nodeNextSibling") orelse return quickjs.Value.exception;
+    return quickjs.Value.initInt64(@intCast(zig_dom.zig_dom_node_next_sibling(node_handle)));
+}
+
+fn jsNodeContains(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const ancestor_handle = parseHandleArg(ctx, args, 0, "nodeContains") orelse return quickjs.Value.exception;
+    const node_handle = parseHandleArg(ctx, args, 1, "nodeContains") orelse return quickjs.Value.exception;
+    return quickjs.Value.initBool(zig_dom.zig_dom_node_contains(ancestor_handle, node_handle) == 1);
+}
+
+fn jsNodeName(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const node_handle = parseHandleArg(ctx, args, 0, "nodeName") orelse return quickjs.Value.exception;
+    return nodeNameToJs(ctx, node_handle, "nodeName");
+}
+
 fn jsNodeAppendChild(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -356,6 +638,66 @@ fn jsNodeAppendChild(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []c
     }
 
     return quickjs.Value.initInt64(@intCast(child_handle));
+}
+
+fn jsNodeAppendFragment(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const parent_handle = parseHandleArg(ctx, args, 0, "nodeAppendFragment") orelse return quickjs.Value.exception;
+    const fragment_handle = parseHandleArg(ctx, args, 1, "nodeAppendFragment") orelse return quickjs.Value.exception;
+
+    const status = zig_dom.zig_dom_node_append_fragment(parent_handle, fragment_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "nodeAppendFragment", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(fragment_handle));
+}
+
+fn jsNodeInsertBefore(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const parent_handle = parseHandleArg(ctx, args, 0, "nodeInsertBefore") orelse return quickjs.Value.exception;
+    const child_handle = parseHandleArg(ctx, args, 1, "nodeInsertBefore") orelse return quickjs.Value.exception;
+    const reference_handle = parseOptionalHandleArg(ctx, args, 2, "nodeInsertBefore") orelse return quickjs.Value.exception;
+
+    const status = zig_dom.zig_dom_node_insert_before(parent_handle, child_handle, reference_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "nodeInsertBefore", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(child_handle));
+}
+
+fn jsNodeRemoveChild(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const parent_handle = parseHandleArg(ctx, args, 0, "nodeRemoveChild") orelse return quickjs.Value.exception;
+    const child_handle = parseHandleArg(ctx, args, 1, "nodeRemoveChild") orelse return quickjs.Value.exception;
+    const status = zig_dom.zig_dom_node_remove_child(parent_handle, child_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "nodeRemoveChild", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(child_handle));
+}
+
+fn jsNodeReplaceChild(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const parent_handle = parseHandleArg(ctx, args, 0, "nodeReplaceChild") orelse return quickjs.Value.exception;
+    const new_child_handle = parseHandleArg(ctx, args, 1, "nodeReplaceChild") orelse return quickjs.Value.exception;
+    const old_child_handle = parseHandleArg(ctx, args, 2, "nodeReplaceChild") orelse return quickjs.Value.exception;
+    const status = zig_dom.zig_dom_node_replace_child(parent_handle, new_child_handle, old_child_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "nodeReplaceChild", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(old_child_handle));
 }
 
 fn jsNodeTextContent(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
@@ -406,6 +748,173 @@ fn jsNodeSetTextContent(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: 
     return quickjs.Value.initInt64(0);
 }
 
+fn jsNodeOuterHtml(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const node_handle = parseHandleArg(ctx, args, 0, "nodeOuterHtml") orelse return quickjs.Value.exception;
+    var out_ptr: [*c]u8 = null;
+    var out_len: usize = 0;
+    const status = zig_dom.zig_dom_node_outer_html(node_handle, &out_ptr, &out_len);
+    if (status != 0) {
+        return throwStatus(ctx, "nodeOuterHtml", status);
+    }
+    defer zig_dom.zig_dom_free_string(out_ptr, out_len);
+
+    if (out_ptr == null or out_len == 0) {
+        return quickjs.Value.initStringLen(ctx, "");
+    }
+
+    const text = @as([*]const u8, @ptrCast(out_ptr))[0..out_len];
+    return quickjs.Value.initStringLen(ctx, text);
+}
+
+fn jsNodeSetInnerHtml(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const node_handle = parseHandleArg(ctx, args, 0, "nodeSetInnerHtml") orelse return quickjs.Value.exception;
+    const html_value = parseStringArg(ctx, args, 1, "nodeSetInnerHtml") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(html_value.ptr);
+
+    const status = zig_dom.zig_dom_node_set_inner_html(node_handle, html_value.ptr, html_value.len);
+    if (status != 0) {
+        return throwStatus(ctx, "nodeSetInnerHtml", status);
+    }
+
+    return quickjs.Value.initInt64(0);
+}
+
+fn jsNodeQuerySelector(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const root_handle = parseHandleArg(ctx, args, 0, "nodeQuerySelector") orelse return quickjs.Value.exception;
+    const selector_value = parseStringArg(ctx, args, 1, "nodeQuerySelector") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(selector_value.ptr);
+
+    var out_handle: u64 = 0;
+    const status = zig_dom.zig_dom_node_query_selector(root_handle, selector_value.ptr, selector_value.len, &out_handle);
+    if (status != 0) {
+        return throwStatus(ctx, "nodeQuerySelector", status);
+    }
+
+    return quickjs.Value.initInt64(@intCast(out_handle));
+}
+
+fn jsNodeQuerySelectorAll(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const root_handle = parseHandleArg(ctx, args, 0, "nodeQuerySelectorAll") orelse return quickjs.Value.exception;
+    const selector_value = parseStringArg(ctx, args, 1, "nodeQuerySelectorAll") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(selector_value.ptr);
+
+    var out_ptr: [*c]u64 = null;
+    var out_len: usize = 0;
+    const status = zig_dom.zig_dom_node_query_selector_all(root_handle, selector_value.ptr, selector_value.len, &out_ptr, &out_len);
+    if (status != 0) {
+        return throwStatus(ctx, "nodeQuerySelectorAll", status);
+    }
+    defer zig_dom.zig_dom_free_handle_array(out_ptr, out_len);
+
+    return handleArrayToJs(ctx, out_ptr, out_len);
+}
+
+fn jsElementGetAttribute(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const element_handle = parseHandleArg(ctx, args, 0, "elementGetAttribute") orelse return quickjs.Value.exception;
+    const name_value = parseStringArg(ctx, args, 1, "elementGetAttribute") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name_value.ptr);
+
+    var out_ptr: [*c]u8 = null;
+    var out_len: usize = 0;
+    var out_exists: u8 = 0;
+    const status = zig_dom.zig_dom_element_get_attribute(element_handle, name_value.ptr, name_value.len, &out_ptr, &out_len, &out_exists);
+    if (status != 0) {
+        return throwStatus(ctx, "elementGetAttribute", status);
+    }
+    defer zig_dom.zig_dom_free_string(out_ptr, out_len);
+
+    if (out_exists == 0) {
+        return quickjs.Value.@"null";
+    }
+    if (out_ptr == null or out_len == 0) {
+        return quickjs.Value.initStringLen(ctx, "");
+    }
+
+    const text = @as([*]const u8, @ptrCast(out_ptr))[0..out_len];
+    return quickjs.Value.initStringLen(ctx, text);
+}
+
+fn jsElementSetAttribute(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const element_handle = parseHandleArg(ctx, args, 0, "elementSetAttribute") orelse return quickjs.Value.exception;
+    const name_value = parseStringArg(ctx, args, 1, "elementSetAttribute") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name_value.ptr);
+    const attr_value = parseStringArg(ctx, args, 2, "elementSetAttribute") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(attr_value.ptr);
+
+    const status = zig_dom.zig_dom_element_set_attribute(element_handle, name_value.ptr, name_value.len, attr_value.ptr, attr_value.len);
+    if (status != 0) {
+        return throwStatus(ctx, "elementSetAttribute", status);
+    }
+
+    return quickjs.Value.initInt64(0);
+}
+
+fn jsElementRemoveAttribute(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const element_handle = parseHandleArg(ctx, args, 0, "elementRemoveAttribute") orelse return quickjs.Value.exception;
+    const name_value = parseStringArg(ctx, args, 1, "elementRemoveAttribute") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name_value.ptr);
+
+    const status = zig_dom.zig_dom_element_remove_attribute(element_handle, name_value.ptr, name_value.len);
+    if (status != 0) {
+        return throwStatus(ctx, "elementRemoveAttribute", status);
+    }
+
+    return quickjs.Value.initInt64(0);
+}
+
+fn jsElementHasAttribute(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const element_handle = parseHandleArg(ctx, args, 0, "elementHasAttribute") orelse return quickjs.Value.exception;
+    const name_value = parseStringArg(ctx, args, 1, "elementHasAttribute") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name_value.ptr);
+
+    return quickjs.Value.initBool(zig_dom.zig_dom_element_has_attribute(element_handle, name_value.ptr, name_value.len) == 1);
+}
+
+fn jsElementAttributesJson(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const element_handle = parseHandleArg(ctx, args, 0, "elementAttributesJson") orelse return quickjs.Value.exception;
+    var out_ptr: [*c]u8 = null;
+    var out_len: usize = 0;
+    const status = zig_dom.zig_dom_element_attributes_json(element_handle, &out_ptr, &out_len);
+    if (status != 0) {
+        return throwStatus(ctx, "elementAttributesJson", status);
+    }
+    defer zig_dom.zig_dom_free_string(out_ptr, out_len);
+
+    if (out_ptr == null or out_len == 0) {
+        return quickjs.Value.initStringLen(ctx, "[]");
+    }
+
+    const text = @as([*]const u8, @ptrCast(out_ptr))[0..out_len];
+    return quickjs.Value.initStringLen(ctx, text);
+}
+
 const CStringArg = struct {
     ptr: [*:0]const u8,
     len: usize,
@@ -430,6 +939,27 @@ fn parseHandleArg(ctx: *quickjs.Context, args: []const quickjs.Value, index: usi
     return @intCast(handle_i64);
 }
 
+fn parseOptionalHandleArg(ctx: *quickjs.Context, args: []const quickjs.Value, index: usize, operation: []const u8) ?u64 {
+    if (index >= args.len) {
+        return 0;
+    }
+
+    if (args[index].isUndefined() or args[index].isNull()) {
+        return 0;
+    }
+
+    const handle_i64 = args[index].toInt64(ctx) catch {
+        _ = throwOperationMessage(ctx, operation, "handle must be numeric");
+        return null;
+    };
+    if (handle_i64 < 0) {
+        _ = throwOperationMessage(ctx, operation, "handle must be non-negative");
+        return null;
+    }
+
+    return @intCast(handle_i64);
+}
+
 fn parseStringArg(ctx: *quickjs.Context, args: []const quickjs.Value, index: usize, operation: []const u8) ?CStringArg {
     if (index >= args.len) {
         _ = throwOperationMessage(ctx, operation, "missing string argument");
@@ -442,6 +972,44 @@ fn parseStringArg(ctx: *quickjs.Context, args: []const quickjs.Value, index: usi
     };
 
     return .{ .ptr = string_value.ptr, .len = string_value.len };
+}
+
+fn nodeNameToJs(ctx: *quickjs.Context, node_handle: u64, operation: []const u8) quickjs.Value {
+    var out_ptr: [*c]u8 = null;
+    var out_len: usize = 0;
+    const status = zig_dom.zig_dom_node_name(node_handle, &out_ptr, &out_len);
+    if (status != 0) {
+        return throwStatus(ctx, operation, status);
+    }
+    defer zig_dom.zig_dom_free_string(out_ptr, out_len);
+
+    if (out_ptr == null or out_len == 0) {
+        return quickjs.Value.initStringLen(ctx, "");
+    }
+
+    const text = @as([*]const u8, @ptrCast(out_ptr))[0..out_len];
+    return quickjs.Value.initStringLen(ctx, text);
+}
+
+fn handleArrayToJs(ctx: *quickjs.Context, out_ptr: [*c]u64, out_len: usize) quickjs.Value {
+    const array = quickjs.Value.initArray(ctx);
+    if (array.isException()) {
+        return quickjs.Value.exception;
+    }
+
+    if (out_ptr == null or out_len == 0) {
+        return array;
+    }
+
+    const handles = @as([*]const u64, @ptrCast(out_ptr))[0..out_len];
+    for (handles, 0..) |handle, index| {
+        array.setPropertyUint32(ctx, @intCast(index), quickjs.Value.initInt64(@intCast(handle))) catch {
+            array.deinit(ctx);
+            return throwOperationMessage(ctx, "handleArrayToJs", "failed to set array element");
+        };
+    }
+
+    return array;
 }
 
 fn throwStatus(ctx: *quickjs.Context, operation: []const u8, status: u32) quickjs.Value {
