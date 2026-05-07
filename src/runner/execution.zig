@@ -346,7 +346,7 @@ const max_package_json_bytes = 512 * 1024;
 const TransformBatchEntry = struct {
     input_path: []const u8,
     loader: []const u8,
-    output_path: []const u8,
+    contents: ?[]u8 = null,
 };
 
 const CommonJsImport = struct {
@@ -414,7 +414,7 @@ const ModuleLoaderState = struct {
     io: std.Io,
     runtime: ?*Runtime,
     loaded_modules: std.StringHashMap(*ModuleDef),
-    transformed_outputs: std.StringHashMap([]u8),
+    transformed_sources: std.StringHashMap([]u8),
     pending_onload_transforms: std.ArrayList(TransformBatchEntry),
     mock_module_sources: std.StringHashMap([]u8),
     path_alias_root: ?[]u8,
@@ -426,7 +426,7 @@ const ModuleLoaderState = struct {
             .io = io,
             .runtime = null,
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
-            .transformed_outputs = std.StringHashMap([]u8).init(allocator),
+            .transformed_sources = std.StringHashMap([]u8).init(allocator),
             .pending_onload_transforms = .empty,
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
             .path_alias_root = null,
@@ -437,12 +437,12 @@ const ModuleLoaderState = struct {
     fn deinit(self: *ModuleLoaderState) void {
         self.clearPathAliases();
 
-        var output_iterator = self.transformed_outputs.iterator();
+        var output_iterator = self.transformed_sources.iterator();
         while (output_iterator.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
             self.allocator.free(entry.value_ptr.*);
         }
-        self.transformed_outputs.deinit();
+        self.transformed_sources.deinit();
 
         self.clearPendingOnLoadTransforms();
         self.pending_onload_transforms.deinit(self.allocator);
@@ -518,35 +518,17 @@ const ModuleLoaderState = struct {
         defer pending.deinit(self.allocator);
 
         for (module_paths) |module_id| {
+            if (self.transformed_sources.contains(module_id)) {
+                continue;
+            }
+            if (include_pending_onload and self.hasPendingOnLoadTransform(module_id)) {
+                continue;
+            }
             const loader = transform.loaderForPath(module_id) orelse return error.TransformCommandFailed;
-            const output_path = try transform.buildModuleOutputPath(self.allocator, self.io, module_id);
-            errdefer self.allocator.free(output_path);
-
-            const output_path_for_map = try self.allocator.dupe(u8, output_path);
-            errdefer self.allocator.free(output_path_for_map);
-
-            const key = try self.allocator.dupe(u8, module_id);
-            errdefer self.allocator.free(key);
-
-            if (try self.transformed_outputs.fetchPut(key, output_path_for_map)) |previous| {
-                self.allocator.free(key);
-                self.allocator.free(previous.value);
-            }
-
-            const stat = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
-                error.FileNotFound => null,
-                else => return err,
-            };
-
-            if (stat == null or stat.?.kind != .file) {
-                try pending.append(self.allocator, .{
-                    .input_path = module_id,
-                    .loader = loader,
-                    .output_path = output_path,
-                });
-            } else {
-                self.allocator.free(output_path);
-            }
+            try pending.append(self.allocator, .{
+                .input_path = module_id,
+                .loader = loader,
+            });
         }
 
         if (include_pending_onload) {
@@ -558,12 +540,10 @@ const ModuleLoaderState = struct {
 
         defer {
             for (pending.items) |entry| {
-                if (std.mem.startsWith(u8, entry.input_path, ".zig-dom-cache/transformed/onload/")) {
+                if (entry.contents != null) {
                     self.allocator.free(entry.input_path);
                     self.allocator.free(entry.loader);
-                    self.allocator.free(entry.output_path);
-                } else if (std.mem.startsWith(u8, entry.output_path, "./.zig-dom-cache/transformed/modules/")) {
-                    self.allocator.free(entry.output_path);
+                    self.allocator.free(entry.contents.?);
                 }
             }
         }
@@ -818,15 +798,19 @@ const ModuleLoaderState = struct {
             return try source.toOwnedSlice(self.allocator);
         }
 
-        const output_path = self.transformed_outputs.get(module_id) orelse return error.ModuleNotPrepared;
-        const transformed = try std.Io.Dir.cwd().readFileAlloc(
-            self.io,
-            output_path,
-            self.allocator,
-            .limited(max_module_source_bytes),
-        );
+        if (self.transformed_sources.get(module_id)) |transformed| {
+            return self.allocator.dupe(u8, transformed);
+        }
 
-        return transformed;
+        if (std.c.getenv("ZIG_DOM_TRANSFORM_DEBUG") != null) {
+            std.debug.print("[zig-dom transform] {s} {s}\n", .{ default_loader, module_id });
+        }
+        const transformed = try yuku_transform.transformFile(self.allocator, self.io, module_id, default_loader);
+        errdefer self.allocator.free(transformed);
+        const key = try self.allocator.dupe(u8, module_id);
+        errdefer self.allocator.free(key);
+        try self.transformed_sources.put(key, transformed);
+        return self.allocator.dupe(u8, transformed);
     }
 
     fn loadCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
@@ -1229,61 +1213,8 @@ const ModuleLoaderState = struct {
             ".jsx"
         else
             return error.UnsupportedTransformLoader;
-
-        var hasher = std.hash.Wyhash.init(0);
-        hasher.update(module_id);
-        hasher.update(loader);
-        hasher.update(contents);
-        const digest = hasher.final();
-
-        const input_path = try std.fmt.allocPrint(
-            self.allocator,
-            ".zig-dom-cache/transformed/onload/{x}-input{s}",
-            .{ digest, extension },
-        );
-        defer self.allocator.free(input_path);
-
-        const output_path = try std.fmt.allocPrint(
-            self.allocator,
-            ".zig-dom-cache/transformed/onload/{x}-output.js",
-            .{digest},
-        );
-        defer self.allocator.free(output_path);
-
-        const cached_output = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
-            error.FileNotFound => null,
-            else => return err,
-        };
-        if (cached_output != null and cached_output.?.kind == .file) {
-            return std.Io.Dir.cwd().readFileAlloc(
-                self.io,
-                output_path,
-                self.allocator,
-                .limited(max_module_source_bytes),
-            );
-        }
-
-        {
-            var atomic_input = try std.Io.Dir.cwd().createFileAtomic(self.io, input_path, .{
-                .make_path = true,
-                .replace = true,
-            });
-            defer atomic_input.deinit(self.io);
-            try atomic_input.file.writeStreamingAll(self.io, contents);
-            try atomic_input.replace(self.io);
-        }
-
-        const exit_code = try self.runSingleTransform(input_path, loader, output_path);
-        if (exit_code != 0) {
-            return error.TransformCommandFailed;
-        }
-
-        return std.Io.Dir.cwd().readFileAlloc(
-            self.io,
-            output_path,
-            self.allocator,
-            .limited(max_module_source_bytes),
-        );
+        _ = extension;
+        return yuku_transform.transformSource(self.allocator, module_id, contents, loader);
     }
 
     fn queueOnLoadTransform(
@@ -1292,56 +1223,31 @@ const ModuleLoaderState = struct {
         loader: []const u8,
         contents: []const u8,
     ) !void {
-        const extension = onLoadTransformExtension(loader) orelse return error.UnsupportedTransformLoader;
-
-        var hasher = std.hash.Wyhash.init(0);
-        hasher.update(module_id);
-        hasher.update(loader);
-        hasher.update(contents);
-        const digest = hasher.final();
-
-        const input_path = try std.fmt.allocPrint(
-            self.allocator,
-            ".zig-dom-cache/transformed/onload/{x}-input{s}",
-            .{ digest, extension },
-        );
-        errdefer self.allocator.free(input_path);
-
-        const output_path = try std.fmt.allocPrint(
-            self.allocator,
-            ".zig-dom-cache/transformed/onload/{x}-output.js",
-            .{digest},
-        );
-        errdefer self.allocator.free(output_path);
-
-        const cached_output = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
-            error.FileNotFound => null,
-            else => return err,
-        };
-        if (cached_output != null and cached_output.?.kind == .file) {
-            self.allocator.free(input_path);
-            self.allocator.free(output_path);
+        _ = onLoadTransformExtension(loader) orelse return error.UnsupportedTransformLoader;
+        if (self.transformed_sources.contains(module_id) or self.hasPendingOnLoadTransform(module_id)) {
             return;
         }
 
-        {
-            var atomic_input = try std.Io.Dir.cwd().createFileAtomic(self.io, input_path, .{
-                .make_path = true,
-                .replace = true,
-            });
-            defer atomic_input.deinit(self.io);
-            try atomic_input.file.writeStreamingAll(self.io, contents);
-            try atomic_input.replace(self.io);
-        }
+        const input_path = try self.allocator.dupe(u8, module_id);
+        errdefer self.allocator.free(input_path);
 
         const loader_owned = try self.allocator.dupe(u8, loader);
         errdefer self.allocator.free(loader_owned);
+        const contents_owned = try self.allocator.dupe(u8, contents);
+        errdefer self.allocator.free(contents_owned);
 
         try self.pending_onload_transforms.append(self.allocator, .{
             .input_path = input_path,
             .loader = loader_owned,
-            .output_path = output_path,
+            .contents = contents_owned,
         });
+    }
+
+    fn hasPendingOnLoadTransform(self: *ModuleLoaderState, module_id: []const u8) bool {
+        for (self.pending_onload_transforms.items) |entry| {
+            if (std.mem.eql(u8, entry.input_path, module_id)) return true;
+        }
+        return false;
     }
 
     fn preparePendingOnLoadTransforms(self: *ModuleLoaderState) !void {
@@ -1361,31 +1267,37 @@ const ModuleLoaderState = struct {
         for (self.pending_onload_transforms.items) |entry| {
             self.allocator.free(entry.input_path);
             self.allocator.free(entry.loader);
-            self.allocator.free(entry.output_path);
+            if (entry.contents) |contents| self.allocator.free(contents);
         }
         self.pending_onload_transforms.clearRetainingCapacity();
-    }
-
-    fn runSingleTransform(self: *ModuleLoaderState, input_path: []const u8, loader: []const u8, output_path: []const u8) !u8 {
-        const entry: TransformBatchEntry = .{
-            .input_path = input_path,
-            .loader = loader,
-            .output_path = output_path,
-        };
-        return self.runTransformBatch(&.{entry});
     }
 
     fn runTransformBatch(self: *ModuleLoaderState, entries: []const TransformBatchEntry) !u8 {
         const debug_transform = std.c.getenv("ZIG_DOM_TRANSFORM_DEBUG") != null;
         for (entries) |entry| {
             if (debug_transform) {
-                std.debug.print("[zig-dom transform] {s} {s} -> {s}\n", .{ entry.loader, entry.input_path, entry.output_path });
+                std.debug.print("[zig-dom transform] {s} {s}\n", .{ entry.loader, entry.input_path });
             }
-            yuku_transform.transformFile(self.allocator, self.io, .{
-                .input_path = entry.input_path,
-                .loader = entry.loader,
-                .output_path = entry.output_path,
-            }) catch return 1;
+            const transformed = if (entry.contents) |contents|
+                yuku_transform.transformSource(self.allocator, entry.input_path, contents, entry.loader) catch return 1
+            else
+                yuku_transform.transformFile(self.allocator, self.io, entry.input_path, entry.loader) catch return 1;
+            errdefer self.allocator.free(transformed);
+
+            const key = self.allocator.dupe(u8, entry.input_path) catch {
+                self.allocator.free(transformed);
+                return 1;
+            };
+            errdefer self.allocator.free(key);
+
+            if (self.transformed_sources.fetchPut(key, transformed) catch {
+                self.allocator.free(key);
+                self.allocator.free(transformed);
+                return 1;
+            }) |previous| {
+                self.allocator.free(key);
+                self.allocator.free(previous.value);
+            }
         }
 
         if (debug_transform) {
@@ -2806,12 +2718,6 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
     };
 
     for (setup_module_ids.items) |setup_module_id| {
-        module_loader_state.preloadEntryGraph(setup_module_id) catch |err| {
-            return collectionFailureFromError(allocator, path, "collection failed", err);
-        };
-    }
-
-    for (setup_module_ids.items) |setup_module_id| {
         const setup_source = module_loader_state.loadModuleSource(setup_module_id) catch |err| {
             return collectionFailureFromError(allocator, path, "collection failed", err);
         };
@@ -2837,10 +2743,6 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
     }
 
     module_loader_state.syncMockModulesFromRuntime(&vm) catch |err| {
-        return collectionFailureFromError(allocator, path, "collection failed", err);
-    };
-
-    module_loader_state.preloadEntryGraph(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
 

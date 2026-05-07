@@ -5,31 +5,16 @@ const Allocator = std.mem.Allocator;
 
 pub const Error = anyerror;
 
-pub const Entry = struct {
-    input_path: []const u8,
-    loader: []const u8,
-    output_path: []const u8,
-};
-
-pub fn transformFile(allocator: Allocator, io: std.Io, entry: Entry) Error!void {
+pub fn transformFile(allocator: Allocator, io: std.Io, input_path: []const u8, loader: []const u8) Error![]u8 {
     const source = try std.Io.Dir.cwd().readFileAlloc(
         io,
-        entry.input_path,
+        input_path,
         allocator,
         .limited(64 * 1024 * 1024),
     );
     defer allocator.free(source);
 
-    const transformed = try transformSource(allocator, entry.input_path, source, entry.loader);
-    defer allocator.free(transformed);
-
-    var atomic_output = try std.Io.Dir.cwd().createFileAtomic(io, entry.output_path, .{
-        .make_path = true,
-        .replace = true,
-    });
-    defer atomic_output.deinit(io);
-    try atomic_output.file.writeStreamingAll(io, transformed);
-    try atomic_output.replace(io);
+    return transformSource(allocator, input_path, source, loader);
 }
 
 pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u8, loader: []const u8) Error![]u8 {

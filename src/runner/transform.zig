@@ -199,11 +199,16 @@ fn transformOptionsSignature(loader: []const u8) []const u8 {
 
 fn runNativeTransforms(allocator: Allocator, io: std.Io, entries: []const TransformEntry) !u8 {
     for (entries) |entry| {
-        try yuku_transform.transformFile(allocator, io, .{
-            .input_path = entry.input_path,
-            .loader = entry.loader,
-            .output_path = entry.output_path,
+        const transformed = try yuku_transform.transformFile(allocator, io, entry.input_path, entry.loader);
+        defer allocator.free(transformed);
+
+        var atomic_output = try std.Io.Dir.cwd().createFileAtomic(io, entry.output_path, .{
+            .make_path = true,
+            .replace = true,
         });
+        defer atomic_output.deinit(io);
+        try atomic_output.file.writeStreamingAll(io, transformed);
+        try atomic_output.replace(io);
     }
 
     return 0;
