@@ -210,6 +210,7 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
         proto.setPrototype(ctx, html_proto) catch return error.PropertyAccessFailed;
         proto.deinit(ctx);
     }
+    try installFormElementPrototypeAccessors(ctx, global);
 
     const character_data_proto = try installConstructor(ctx, global, "CharacterData", jsIllegalConstructor);
     character_data_proto.setPrototype(ctx, node_proto) catch return error.PropertyAccessFailed;
@@ -307,6 +308,22 @@ fn setNodeConstants(ctx: *quickjs.Context, global: quickjs.Value) DomClassesErro
     }
 }
 
+fn installFormElementPrototypeAccessors(ctx: *quickjs.Context, global: quickjs.Value) DomClassesError!void {
+    for ([_][*:0]const u8{ "HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement" }) |name| {
+        const ctor = global.getPropertyStr(ctx, name);
+        defer ctor.deinit(ctx);
+        if (ctor.isException() or !ctor.isObject()) continue;
+        const proto = ctor.getPropertyStr(ctx, "prototype");
+        defer proto.deinit(ctx);
+        if (proto.isException() or !proto.isObject()) continue;
+        try installAccessor(ctx, proto, "value", jsElementValueGet, jsElementValueSet);
+        try installAccessor(ctx, proto, "checked", jsElementCheckedGet, jsElementCheckedSet);
+        try installAccessor(ctx, proto, "disabled", jsElementDisabledGet, jsElementDisabledSet);
+        try installAccessor(ctx, proto, "name", jsElementNameGet, jsElementNameSet);
+        try installAccessor(ctx, proto, "type", jsElementTypeGet, jsElementTypeSet);
+    }
+}
+
 fn installElementSlice(ctx: *quickjs.Context, global: quickjs.Value) DomClassesError!void {
     const element_ctor = global.getPropertyStr(ctx, "Element");
     defer element_ctor.deinit(ctx);
@@ -347,6 +364,9 @@ fn installElementSlice(ctx: *quickjs.Context, global: quickjs.Value) DomClassesE
     try installMethod(ctx, element_proto, "insertAdjacentHTML", jsElementInsertAdjacentHTML, 2);
     try installMethod(ctx, element_proto, "getBoundingClientRect", jsElementGetBoundingClientRect, 0);
     try installMethod(ctx, element_proto, "getClientRects", jsElementGetClientRects, 0);
+    try installMethod(ctx, element_proto, "focus", jsElementFocus, 0);
+    try installMethod(ctx, element_proto, "blur", jsElementBlur, 0);
+    try installMethod(ctx, element_proto, "select", jsElementSelect, 0);
     try installAccessor(ctx, element_proto, "value", jsElementValueGet, jsElementValueSet);
     try installAccessor(ctx, element_proto, "checked", jsElementCheckedGet, jsElementCheckedSet);
     try installAccessor(ctx, element_proto, "disabled", jsElementDisabledGet, jsElementDisabledSet);
@@ -1722,6 +1742,10 @@ fn isKnownFastSelector(selector: []const u8) bool {
         std.mem.eql(u8, selector, "h4") or
         std.mem.eql(u8, selector, "h5") or
         std.mem.eql(u8, selector, "h6") or
+        std.mem.eql(u8, selector, "input") or
+        std.mem.eql(u8, selector, "input:not([type])") or
+        std.mem.eql(u8, selector, "input[type=\"text\"]") or
+        std.mem.eql(u8, selector, "input[type=\"search\"]") or
         std.mem.eql(u8, selector, "img") or
         std.mem.eql(u8, selector, "a") or
         std.mem.eql(u8, selector, "area") or
@@ -1746,9 +1770,23 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
         std.mem.eql(u8, selector, "h4") or
         std.mem.eql(u8, selector, "h5") or
         std.mem.eql(u8, selector, "h6") or
+        std.mem.eql(u8, selector, "input") or
         std.mem.eql(u8, selector, "img"))
     {
         return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], selector);
+    }
+    if (std.mem.eql(u8, selector, "input:not([type])")) {
+        if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
+        const value = elementAttributeString(ctx, element, "type");
+        if (value) |owned| ctx.freeCString(owned.ptr);
+        return value == null;
+    }
+    if (std.mem.eql(u8, selector, "input[type=\"text\"]") or std.mem.eql(u8, selector, "input[type=\"search\"]")) {
+        if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
+        const value = elementAttributeString(ctx, element, "type") orelse return false;
+        defer ctx.freeCString(value.ptr);
+        const expected = if (std.mem.eql(u8, selector, "input[type=\"text\"]")) "text" else "search";
+        return std.ascii.eqlIgnoreCase(value.ptr[0..value.len], expected);
     }
     if (std.mem.eql(u8, selector, "a")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "a");
     if (std.mem.eql(u8, selector, "area")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "area");
@@ -1884,6 +1922,45 @@ fn jsElementInsertAdjacentHTML(ctx_opt: ?*quickjs.Context, this_value: quickjs.V
         defer insert_result.deinit(ctx);
         return quickjs.Value.undefined;
     }
+    return quickjs.Value.undefined;
+}
+
+fn jsElementFocus(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const document = jsNodeOwnerDocumentGet(ctx, this_value);
+    defer document.deinit(ctx);
+    if (!document.isException() and document.isObject()) {
+        document.setPropertyStr(ctx, "activeElement", this_value.dup(ctx)) catch return quickjs.Value.exception;
+    }
+    return quickjs.Value.undefined;
+}
+
+fn jsElementBlur(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const document = jsNodeOwnerDocumentGet(ctx, this_value);
+    defer document.deinit(ctx);
+    if (!document.isException() and document.isObject()) {
+        const body = jsDocumentBodyGet(ctx, document);
+        defer body.deinit(ctx);
+        if (!body.isException() and body.isObject()) {
+            document.setPropertyStr(ctx, "activeElement", body.dup(ctx)) catch return quickjs.Value.exception;
+        }
+    }
+    return quickjs.Value.undefined;
+}
+
+fn jsElementSelect(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const value = jsElementValueGet(ctx, this_value);
+    defer value.deinit(ctx);
+    const text = value.toCStringLen(ctx) orelse {
+        this_value.setPropertyStr(ctx, "selectionStart", quickjs.Value.initInt32(0)) catch return quickjs.Value.exception;
+        this_value.setPropertyStr(ctx, "selectionEnd", quickjs.Value.initInt32(0)) catch return quickjs.Value.exception;
+        return quickjs.Value.undefined;
+    };
+    defer ctx.freeCString(text.ptr);
+    this_value.setPropertyStr(ctx, "selectionStart", quickjs.Value.initInt32(0)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "selectionEnd", quickjs.Value.initInt32(@intCast(text.len))) catch return quickjs.Value.exception;
     return quickjs.Value.undefined;
 }
 

@@ -592,10 +592,23 @@ pub const HostRunner = struct {
     }
 
     fn formatErrorValue(self: *HostRunner, value: quickjs.Value) ![]u8 {
+        const message = value.getPropertyStr(self.ctx, "message");
+        defer message.deinit(self.ctx);
         const stack = value.getPropertyStr(self.ctx, "stack");
         defer stack.deinit(self.ctx);
         if (!stack.isException() and !stack.isUndefined() and !stack.isNull()) {
-            return self.valueToOwnedString(stack);
+            const stack_text = try self.valueToOwnedString(stack);
+            errdefer self.allocator.free(stack_text);
+            if (!message.isException() and !message.isUndefined() and !message.isNull()) {
+                const message_text = try self.valueToOwnedString(message);
+                defer self.allocator.free(message_text);
+                if (message_text.len > 0 and std.mem.indexOf(u8, stack_text, message_text) == null) {
+                    const combined = try std.fmt.allocPrint(self.allocator, "{s}\n{s}", .{ message_text, stack_text });
+                    self.allocator.free(stack_text);
+                    return combined;
+                }
+            }
+            return stack_text;
         }
         return self.valueToOwnedString(value);
     }

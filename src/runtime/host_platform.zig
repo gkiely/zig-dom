@@ -19,7 +19,10 @@ pub fn install(ctx: *quickjs.Context) PlatformError!void {
     try installMatchMedia(ctx, global);
     try installKeyboardEvent(ctx, global);
     try installUrl(ctx, global);
+    try installFetchApi(ctx, global);
+    try installImage(ctx, global);
     try installIntl(ctx, global);
+    try installDateLocale(ctx, global);
     try installDomParser(ctx, global);
     try installImportMetaRequire(ctx, global);
     try installStorage(ctx, global);
@@ -39,6 +42,12 @@ pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
     try linkWindowProperty(ctx, global, window, "KeyboardEvent");
     try linkWindowProperty(ctx, global, window, "URL");
     try linkWindowProperty(ctx, global, window, "URLSearchParams");
+    try linkWindowProperty(ctx, global, window, "Headers");
+    try linkWindowProperty(ctx, global, window, "Request");
+    try linkWindowProperty(ctx, global, window, "Response");
+    try linkWindowProperty(ctx, global, window, "Blob");
+    try linkWindowProperty(ctx, global, window, "fetch");
+    try linkWindowProperty(ctx, global, window, "Image");
     try linkWindowProperty(ctx, global, window, "Intl");
     try linkWindowProperty(ctx, global, window, "DOMParser");
     try linkWindowProperty(ctx, global, window, "localStorage");
@@ -213,6 +222,43 @@ fn installUrl(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
     global.setPropertyStr(ctx, "URL", ctor) catch return error.JSError;
 }
 
+fn installFetchApi(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
+    if (isMissing(ctx, global, "Headers")) {
+        const ctor = quickjs.Value.initCFunction2(ctx, jsHeadersCtor, "Headers", 1, .constructor_or_func, 0);
+        if (ctor.isException()) return error.JSError;
+        global.setPropertyStr(ctx, "Headers", ctor) catch return error.JSError;
+    }
+    if (isMissing(ctx, global, "Request")) {
+        const ctor = quickjs.Value.initCFunction2(ctx, jsRequestCtor, "Request", 1, .constructor_or_func, 0);
+        if (ctor.isException()) return error.JSError;
+        global.setPropertyStr(ctx, "Request", ctor) catch return error.JSError;
+    }
+    if (isMissing(ctx, global, "Response")) {
+        const ctor = quickjs.Value.initCFunction2(ctx, jsResponseCtor, "Response", 2, .constructor_or_func, 0);
+        if (ctor.isException()) return error.JSError;
+        global.setPropertyStr(ctx, "Response", ctor) catch return error.JSError;
+    }
+    if (isMissing(ctx, global, "Blob")) {
+        const ctor = quickjs.Value.initCFunction2(ctx, jsBlobCtor, "Blob", 1, .constructor_or_func, 0);
+        if (ctor.isException()) return error.JSError;
+        global.setPropertyStr(ctx, "Blob", ctor) catch return error.JSError;
+    }
+    try setFunctionIfMissing(ctx, global, "fetch", jsFetch, 1);
+}
+
+fn installImage(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
+    if (!isMissing(ctx, global, "Image")) return;
+    const ctor = quickjs.Value.initCFunction2(ctx, jsImageCtor, "Image", 0, .constructor_or_func, 0);
+    if (ctor.isException()) return error.JSError;
+    global.setPropertyStr(ctx, "Image", ctor) catch return error.JSError;
+}
+
+fn isMissing(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]const u8) bool {
+    const current = object.getPropertyStr(ctx, name);
+    defer current.deinit(ctx);
+    return current.isUndefined() or current.isNull();
+}
+
 fn installIntl(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
     var intl = global.getPropertyStr(ctx, "Intl");
     defer intl.deinit(ctx);
@@ -230,6 +276,18 @@ fn installIntl(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void 
     const ctor = quickjs.Value.initCFunction2(ctx, jsCollatorCtor, "Collator", 0, .constructor_or_func, 0);
     if (ctor.isException()) return error.JSError;
     intl.setPropertyStr(ctx, "Collator", ctor) catch return error.JSError;
+}
+
+fn installDateLocale(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
+    const date_ctor = global.getPropertyStr(ctx, "Date");
+    defer date_ctor.deinit(ctx);
+    if (date_ctor.isException() or date_ctor.isUndefined() or date_ctor.isNull() or !date_ctor.isObject()) return;
+
+    const proto = date_ctor.getPropertyStr(ctx, "prototype");
+    defer proto.deinit(ctx);
+    if (proto.isException() or proto.isUndefined() or proto.isNull() or !proto.isObject()) return;
+
+    try setFunction(ctx, proto, "toLocaleDateString", jsDateToLocaleDateString, 2);
 }
 
 fn installDomParser(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -356,6 +414,8 @@ fn jsUrlSearchParamsCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value
 
 fn initUrlSearchParamsObject(ctx: *quickjs.Context, obj: quickjs.Value, raw: []const u8) PlatformError!void {
     obj.setPropertyStr(ctx, "__zigRawSearch", quickjs.Value.initStringLen(ctx, if (std.mem.startsWith(u8, raw, "?")) raw[1..] else raw)) catch return error.JSError;
+    setFunction(ctx, obj, "append", jsUrlSearchParamsAppend, 2) catch return error.JSError;
+    setFunction(ctx, obj, "set", jsUrlSearchParamsAppend, 2) catch return error.JSError;
     setFunction(ctx, obj, "get", jsUrlSearchParamsGet, 1) catch return error.JSError;
     setFunction(ctx, obj, "delete", jsUrlSearchParamsDelete, 1) catch return error.JSError;
     setFunction(ctx, obj, "toString", jsUrlSearchParamsToString, 0) catch return error.JSError;
@@ -380,6 +440,33 @@ fn jsUrlSearchParamsGet(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value,
         }
     }
     return quickjs.Value.null;
+}
+
+fn jsUrlSearchParamsAppend(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const key = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (key) |text| ctx.freeCString(text.ptr);
+    const value = if (args.len > 1) quickjs.Value.fromCVal(args[1]).toCStringLen(ctx) else null;
+    defer if (value) |text| ctx.freeCString(text.ptr);
+    if (key == null) return quickjs.Value.undefined;
+    const raw_value = this_value.getPropertyStr(ctx, "__zigRawSearch");
+    defer raw_value.deinit(ctx);
+    const raw = raw_value.toCStringLen(ctx);
+    defer if (raw) |text| ctx.freeCString(text.ptr);
+    const prefix = if (raw) |text| if (text.len > 0) "&" else "" else "";
+    var buffer: [1024]u8 = undefined;
+    const next = std.fmt.bufPrint(
+        &buffer,
+        "{s}{s}{s}={s}",
+        .{
+            if (raw) |text| text.ptr[0..text.len] else "",
+            prefix,
+            key.?.ptr[0..key.?.len],
+            if (value) |text| text.ptr[0..text.len] else "",
+        },
+    ) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "__zigRawSearch", quickjs.Value.initStringLen(ctx, next)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
 }
 
 fn jsUrlSearchParamsDelete(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
@@ -438,6 +525,241 @@ fn jsUrlToString(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []c
     const href = this_value.getPropertyStr(ctx, "href");
     if (href.isException()) return quickjs.Value.initStringLen(ctx, "");
     return href;
+}
+
+fn jsHeadersCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    if (obj.isException()) return quickjs.Value.exception;
+    const store = quickjs.Value.initObject(ctx);
+    if (store.isException()) return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "__zigHeaders", store) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "get", jsHeadersGet, 1) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "set", jsHeadersSet, 2) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "has", jsHeadersHas, 1) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "append", jsHeadersSet, 2) catch return quickjs.Value.exception;
+    if (args.len > 0) {
+        const init = quickjs.Value.fromCVal(args[0]);
+        if (init.isObject()) copyHeaderObject(ctx, obj, init) catch return quickjs.Value.exception;
+    }
+    return obj;
+}
+
+fn copyHeaderObject(ctx: *quickjs.Context, headers: quickjs.Value, init: quickjs.Value) PlatformError!void {
+    const keys_fn = getObjectKeys(ctx) catch return error.JSError;
+    defer keys_fn.deinit(ctx);
+    var call_args = [_]quickjs.Value{init.dup(ctx)};
+    defer call_args[0].deinit(ctx);
+    const keys = keys_fn.call(ctx, quickjs.Value.undefined, &call_args);
+    defer keys.deinit(ctx);
+    if (keys.isException()) return error.JSError;
+    const length_value = keys.getPropertyStr(ctx, "length");
+    defer length_value.deinit(ctx);
+    const length = length_value.toInt32(ctx) catch 0;
+    var index: i32 = 0;
+    while (index < length) : (index += 1) {
+        const key_value = keys.getPropertyUint32(ctx, @intCast(index));
+        defer key_value.deinit(ctx);
+        if (key_value.isException()) return error.JSError;
+        const key_text = key_value.toCStringLen(ctx) orelse return error.JSError;
+        defer ctx.freeCString(key_text.ptr);
+        const value = init.getPropertyStr(ctx, key_text.ptr);
+        defer value.deinit(ctx);
+        if (value.isException() or value.isUndefined() or value.isNull()) continue;
+        var method_args = [_]quickjs.Value{ key_value.dup(ctx), value.dup(ctx) };
+        defer method_args[0].deinit(ctx);
+        defer method_args[1].deinit(ctx);
+        const ignored = jsHeadersSet(ctx, headers, @ptrCast(&method_args));
+        defer ignored.deinit(ctx);
+        if (ignored.isException()) return error.JSError;
+    }
+}
+
+fn getObjectKeys(ctx: *quickjs.Context) PlatformError!quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const object = global.getPropertyStr(ctx, "Object");
+    defer object.deinit(ctx);
+    if (object.isException()) return error.JSError;
+    const keys = object.getPropertyStr(ctx, "keys");
+    if (!keys.isFunction(ctx)) {
+        keys.deinit(ctx);
+        return error.JSError;
+    }
+    return keys;
+}
+
+fn jsHeadersGet(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const name = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (name) |text| ctx.freeCString(text.ptr);
+    const store = this_value.getPropertyStr(ctx, "__zigHeaders");
+    defer store.deinit(ctx);
+    if (store.isException() or store.isUndefined()) return quickjs.Value.null;
+    if (name) |text| {
+        const key = lowerHeaderName(text.ptr[0..text.len]);
+        defer std.heap.c_allocator.free(key);
+        const value = store.getPropertyStr(ctx, key.ptr);
+        if (value.isException() or value.isUndefined()) {
+            value.deinit(ctx);
+            return quickjs.Value.null;
+        }
+        return value;
+    }
+    return quickjs.Value.null;
+}
+
+fn jsHeadersSet(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const name = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (name) |text| ctx.freeCString(text.ptr);
+    const value = if (args.len > 1) quickjs.Value.fromCVal(args[1]).toCStringLen(ctx) else null;
+    defer if (value) |text| ctx.freeCString(text.ptr);
+    const store = this_value.getPropertyStr(ctx, "__zigHeaders");
+    defer store.deinit(ctx);
+    if (store.isException() or store.isUndefined()) return quickjs.Value.exception;
+    if (name) |text| {
+        const key = lowerHeaderName(text.ptr[0..text.len]);
+        defer std.heap.c_allocator.free(key);
+        store.setPropertyStr(ctx, key.ptr, quickjs.Value.initStringLen(ctx, if (value) |v| v.ptr[0..v.len] else "")) catch return quickjs.Value.exception;
+    }
+    return quickjs.Value.undefined;
+}
+
+fn jsHeadersHas(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const value = jsHeadersGet(ctx, this_value, args);
+    defer value.deinit(ctx);
+    return quickjs.Value.initBool(!value.isNull() and !value.isUndefined());
+}
+
+fn lowerHeaderName(input: []const u8) [:0]u8 {
+    const buffer = std.heap.c_allocator.allocSentinel(u8, input.len, 0) catch unreachable;
+    for (input, 0..) |ch, index| buffer[index] = std.ascii.toLower(ch);
+    return buffer;
+}
+
+fn jsRequestCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    if (obj.isException()) return quickjs.Value.exception;
+    const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (input) |text| ctx.freeCString(text.ptr);
+    const url = if (input) |text| text.ptr[0..text.len] else "";
+    obj.setPropertyStr(ctx, "url", quickjs.Value.initStringLen(ctx, url)) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "method", quickjs.Value.initStringLen(ctx, "GET")) catch return quickjs.Value.exception;
+    return obj;
+}
+
+fn jsResponseCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    if (obj.isException()) return quickjs.Value.exception;
+    const body = if (args.len > 0 and !quickjs.Value.fromCVal(args[0]).isUndefined() and !quickjs.Value.fromCVal(args[0]).isNull())
+        quickjs.Value.fromCVal(args[0]).toCStringLen(ctx)
+    else
+        null;
+    defer if (body) |text| ctx.freeCString(text.ptr);
+    const init = if (args.len > 1) quickjs.Value.fromCVal(args[1]) else quickjs.Value.undefined;
+    var status: i32 = 200;
+    if (init.isObject()) {
+        const status_value = init.getPropertyStr(ctx, "status");
+        defer status_value.deinit(ctx);
+        if (!status_value.isException() and !status_value.isUndefined()) status = status_value.toInt32(ctx) catch 200;
+    }
+    obj.setPropertyStr(ctx, "__zigBody", quickjs.Value.initStringLen(ctx, if (body) |text| text.ptr[0..text.len] else "")) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "status", quickjs.Value.initInt32(status)) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "ok", quickjs.Value.initBool(status >= 200 and status < 300)) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "statusText", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    const headers = jsHeadersCtor(ctx, quickjs.Value.undefined, &.{});
+    if (headers.isException()) return headers;
+    obj.setPropertyStr(ctx, "headers", headers) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "text", jsBodyText, 0) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "json", jsBodyJson, 0) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "blob", jsBodyBlob, 0) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "arrayBuffer", jsBodyArrayBuffer, 0) catch return quickjs.Value.exception;
+    return obj;
+}
+
+fn jsBlobCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    if (obj.isException()) return quickjs.Value.exception;
+    const body = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (body) |text| ctx.freeCString(text.ptr);
+    const text = if (body) |value| value.ptr[0..value.len] else "";
+    obj.setPropertyStr(ctx, "__zigBody", quickjs.Value.initStringLen(ctx, text)) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "size", quickjs.Value.initInt32(@intCast(text.len))) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "type", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "text", jsBodyText, 0) catch return quickjs.Value.exception;
+    return obj;
+}
+
+fn jsBodyText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const body = this_value.getPropertyStr(ctx, "__zigBody");
+    if (body.isException()) return quickjs.Value.initStringLen(ctx, "");
+    return body;
+}
+
+fn jsBodyJson(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const body = this_value.getPropertyStr(ctx, "__zigBody");
+    defer body.deinit(ctx);
+    if (body.isException() or body.isUndefined()) return quickjs.Value.null;
+    const json = body.toCStringLen(ctx) orelse return quickjs.Value.null;
+    defer ctx.freeCString(json.ptr);
+    if (json.len == 0) return quickjs.Value.null;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const json_obj = global.getPropertyStr(ctx, "JSON");
+    defer json_obj.deinit(ctx);
+    const parse = json_obj.getPropertyStr(ctx, "parse");
+    defer parse.deinit(ctx);
+    var call_args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, json.ptr[0..json.len])};
+    defer call_args[0].deinit(ctx);
+    return parse.call(ctx, json_obj, &call_args);
+}
+
+fn jsBodyBlob(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const body = this_value.getPropertyStr(ctx, "__zigBody");
+    defer body.deinit(ctx);
+    var args = [_]quickjs.Value{body.dup(ctx)};
+    defer args[0].deinit(ctx);
+    return jsBlobCtor(ctx, quickjs.Value.undefined, @ptrCast(&args));
+}
+
+fn jsBodyArrayBuffer(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    return quickjs.Value.undefined;
+}
+
+fn jsFetch(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    return ctx.throwInternalError("fetch is not implemented in this runner; mock global.fetch in setup");
+}
+
+fn jsImageCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (!document.isException() and document.isObject()) {
+        const create = document.getPropertyStr(ctx, "createElement");
+        defer create.deinit(ctx);
+        if (create.isFunction(ctx)) {
+            var call_args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, "img")};
+            defer call_args[0].deinit(ctx);
+            const image = create.call(ctx, document, &call_args);
+            if (!image.isException()) return image;
+            image.deinit(ctx);
+        }
+    }
+    const obj = if (this_value.isUndefined() or this_value.isNull()) quickjs.Value.initObject(ctx) else this_value.dup(ctx);
+    if (obj.isException()) return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "complete", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
+    return obj;
 }
 
 fn jsCollatorCtor(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
@@ -703,6 +1025,50 @@ fn jsReturnThis(_: ?*quickjs.Context, this_value: quickjs.Value, _: []const quic
 
 fn jsReturnZero(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     return quickjs.Value.initInt32(0);
+}
+
+fn jsDateToLocaleDateString(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const year = callDateInt(ctx, this_value, "getUTCFullYear") orelse return quickjs.Value.initStringLen(ctx, "Invalid Date");
+    const month = callDateInt(ctx, this_value, "getUTCMonth") orelse return quickjs.Value.initStringLen(ctx, "Invalid Date");
+    const day = callDateInt(ctx, this_value, "getUTCDate") orelse return quickjs.Value.initStringLen(ctx, "Invalid Date");
+
+    const use_short_month = dateLocaleOptionEquals(ctx, args, "month", "short");
+    const use_numeric_year = dateLocaleOptionEquals(ctx, args, "year", "numeric");
+    const use_numeric_day = dateLocaleOptionEquals(ctx, args, "day", "numeric");
+
+    const allocator = std.heap.c_allocator;
+    const text = if (use_short_month and use_numeric_year and use_numeric_day)
+        std.fmt.allocPrint(allocator, "{s} {d}, {d}", .{ short_months[@intCast(@max(0, @min(month, 11)))], day, year }) catch return quickjs.Value.exception
+    else
+        std.fmt.allocPrint(allocator, "{d}/{d}/{d}", .{ month + 1, day, year }) catch return quickjs.Value.exception;
+    defer allocator.free(text);
+
+    return quickjs.Value.initStringLen(ctx, text);
+}
+
+const short_months = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+fn callDateInt(ctx: *quickjs.Context, date: quickjs.Value, comptime method_name: [:0]const u8) ?i32 {
+    const method = date.getPropertyStr(ctx, method_name);
+    defer method.deinit(ctx);
+    if (method.isException() or !method.isFunction(ctx)) return null;
+    const result = method.call(ctx, date, &.{});
+    defer result.deinit(ctx);
+    if (result.isException()) return null;
+    return result.toInt32(ctx) catch null;
+}
+
+fn dateLocaleOptionEquals(ctx: *quickjs.Context, args: []const quickjs.c.JSValue, comptime name: [:0]const u8, expected: []const u8) bool {
+    if (args.len < 2) return false;
+    const options = quickjs.Value.fromCVal(args[1]);
+    if (options.isException() or options.isUndefined() or options.isNull() or !options.isObject()) return false;
+    const value = options.getPropertyStr(ctx, name);
+    defer value.deinit(ctx);
+    if (value.isException() or value.isUndefined() or value.isNull()) return false;
+    const text = value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(text.ptr);
+    return std.mem.eql(u8, text.ptr[0..text.len], expected);
 }
 
 fn setString(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]const u8, value: []const u8) PlatformError!void {

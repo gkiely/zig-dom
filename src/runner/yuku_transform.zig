@@ -19,8 +19,10 @@ pub fn transformFile(allocator: Allocator, io: std.Io, input_path: []const u8, l
 
 pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u8, loader: []const u8) Error![]u8 {
     const lang = langForLoader(loader) orelse return error.UnsupportedTransformLoader;
+    const source_for_parse = try rewriteSimpleTopLevelDynamicImports(allocator, source);
+    defer allocator.free(source_for_parse);
 
-    var tree = parser.parse(allocator, source, .{
+    var tree = parser.parse(allocator, source_for_parse, .{
         .source_type = .module,
         .lang = lang,
     }) catch return error.TransformCommandFailed;
@@ -49,15 +51,18 @@ pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u
     const normalized_require = try replaceAll(allocator, normalized, "import.meta.require", "globalThis.__zigImportMetaRequire");
     defer allocator.free(normalized_require);
 
+    const normalized_using = try replaceAll(allocator, normalized_require, "using ", "const ");
+    defer allocator.free(normalized_using);
+
     if (jsx_runtime == .classic and
-        std.mem.indexOf(u8, normalized_require, "React.createElement") != null and
+        std.mem.indexOf(u8, normalized_using, "React.createElement") != null and
         !hasClassicReactImport(source))
     {
-        return std.mem.concat(allocator, u8, &.{ "import React from \"react\";\n", normalized_require });
+        return std.mem.concat(allocator, u8, &.{ "import React from \"react\";\n", normalized_using });
     }
 
     _ = path;
-    return allocator.dupe(u8, normalized_require);
+    return allocator.dupe(u8, normalized_using);
 }
 
 fn langForLoader(loader: []const u8) ?parser.ast.Lang {
@@ -71,6 +76,61 @@ fn langForLoader(loader: []const u8) ?parser.ast.Lang {
 fn hasClassicReactImport(source: []const u8) bool {
     return std.mem.indexOf(u8, source, "import React") != null or
         std.mem.indexOf(u8, source, "import * as React") != null;
+}
+
+fn rewriteSimpleTopLevelDynamicImports(allocator: Allocator, source: []const u8) ![]u8 {
+    if (std.mem.indexOf(u8, source, "await import(") == null) return allocator.dupe(u8, source);
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |line| {
+        if (try rewriteDynamicImportLine(allocator, &out, line)) {
+            try out.append(allocator, '\n');
+            continue;
+        }
+        try out.appendSlice(allocator, line);
+        try out.append(allocator, '\n');
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn rewriteDynamicImportLine(allocator: Allocator, out: *std.ArrayList(u8), line: []const u8) !bool {
+    const trimmed = std.mem.trim(u8, line, " \t\r");
+    if (trimmed.len != line.len) return false;
+    if (!std.mem.startsWith(u8, trimmed, "const ")) return false;
+    const eq_index = std.mem.indexOf(u8, trimmed, " = await import(") orelse return false;
+    const binding = std.mem.trim(u8, trimmed["const ".len..eq_index], " \t");
+    const after_import = trimmed[eq_index + " = await import(".len ..];
+    if (after_import.len < 3) return false;
+    const quote = after_import[0];
+    if (quote != '\'' and quote != '"') return false;
+    const rest = after_import[1..];
+    const quote_end = std.mem.indexOfScalar(u8, rest, quote) orelse return false;
+    const specifier = rest[0..quote_end];
+    const after_specifier = std.mem.trim(u8, rest[quote_end + 1 ..], " \t");
+
+    if (std.mem.startsWith(u8, binding, "{") and std.mem.endsWith(u8, binding, "}")) {
+        if (!std.mem.startsWith(u8, after_specifier, ");")) return false;
+        try out.print(allocator, "import {s} from \"{s}\";", .{ binding, specifier });
+        return true;
+    }
+
+    if (std.mem.startsWith(u8, after_specifier, ");")) {
+        try out.print(allocator, "import * as {s} from \"{s}\";", .{ binding, specifier });
+        return true;
+    }
+
+    if (std.mem.startsWith(u8, after_specifier, ").then(") and
+        std.mem.indexOf(u8, after_specifier, "=>") != null and
+        std.mem.indexOf(u8, after_specifier, ".default") != null)
+    {
+        try out.print(allocator, "import {s} from \"{s}\";", .{ binding, specifier });
+        return true;
+    }
+
+    return false;
 }
 
 fn replaceAll(allocator: Allocator, source: []const u8, needle: []const u8, replacement: []const u8) ![]u8 {

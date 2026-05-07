@@ -10,6 +10,7 @@ var active_mocks: ?*HostMocks = null;
 const MockState = struct {
     owner: *HostMocks,
     calls: quickjs.Value,
+    once_implementations: quickjs.Value,
     implementation: quickjs.Value,
     original_implementation: quickjs.Value,
     return_value: quickjs.Value,
@@ -28,6 +29,7 @@ const MockState = struct {
     fn deinit(self: *MockState, rt: *quickjs.Runtime) void {
         if (self.disposed) return;
         self.calls.deinitRT(rt);
+        self.once_implementations.deinitRT(rt);
         self.implementation.deinitRT(rt);
         self.original_implementation.deinitRT(rt);
         self.return_value.deinitRT(rt);
@@ -250,6 +252,7 @@ pub const HostMocks = struct {
         state.* = .{
             .owner = self,
             .calls = quickjs.Value.initArray(ctx),
+            .once_implementations = quickjs.Value.initArray(ctx),
             .implementation = if (implementation.isFunction(ctx)) implementation.dup(ctx) else quickjs.Value.undefined,
             .original_implementation = if (original.isFunction(ctx)) original.dup(ctx) else quickjs.Value.undefined,
             .return_value = quickjs.Value.undefined,
@@ -277,6 +280,7 @@ pub const HostMocks = struct {
         func.setPropertyStr(ctx, "mock", mock_info) catch return quickjs.Value.exception;
 
         installMockMethod(ctx, func, "mockImplementation", .implementation, state) catch return quickjs.Value.exception;
+        installMockMethod(ctx, func, "mockImplementationOnce", .implementation_once, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockReturnValue", .return_value, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockResolvedValue", .resolved_value, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockRejectedValue", .rejected_value, state) catch return quickjs.Value.exception;
@@ -335,6 +339,7 @@ const MockMethod = enum(i32) {
     clear = 5,
     reset = 6,
     restore = 7,
+    implementation_once = 8,
 };
 
 fn jsMockFinalizer(rt: ?*quickjs.c.JSRuntime, value: quickjs.c.JSValue) callconv(.c) void {
@@ -359,6 +364,15 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
     state.calls.setPropertyUint32(real_ctx, @intCast(@max(length, 0)), call_args) catch return quickjs.Value.exception.cval();
 
     const args_slice: []const quickjs.Value = if (argc > 0) @ptrCast(argv[0..@intCast(argc)]) else &.{};
+    const once_length = state.once_implementations.getLength(real_ctx) catch 0;
+    if (once_length > 0) {
+        const once_impl = state.once_implementations.getPropertyUint32(real_ctx, 0);
+        defer once_impl.deinit(real_ctx);
+        shiftArrayLeft(real_ctx, state.once_implementations, @intCast(once_length)) catch return quickjs.Value.exception.cval();
+        if (once_impl.isFunction(real_ctx)) {
+            return once_impl.call(real_ctx, wrapped_this, args_slice).cval();
+        }
+    }
     if (state.implementation.isFunction(real_ctx)) {
         return state.implementation.call(real_ctx, wrapped_this, args_slice).cval();
     }
@@ -366,6 +380,17 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
     if (state.has_resolved_value) return resolvedPromise(real_ctx, state.resolved_value).cval();
     if (state.has_rejected_value) return rejectedPromise(real_ctx, state.rejected_value).cval();
     return quickjs.Value.undefined.cval();
+}
+
+fn shiftArrayLeft(ctx: *quickjs.Context, array: quickjs.Value, length: usize) !void {
+    if (length == 0) return;
+    var index: usize = 1;
+    while (index < length) : (index += 1) {
+        const value = array.getPropertyUint32(ctx, @intCast(index));
+        defer value.deinit(ctx);
+        try array.setPropertyUint32(ctx, @intCast(index - 1), value.dup(ctx));
+    }
+    try array.setLength(ctx, @intCast(length - 1));
 }
 
 fn jsMock(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
@@ -532,6 +557,12 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
             replaceValue(ctx, &state.implementation, next);
             clearModes(ctx, state, false);
         },
+        .implementation_once => {
+            const next = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+            if (!next.isFunction(ctx)) return ctx.throwInternalError("mockImplementationOnce() requires a function");
+            const length = state.once_implementations.getLength(ctx) catch 0;
+            state.once_implementations.setPropertyUint32(ctx, @intCast(@max(length, 0)), next.dup(ctx)) catch return quickjs.Value.exception;
+        },
         .return_value => {
             const next = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
             replaceValue(ctx, &state.return_value, next);
@@ -562,6 +593,7 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
         .clear => state.calls.setLength(ctx, 0) catch return quickjs.Value.exception,
         .reset => {
             state.calls.setLength(ctx, 0) catch return quickjs.Value.exception;
+            state.once_implementations.setLength(ctx, 0) catch return quickjs.Value.exception;
             replaceValue(ctx, &state.implementation, state.original_implementation);
             clearModes(ctx, state, true);
         },
@@ -576,6 +608,7 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
                 }
             }
             state.calls.setLength(ctx, 0) catch return quickjs.Value.exception;
+            state.once_implementations.setLength(ctx, 0) catch return quickjs.Value.exception;
             replaceValue(ctx, &state.implementation, state.original_implementation);
             clearModes(ctx, state, true);
         },

@@ -90,6 +90,7 @@ pub const Runtime = struct {
             mocks.clearHooks();
             mocks.clearMockStates();
         }
+        self.clearRuntimeGlobalsForShutdown();
         self.rt.runGC();
         self.ctx.deinit();
         self.rt.runGC();
@@ -97,6 +98,18 @@ pub const Runtime = struct {
         if (self.host_mocks_state) |mocks| {
             mocks.destroyAfterRuntimeFree();
             self.host_mocks_state = null;
+        }
+    }
+
+    fn clearRuntimeGlobalsForShutdown(self: *Runtime) void {
+        const global = self.ctx.getGlobalObject();
+        defer global.deinit(self.ctx);
+        _ = global.deletePropertyStr(self.ctx, "__zigDomNodeCache") catch {};
+        _ = global.deletePropertyStr(self.ctx, "__zigCjsRegistry") catch {};
+        const document = global.getPropertyStr(self.ctx, "document");
+        defer document.deinit(self.ctx);
+        if (!document.isException() and document.isObject()) {
+            _ = document.deletePropertyStr(self.ctx, "activeElement") catch {};
         }
     }
 
