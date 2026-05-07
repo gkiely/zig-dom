@@ -493,6 +493,11 @@ const ModuleLoaderState = struct {
     profile_transform_ns: i128,
     profile_onload_ns: i128,
     profile_compile_ns: i128,
+    profile_load_source_ns: i128,
+    profile_collect_graph_ns: i128,
+    profile_setup_eval_ns: i128,
+    profile_entry_eval_ns: i128,
+    profile_runner_ns: i128,
     profile_transform_count: usize,
     profile_module_count: usize,
 
@@ -511,6 +516,11 @@ const ModuleLoaderState = struct {
             .profile_transform_ns = 0,
             .profile_onload_ns = 0,
             .profile_compile_ns = 0,
+            .profile_load_source_ns = 0,
+            .profile_collect_graph_ns = 0,
+            .profile_setup_eval_ns = 0,
+            .profile_entry_eval_ns = 0,
+            .profile_runner_ns = 0,
             .profile_transform_count = 0,
             .profile_module_count = 0,
         };
@@ -883,8 +893,15 @@ const ModuleLoaderState = struct {
         const compile_start = if (self.profile_enabled) self.profileNow() else 0;
         const value = ctx.eval(source_z[0..source.len], filename_z, .{});
         if (self.profile_enabled) {
-            self.profile_compile_ns += self.profileNow() - compile_start;
+            const elapsed = self.profileNow() - compile_start;
+            self.profile_compile_ns += elapsed;
             self.profile_module_count += 1;
+            if (std.c.getenv("ZIG_DOM_PROFILE_MODULES") != null) {
+                std.debug.print("[zig-dom profile cjs] eval_ms={d:.3} {s}\n", .{
+                    @as(f64, @floatFromInt(elapsed)) / 1_000_000.0,
+                    resolved,
+                });
+            }
         }
         if (value.isException()) return error.EvaluationFailed;
         return value;
@@ -1306,7 +1323,9 @@ const ModuleLoaderState = struct {
         else
             return error.UnsupportedTransformLoader;
         _ = extension;
-        const can_tree_shake = std.mem.eql(u8, loader, "ts") or std.mem.eql(u8, loader, "tsx");
+        const can_tree_shake = std.mem.eql(u8, loader, "ts") or
+            std.mem.eql(u8, loader, "tsx") or
+            std.mem.eql(u8, loader, "jsx");
         const source = if (can_tree_shake) blk: {
             const requested = self.requestedExportsFor(module_id) orelse break :blk try self.allocator.dupe(u8, contents);
             const export_pruned = try pruneUnrequestedTsExports(self.allocator, contents, requested);
@@ -2774,6 +2793,7 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             return failureFromRuntimeException(allocator, path, "failed to prepare setup environment", err, &vm);
         };
 
+        const setup_eval_start = if (module_loader_state.profile_enabled) module_loader_state.profileNow() else 0;
         vm.evalModule(setup_module_id, setup_source) catch |err| {
             vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch {};
             return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
@@ -2787,15 +2807,22 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
                 return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
             };
         }
+        if (module_loader_state.profile_enabled) {
+            module_loader_state.profile_setup_eval_ns += module_loader_state.profileNow() - setup_eval_start;
+        }
     }
 
     module_loader_state.syncMockModulesFromRuntime(&vm) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
 
+    const collect_graph_start = if (module_loader_state.profile_enabled) module_loader_state.profileNow() else 0;
     module_loader_state.collectImportGraph(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
+    if (module_loader_state.profile_enabled) {
+        module_loader_state.profile_collect_graph_ns += module_loader_state.profileNow() - collect_graph_start;
+    }
 
     const entry_source = module_loader_state.loadModuleSource(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
@@ -2805,6 +2832,7 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
 
+    const entry_eval_start = if (module_loader_state.profile_enabled) module_loader_state.profileNow() else 0;
     vm.evalModule(entry_module_id, entry_source) catch |err| {
         return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
     };
@@ -2813,6 +2841,9 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         _ = vm.executePendingJob() catch |err| {
             return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
         };
+    }
+    if (module_loader_state.profile_enabled) {
+        module_loader_state.profile_entry_eval_ns += module_loader_state.profileNow() - entry_eval_start;
     }
 
     vm.evalScript("<zig-collection-flush>", collection_flush_source) catch |err| {
@@ -2849,6 +2880,7 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         };
     }
 
+    const runner_start = if (module_loader_state.profile_enabled) module_loader_state.profileNow() else 0;
     vm.evalScript("<zig-runner-bootstrap>", run_bootstrap_source) catch |err| {
         return failureFromRuntimeException(allocator, path, "failed to start file execution", err, &vm);
     };
@@ -2887,6 +2919,9 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             .failure_report = try allocator.dupe(u8, "Runner stalled with unresolved async work."),
             .collection_report = null,
         };
+    }
+    if (module_loader_state.profile_enabled) {
+        module_loader_state.profile_runner_ns += module_loader_state.profileNow() - runner_start;
     }
 
     const run_error = vm.getGlobalStringDup("__zigRunError") catch try allocator.dupe(u8, "");
@@ -2942,12 +2977,17 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
 
     if (module_loader_state.profile_enabled) {
         std.debug.print(
-            "[zig-dom profile] modules={d} transforms={d} transform_ms={d:.3} onload_ms={d:.3} compile_ms={d:.3}\n",
+            "[zig-dom profile] modules={d} transforms={d} transform_ms={d:.3} onload_ms={d:.3} load_source_ms={d:.3} collect_graph_ms={d:.3} setup_eval_ms={d:.3} entry_eval_ms={d:.3} runner_ms={d:.3} compile_ms={d:.3}\n",
             .{
                 module_loader_state.profile_module_count,
                 module_loader_state.profile_transform_count,
                 @as(f64, @floatFromInt(module_loader_state.profile_transform_ns)) / 1_000_000.0,
                 @as(f64, @floatFromInt(module_loader_state.profile_onload_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_load_source_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_collect_graph_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_setup_eval_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_entry_eval_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_runner_ns)) / 1_000_000.0,
                 @as(f64, @floatFromInt(module_loader_state.profile_compile_ns)) / 1_000_000.0,
             },
         );
@@ -3102,6 +3142,7 @@ fn moduleLoad(
         return existing;
     }
 
+    const load_source_start = if (state.profile_enabled) state.profileNow() else 0;
     const source = state.loadModuleSource(module_id) catch |err| {
         _ = quickjs.c.JS_ThrowReferenceError(
             ctx.cval(),
@@ -3111,6 +3152,9 @@ fn moduleLoad(
         );
         return null;
     };
+    if (state.profile_enabled) {
+        state.profile_load_source_ns += state.profileNow() - load_source_start;
+    }
     defer state.allocator.free(source);
     state.recordStaticImportRequests(module_id, source) catch {
         _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
@@ -3126,8 +3170,15 @@ fn moduleLoad(
     const compile_start = if (state.profile_enabled) state.profileNow() else 0;
     const compiled = ctx.eval(source_z[0..source.len], module_name, .{ .type = .module, .compile_only = true });
     if (state.profile_enabled) {
-        state.profile_compile_ns += state.profileNow() - compile_start;
+        const elapsed = state.profileNow() - compile_start;
+        state.profile_compile_ns += elapsed;
         state.profile_module_count += 1;
+        if (std.c.getenv("ZIG_DOM_PROFILE_MODULES") != null) {
+            std.debug.print("[zig-dom profile module] compile_ms={d:.3} {s}\n", .{
+                @as(f64, @floatFromInt(elapsed)) / 1_000_000.0,
+                module_id,
+            });
+        }
     }
     if (compiled.isException()) {
         return null;
