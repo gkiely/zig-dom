@@ -64,6 +64,8 @@ const testing_library_shim_source =
     \\export default api;
 ;
 
+const max_module_source_bytes = 4 * 1024 * 1024;
+
 pub const FileResult = struct {
     path: []u8,
     passed: usize,
@@ -109,24 +111,33 @@ const ModuleLoaderState = struct {
     allocator: Allocator,
     io: std.Io,
     loaded_modules: std.StringHashMap(*ModuleDef),
-    transformed_sources: std.StringHashMap([]u8),
+    module_sources: std.StringHashMap([]u8),
+    transformed_outputs: std.StringHashMap([]u8),
 
     fn init(allocator: Allocator, io: std.Io) ModuleLoaderState {
         return .{
             .allocator = allocator,
             .io = io,
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
-            .transformed_sources = std.StringHashMap([]u8).init(allocator),
+            .module_sources = std.StringHashMap([]u8).init(allocator),
+            .transformed_outputs = std.StringHashMap([]u8).init(allocator),
         };
     }
 
     fn deinit(self: *ModuleLoaderState) void {
-        var source_iterator = self.transformed_sources.iterator();
+        var source_iterator = self.module_sources.iterator();
         while (source_iterator.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
             self.allocator.free(entry.value_ptr.*);
         }
-        self.transformed_sources.deinit();
+        self.module_sources.deinit();
+
+        var output_iterator = self.transformed_outputs.iterator();
+        while (output_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.transformed_outputs.deinit();
 
         var loaded_iterator = self.loaded_modules.iterator();
         while (loaded_iterator.next()) |entry| {
@@ -151,34 +162,143 @@ const ModuleLoaderState = struct {
         return error.UnsupportedExternalModule;
     }
 
+    fn preloadEntryGraph(self: *ModuleLoaderState, entry_module_id: []const u8) !void {
+        const graph = try self.discoverModuleGraph(entry_module_id);
+        defer {
+            for (graph) |module_id| {
+                self.allocator.free(module_id);
+            }
+            self.allocator.free(graph);
+        }
+
+        var transform_targets: std.ArrayList([]const u8) = .empty;
+        defer transform_targets.deinit(self.allocator);
+
+        for (graph) |module_id| {
+            if (transform.needsTransform(module_id)) {
+                try transform_targets.append(self.allocator, module_id);
+            }
+        }
+
+        if (transform_targets.items.len == 0) {
+            return;
+        }
+
+        const prepared = try transform.prepareModuleTransforms(self.allocator, self.io, transform_targets.items);
+        defer prepared.deinit(self.allocator);
+
+        if (prepared.outputs.len != transform_targets.items.len) {
+            return error.TransformCommandFailed;
+        }
+
+        for (transform_targets.items, prepared.outputs) |module_id, output_path| {
+            const key = try self.allocator.dupe(u8, module_id);
+            errdefer self.allocator.free(key);
+
+            const value = try self.allocator.dupe(u8, output_path);
+            errdefer self.allocator.free(value);
+
+            try self.transformed_outputs.put(key, value);
+        }
+    }
+
+    fn discoverModuleGraph(self: *ModuleLoaderState, entry_module_id: []const u8) ![]const []u8 {
+        var queue: std.ArrayList([]u8) = .empty;
+        errdefer {
+            for (queue.items) |item| {
+                self.allocator.free(item);
+            }
+            queue.deinit(self.allocator);
+        }
+
+        var seen = std.StringHashMap(void).init(self.allocator);
+        defer seen.deinit();
+
+        const entry = try self.allocator.dupe(u8, entry_module_id);
+        errdefer self.allocator.free(entry);
+
+        try queue.append(self.allocator, entry);
+        try seen.put(entry, {});
+
+        var index: usize = 0;
+        while (index < queue.items.len) : (index += 1) {
+            const module_id = queue.items[index];
+
+            const source = try std.Io.Dir.cwd().readFileAlloc(
+                self.io,
+                module_id,
+                self.allocator,
+                .limited(max_module_source_bytes),
+            );
+            defer self.allocator.free(source);
+
+            const specifiers = try collectEsmSpecifiers(self.allocator, source);
+            defer {
+                for (specifiers) |specifier| {
+                    self.allocator.free(specifier);
+                }
+                self.allocator.free(specifiers);
+            }
+
+            for (specifiers) |specifier| {
+                const resolved = try self.normalizeSpecifier(module_id, specifier);
+                if (shimModuleSource(resolved) != null) {
+                    self.allocator.free(resolved);
+                    continue;
+                }
+
+                if (seen.contains(resolved)) {
+                    self.allocator.free(resolved);
+                    continue;
+                }
+
+                try seen.put(resolved, {});
+                try queue.append(self.allocator, resolved);
+            }
+        }
+
+        return queue.toOwnedSlice(self.allocator);
+    }
+
     fn loadModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]const u8 {
         if (shimModuleSource(module_id)) |shim_source| {
             return shim_source;
         }
 
-        if (self.transformed_sources.get(module_id)) |cached| {
+        if (self.module_sources.get(module_id)) |cached| {
             return cached;
         }
 
-        _ = transform.loaderForPath(module_id) orelse return error.UnsupportedModuleExtension;
+        const loader = transform.loaderForPath(module_id) orelse return error.UnsupportedModuleExtension;
+        if (std.mem.eql(u8, loader, "js")) {
+            const source = try std.Io.Dir.cwd().readFileAlloc(
+                self.io,
+                module_id,
+                self.allocator,
+                .limited(max_module_source_bytes),
+            );
 
-        const output_path = try transform.buildModuleOutputPath(self.allocator, module_id);
-        defer self.allocator.free(output_path);
+            try self.cacheModuleSource(module_id, source);
+            return self.module_sources.get(module_id).?;
+        }
 
-        try transform.transformModuleToPath(self.allocator, self.io, module_id, output_path);
-
+        const output_path = self.transformed_outputs.get(module_id) orelse return error.ModuleNotPrepared;
         const transformed = try std.Io.Dir.cwd().readFileAlloc(
             self.io,
             output_path,
             self.allocator,
-            .limited(4 * 1024 * 1024),
+            .limited(max_module_source_bytes),
         );
 
+        try self.cacheModuleSource(module_id, transformed);
+        return self.module_sources.get(module_id).?;
+    }
+
+    fn cacheModuleSource(self: *ModuleLoaderState, module_id: []const u8, source: []u8) !void {
         const key = try self.allocator.dupe(u8, module_id);
         errdefer self.allocator.free(key);
 
-        try self.transformed_sources.put(key, transformed);
-        return self.transformed_sources.get(module_id).?;
+        try self.module_sources.put(key, source);
     }
 
     fn resolveRelativePath(self: *ModuleLoaderState, module_base_name: []const u8, specifier: []const u8) ![]u8 {
@@ -249,6 +369,315 @@ const ModuleLoaderState = struct {
     }
 };
 
+const ParsedLiteral = struct {
+    specifier: []const u8,
+    next_index: usize,
+};
+
+fn collectEsmSpecifiers(allocator: Allocator, source: []const u8) ![]const []u8 {
+    var specifiers: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (specifiers.items) |specifier| {
+            allocator.free(specifier);
+        }
+        specifiers.deinit(allocator);
+    }
+
+    var dedup = std.StringHashMap(void).init(allocator);
+    defer dedup.deinit();
+
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        const current = source[cursor];
+
+        if (current == '/') {
+            if (cursor + 1 < source.len and source[cursor + 1] == '/') {
+                cursor = skipLineComment(source, cursor);
+                continue;
+            }
+            if (cursor + 1 < source.len and source[cursor + 1] == '*') {
+                cursor = skipBlockComment(source, cursor);
+                continue;
+            }
+        }
+
+        if (current == '\'' or current == '"' or current == '`') {
+            cursor = skipQuotedLiteral(source, cursor);
+            continue;
+        }
+
+        if (hasWordAt(source, cursor, "import")) {
+            cursor = try parseImportSpecifier(allocator, source, cursor, &specifiers, &dedup);
+            continue;
+        }
+
+        if (hasWordAt(source, cursor, "export")) {
+            cursor = try parseExportSpecifier(allocator, source, cursor, &specifiers, &dedup);
+            continue;
+        }
+
+        cursor += 1;
+    }
+
+    return specifiers.toOwnedSlice(allocator);
+}
+
+fn parseImportSpecifier(
+    allocator: Allocator,
+    source: []const u8,
+    start_index: usize,
+    specifiers: *std.ArrayList([]u8),
+    dedup: *std.StringHashMap(void),
+) !usize {
+    var cursor = start_index + "import".len;
+    skipTrivia(source, &cursor);
+    if (cursor >= source.len) {
+        return cursor;
+    }
+
+    if (source[cursor] == '.') {
+        return cursor + 1;
+    }
+
+    if (parseQuotedSpecifier(source, cursor)) |literal| {
+        try appendSpecifier(allocator, specifiers, dedup, literal.specifier);
+        return literal.next_index;
+    }
+
+    if (source[cursor] == '(') {
+        cursor += 1;
+        skipTrivia(source, &cursor);
+        if (parseQuotedSpecifier(source, cursor)) |literal| {
+            try appendSpecifier(allocator, specifiers, dedup, literal.specifier);
+            return literal.next_index;
+        }
+        return cursor;
+    }
+
+    while (cursor < source.len) {
+        const current = source[cursor];
+
+        if (current == ';') {
+            return cursor + 1;
+        }
+
+        if (current == '/') {
+            if (cursor + 1 < source.len and source[cursor + 1] == '/') {
+                cursor = skipLineComment(source, cursor);
+                continue;
+            }
+            if (cursor + 1 < source.len and source[cursor + 1] == '*') {
+                cursor = skipBlockComment(source, cursor);
+                continue;
+            }
+        }
+
+        if (current == '\'' or current == '"' or current == '`') {
+            cursor = skipQuotedLiteral(source, cursor);
+            continue;
+        }
+
+        if (hasWordAt(source, cursor, "from")) {
+            var value_index = cursor + "from".len;
+            skipTrivia(source, &value_index);
+            if (parseQuotedSpecifier(source, value_index)) |literal| {
+                try appendSpecifier(allocator, specifiers, dedup, literal.specifier);
+                return literal.next_index;
+            }
+        }
+
+        cursor += 1;
+    }
+
+    return cursor;
+}
+
+fn parseExportSpecifier(
+    allocator: Allocator,
+    source: []const u8,
+    start_index: usize,
+    specifiers: *std.ArrayList([]u8),
+    dedup: *std.StringHashMap(void),
+) !usize {
+    var cursor = start_index + "export".len;
+
+    while (cursor < source.len) {
+        const current = source[cursor];
+
+        if (current == ';') {
+            return cursor + 1;
+        }
+
+        if (current == '/') {
+            if (cursor + 1 < source.len and source[cursor + 1] == '/') {
+                cursor = skipLineComment(source, cursor);
+                continue;
+            }
+            if (cursor + 1 < source.len and source[cursor + 1] == '*') {
+                cursor = skipBlockComment(source, cursor);
+                continue;
+            }
+        }
+
+        if (current == '\'' or current == '"' or current == '`') {
+            cursor = skipQuotedLiteral(source, cursor);
+            continue;
+        }
+
+        if (hasWordAt(source, cursor, "from")) {
+            var value_index = cursor + "from".len;
+            skipTrivia(source, &value_index);
+            if (parseQuotedSpecifier(source, value_index)) |literal| {
+                try appendSpecifier(allocator, specifiers, dedup, literal.specifier);
+                return literal.next_index;
+            }
+        }
+
+        cursor += 1;
+    }
+
+    return cursor;
+}
+
+fn appendSpecifier(
+    allocator: Allocator,
+    specifiers: *std.ArrayList([]u8),
+    dedup: *std.StringHashMap(void),
+    specifier: []const u8,
+) !void {
+    if (specifier.len == 0 or dedup.contains(specifier)) {
+        return;
+    }
+
+    const owned = try allocator.dupe(u8, specifier);
+    errdefer allocator.free(owned);
+
+    try dedup.put(owned, {});
+    try specifiers.append(allocator, owned);
+}
+
+fn parseQuotedSpecifier(source: []const u8, start_index: usize) ?ParsedLiteral {
+    if (start_index >= source.len) {
+        return null;
+    }
+
+    const quote = source[start_index];
+    if (quote != '\'' and quote != '"') {
+        return null;
+    }
+
+    var index = start_index + 1;
+    while (index < source.len) {
+        const current = source[index];
+        if (current == '\\') {
+            if (index + 1 >= source.len) {
+                return null;
+            }
+            index += 2;
+            continue;
+        }
+
+        if (current == quote) {
+            return .{
+                .specifier = source[start_index + 1 .. index],
+                .next_index = index + 1,
+            };
+        }
+
+        index += 1;
+    }
+
+    return null;
+}
+
+fn skipTrivia(source: []const u8, index: *usize) void {
+    while (index.* < source.len) {
+        const current = source[index.*];
+        if (std.ascii.isWhitespace(current)) {
+            index.* += 1;
+            continue;
+        }
+
+        if (current == '/' and index.* + 1 < source.len and source[index.* + 1] == '/') {
+            index.* = skipLineComment(source, index.*);
+            continue;
+        }
+
+        if (current == '/' and index.* + 1 < source.len and source[index.* + 1] == '*') {
+            index.* = skipBlockComment(source, index.*);
+            continue;
+        }
+
+        break;
+    }
+}
+
+fn skipLineComment(source: []const u8, start_index: usize) usize {
+    var index = start_index + 2;
+    while (index < source.len and source[index] != '\n') {
+        index += 1;
+    }
+    return index;
+}
+
+fn skipBlockComment(source: []const u8, start_index: usize) usize {
+    var index = start_index + 2;
+    while (index + 1 < source.len) {
+        if (source[index] == '*' and source[index + 1] == '/') {
+            return index + 2;
+        }
+        index += 1;
+    }
+    return source.len;
+}
+
+fn skipQuotedLiteral(source: []const u8, start_index: usize) usize {
+    const quote = source[start_index];
+    var index = start_index + 1;
+    while (index < source.len) {
+        const current = source[index];
+        if (current == '\\') {
+            if (index + 1 >= source.len) {
+                return source.len;
+            }
+            index += 2;
+            continue;
+        }
+
+        if (current == quote) {
+            return index + 1;
+        }
+
+        index += 1;
+    }
+    return source.len;
+}
+
+fn hasWordAt(source: []const u8, index: usize, word: []const u8) bool {
+    if (index + word.len > source.len) {
+        return false;
+    }
+
+    if (!std.mem.eql(u8, source[index .. index + word.len], word)) {
+        return false;
+    }
+
+    if (index > 0 and isIdentifierChar(source[index - 1])) {
+        return false;
+    }
+
+    const end_index = index + word.len;
+    if (end_index < source.len and isIdentifierChar(source[end_index])) {
+        return false;
+    }
+
+    return true;
+}
+
+fn isIdentifierChar(ch: u8) bool {
+    return std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '$';
+}
+
 pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8) !Summary {
     var results: std.ArrayList(FileResult) = .empty;
     errdefer {
@@ -299,6 +728,10 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8) !FileResult
 
     var module_loader_state = ModuleLoaderState.init(allocator, io);
     defer module_loader_state.deinit();
+
+    module_loader_state.preloadEntryGraph(entry_module_id) catch |err| {
+        return collectionFailureFromError(allocator, path, "collection failed", err);
+    };
 
     vm.setModuleLoaderFunc(ModuleLoaderState, &module_loader_state, moduleNormalize, moduleLoad);
 

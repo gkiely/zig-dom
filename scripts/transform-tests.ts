@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 
 type Entry = {
   file: string;
-  loader: "ts" | "tsx" | "jsx" | "js";
+  loader: "ts" | "tsx" | "jsx";
   out: string;
 };
 
@@ -34,10 +34,10 @@ function parseArgs() {
       const out = process.argv[index + 5];
 
       if (!file || loaderToken !== "--loader" || !loaderValue || outToken !== "--out" || !out) {
-        throw new Error("Expected --file <path> --loader <ts|tsx|jsx|js> --out <path>");
+        throw new Error("Expected --file <path> --loader <ts|tsx|jsx> --out <path>");
       }
 
-      if (loaderValue !== "ts" && loaderValue !== "tsx" && loaderValue !== "jsx" && loaderValue !== "js") {
+      if (loaderValue !== "ts" && loaderValue !== "tsx" && loaderValue !== "jsx") {
         throw new Error(`Unsupported loader ${loaderValue}`);
       }
 
@@ -59,7 +59,6 @@ if (entries.length === 0) {
 
 mkdirSync(resolve(cacheDir), { recursive: true });
 const transpilers: Record<Loader, Bun.Transpiler> = {
-  js: new Bun.Transpiler({ loader: "js" }),
   ts: new Bun.Transpiler({ loader: "ts" }),
   jsx: new Bun.Transpiler({
     loader: "jsx",

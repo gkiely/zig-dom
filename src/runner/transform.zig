@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 
 pub const TransformError = error{
     TransformCommandFailed,
+    UnsupportedTransformLoader,
 };
 
 pub const PreparedPaths = struct {
@@ -15,6 +16,18 @@ pub const PreparedPaths = struct {
             allocator.free(path);
         }
         allocator.free(self.paths);
+    }
+};
+
+pub const PreparedTransforms = struct {
+    outputs: []const []u8,
+    transformed_count: usize,
+
+    pub fn deinit(self: PreparedTransforms, allocator: Allocator) void {
+        for (self.outputs) |path| {
+            allocator.free(path);
+        }
+        allocator.free(self.outputs);
     }
 };
 
@@ -45,7 +58,17 @@ pub fn runUpfront(allocator: Allocator, io: std.Io, discovered_paths: []const []
     };
 }
 
-pub fn buildModuleOutputPath(allocator: Allocator, path: []const u8) ![]u8 {
+pub fn buildModuleOutputPath(allocator: Allocator, io: std.Io, path: []const u8) ![]u8 {
+    const loader = loaderForPath(path) orelse return error.TransformCommandFailed;
+    if (!needsTransform(path)) {
+        return error.UnsupportedTransformLoader;
+    }
+
+    const stat = try std.Io.Dir.cwd().statFile(io, path, .{});
+    if (stat.kind != .file) {
+        return error.TransformCommandFailed;
+    }
+
     const basename = std.fs.path.basename(path);
     const stem = std.fs.path.stem(basename);
     var sanitized: std.ArrayList(u8) = .empty;
@@ -59,7 +82,14 @@ pub fn buildModuleOutputPath(allocator: Allocator, path: []const u8) ![]u8 {
         }
     }
 
-    const digest = std.hash.Wyhash.hash(0, path);
+    var hasher = std.hash.Wyhash.init(0);
+    hasher.update(path);
+    hasher.update(loader);
+    hasher.update(transformOptionsSignature(loader));
+    hasher.update(std.mem.asBytes(&stat.size));
+    hasher.update(std.mem.asBytes(&stat.mtime.nanoseconds));
+    const digest = hasher.final();
+
     return std.fmt.allocPrint(
         allocator,
         "./.zig-dom-cache/transformed/modules/{x}-{s}.js",
@@ -87,16 +117,71 @@ pub fn loaderForPath(path: []const u8) ?[]const u8 {
     return null;
 }
 
-pub fn transformModuleToPath(allocator: Allocator, io: std.Io, input_path: []const u8, output_path: []const u8) !void {
-    const loader = loaderForPath(input_path) orelse return error.TransformCommandFailed;
-    const exit_code = try runTransformProcess(allocator, io, &.{.{
-        .input_path = input_path,
-        .output_path = output_path,
-        .loader = loader,
-    }});
-    if (exit_code != 0) {
-        return error.TransformCommandFailed;
+pub fn needsTransform(path: []const u8) bool {
+    const loader = loaderForPath(path) orelse return false;
+    return !std.mem.eql(u8, loader, "js");
+}
+
+pub fn prepareModuleTransforms(
+    allocator: Allocator,
+    io: std.Io,
+    module_paths: []const []const u8,
+) !PreparedTransforms {
+    var outputs: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (outputs.items) |path| {
+            allocator.free(path);
+        }
+        outputs.deinit(allocator);
     }
+
+    var pending: std.ArrayList(TransformEntry) = .empty;
+    defer pending.deinit(allocator);
+
+    for (module_paths) |module_path| {
+        if (!needsTransform(module_path)) {
+            return error.UnsupportedTransformLoader;
+        }
+
+        const loader = loaderForPath(module_path) orelse return error.TransformCommandFailed;
+        const output_path = try buildModuleOutputPath(allocator, io, module_path);
+        errdefer allocator.free(output_path);
+
+        try outputs.append(allocator, output_path);
+
+        if (!outputExists(io, output_path)) {
+            try pending.append(allocator, .{
+                .input_path = module_path,
+                .output_path = output_path,
+                .loader = loader,
+            });
+        }
+    }
+
+    if (pending.items.len > 0) {
+        const exit_code = try runTransformProcess(allocator, io, pending.items);
+        if (exit_code != 0) {
+            return error.TransformCommandFailed;
+        }
+    }
+
+    return .{
+        .outputs = try outputs.toOwnedSlice(allocator),
+        .transformed_count = pending.items.len,
+    };
+}
+
+fn outputExists(io: std.Io, path: []const u8) bool {
+    const stat = std.Io.Dir.cwd().statFile(io, path, .{}) catch return false;
+    return stat.kind == .file;
+}
+
+fn transformOptionsSignature(loader: []const u8) []const u8 {
+    if (std.mem.eql(u8, loader, "tsx") or std.mem.eql(u8, loader, "jsx")) {
+        return "jsx-react-factory-v1";
+    }
+
+    return "esm-preserve-v1";
 }
 
 fn runTransformProcess(allocator: Allocator, io: std.Io, entries: []const TransformEntry) !u8 {
@@ -153,4 +238,11 @@ test "loaderForPath matches transform extensions" {
     try std.testing.expectEqualStrings("tsx", loaderForPath("foo.test.tsx").?);
     try std.testing.expectEqualStrings("jsx", loaderForPath("foo.test.jsx").?);
     try std.testing.expectEqualStrings("js", loaderForPath("foo.test.js").?);
+}
+
+test "needsTransform skips javascript" {
+    try std.testing.expect(needsTransform("foo.ts"));
+    try std.testing.expect(needsTransform("foo.tsx"));
+    try std.testing.expect(needsTransform("foo.jsx"));
+    try std.testing.expect(!needsTransform("foo.js"));
 }
