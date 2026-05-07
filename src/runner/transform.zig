@@ -25,8 +25,7 @@ const TransformEntry = struct {
 };
 
 pub fn runUpfront(allocator: Allocator, io: std.Io, discovered_paths: []const []u8) !PreparedPaths {
-    var transformed_entries: std.ArrayList(TransformEntry) = .empty;
-    defer transformed_entries.deinit(allocator);
+    _ = io;
 
     var prepared_paths: std.ArrayList([]u8) = .empty;
     errdefer {
@@ -36,35 +35,17 @@ pub fn runUpfront(allocator: Allocator, io: std.Io, discovered_paths: []const []
         prepared_paths.deinit(allocator);
     }
 
-    for (discovered_paths, 0..) |path, index| {
-        if (loaderForPath(path)) |loader| {
-            const output_path = try buildOutputPath(allocator, index, path);
-            try prepared_paths.append(allocator, output_path);
-            try transformed_entries.append(allocator, .{
-                .input_path = path,
-                .output_path = output_path,
-                .loader = loader,
-            });
-            continue;
-        }
-
+    for (discovered_paths) |path| {
         try prepared_paths.append(allocator, try allocator.dupe(u8, path));
-    }
-
-    if (transformed_entries.items.len > 0) {
-        const exit_code = try runTransformProcess(allocator, io, transformed_entries.items);
-        if (exit_code != 0) {
-            return error.TransformCommandFailed;
-        }
     }
 
     return .{
         .paths = try prepared_paths.toOwnedSlice(allocator),
-        .transformed_count = transformed_entries.items.len,
+        .transformed_count = 0,
     };
 }
 
-fn buildOutputPath(allocator: Allocator, index: usize, path: []const u8) ![]u8 {
+pub fn buildModuleOutputPath(allocator: Allocator, path: []const u8) ![]u8 {
     const basename = std.fs.path.basename(path);
     const stem = std.fs.path.stem(basename);
     var sanitized: std.ArrayList(u8) = .empty;
@@ -78,10 +59,15 @@ fn buildOutputPath(allocator: Allocator, index: usize, path: []const u8) ![]u8 {
         }
     }
 
-    return std.fmt.allocPrint(allocator, "./.zig-dom-cache/transformed/{d}-{s}.test.js", .{ index, sanitized.items });
+    const digest = std.hash.Wyhash.hash(0, path);
+    return std.fmt.allocPrint(
+        allocator,
+        "./.zig-dom-cache/transformed/modules/{x}-{s}.cjs",
+        .{ digest, sanitized.items },
+    );
 }
 
-fn loaderForPath(path: []const u8) ?[]const u8 {
+pub fn loaderForPath(path: []const u8) ?[]const u8 {
     if (std.mem.endsWith(u8, path, ".ts")) {
         return "ts";
     }
@@ -94,7 +80,23 @@ fn loaderForPath(path: []const u8) ?[]const u8 {
         return "jsx";
     }
 
+    if (std.mem.endsWith(u8, path, ".js")) {
+        return "js";
+    }
+
     return null;
+}
+
+pub fn transformModuleToPath(allocator: Allocator, io: std.Io, input_path: []const u8, output_path: []const u8) !void {
+    const loader = loaderForPath(input_path) orelse return error.TransformCommandFailed;
+    const exit_code = try runTransformProcess(allocator, io, &.{.{
+        .input_path = input_path,
+        .output_path = output_path,
+        .loader = loader,
+    }});
+    if (exit_code != 0) {
+        return error.TransformCommandFailed;
+    }
 }
 
 fn runTransformProcess(allocator: Allocator, io: std.Io, entries: []const TransformEntry) !u8 {
@@ -150,5 +152,5 @@ test "loaderForPath matches transform extensions" {
     try std.testing.expectEqualStrings("ts", loaderForPath("foo.test.ts").?);
     try std.testing.expectEqualStrings("tsx", loaderForPath("foo.test.tsx").?);
     try std.testing.expectEqualStrings("jsx", loaderForPath("foo.test.jsx").?);
-    try std.testing.expect(loaderForPath("foo.test.js") == null);
+    try std.testing.expectEqualStrings("js", loaderForPath("foo.test.js").?);
 }

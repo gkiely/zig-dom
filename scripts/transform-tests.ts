@@ -1,9 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import ts from "typescript";
 
 type Entry = {
   file: string;
-  loader: "ts" | "tsx" | "jsx";
+  loader: "ts" | "tsx" | "jsx" | "js";
   out: string;
 };
 
@@ -34,10 +35,10 @@ function parseArgs() {
       const out = process.argv[index + 5];
 
       if (!file || loaderToken !== "--loader" || !loaderValue || outToken !== "--out" || !out) {
-        throw new Error("Expected --file <path> --loader <ts|tsx|jsx> --out <path>");
+        throw new Error("Expected --file <path> --loader <ts|tsx|jsx|js> --out <path>");
       }
 
-      if (loaderValue !== "ts" && loaderValue !== "tsx" && loaderValue !== "jsx") {
+      if (loaderValue !== "ts" && loaderValue !== "tsx" && loaderValue !== "jsx" && loaderValue !== "js") {
         throw new Error(`Unsupported loader ${loaderValue}`);
       }
 
@@ -59,6 +60,7 @@ if (entries.length === 0) {
 
 mkdirSync(resolve(cacheDir), { recursive: true });
 const transpilers: Record<Loader, Bun.Transpiler> = {
+  js: new Bun.Transpiler({ loader: "js" }),
   ts: new Bun.Transpiler({ loader: "ts" }),
   jsx: new Bun.Transpiler({
     loader: "jsx",
@@ -85,10 +87,19 @@ const transpilers: Record<Loader, Bun.Transpiler> = {
 for (const entry of entries) {
   const source = await Bun.file(resolve(entry.file)).text();
   const transformed = transpilers[entry.loader].transformSync(source);
+  const commonJs = ts.transpileModule(transformed, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      jsx: ts.JsxEmit.React,
+      esModuleInterop: true,
+      allowSyntheticDefaultImports: true
+    }
+  }).outputText;
   const outPath = resolve(entry.out);
 
   mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, transformed, "utf8");
+  writeFileSync(outPath, commonJs, "utf8");
 }
 
 console.log(`Transformed ${entries.length} file(s).`);
