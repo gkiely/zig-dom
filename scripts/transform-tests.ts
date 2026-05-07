@@ -87,6 +87,18 @@ function addCommonJsNamedExports(source: string): string {
   return source.slice(0, defaultExport.index) + replacement + "\n";
 }
 
+function ensureClassicReactImport(source: string): string {
+  if (!source.includes("React.createElement") && !source.includes("React.Fragment")) {
+    return source;
+  }
+
+  if (/\bimport\s+React\b/.test(source) || /\bimport\s+\*\s+as\s+React\b/.test(source)) {
+    return source;
+  }
+
+  return `import React from "react";\n${source}`;
+}
+
 mkdirSync(resolve(cacheDir), { recursive: true });
 const transpilers: Record<Loader, Bun.Transpiler> = {
   ts: new Bun.Transpiler({ loader: "ts" }),
@@ -121,6 +133,7 @@ for (const entry of entries) {
       format: "esm",
       target: "bun",
       bundle: true,
+      external: ["react", "react-dom", "react-dom/client", "react-dom/test-utils", "react/jsx-runtime", "react/jsx-dev-runtime"],
       write: false
     });
 
@@ -139,6 +152,9 @@ for (const entry of entries) {
     normalized = transformed
       .replaceAll("import.meta.env", "globalThis.__zigImportMetaEnv")
       .replaceAll("import.meta.require", "globalThis.__zigImportMetaRequire");
+    if (entry.loader === "tsx" || entry.loader === "jsx") {
+      normalized = ensureClassicReactImport(normalized);
+    }
   }
   const outPath = resolve(entry.out);
 

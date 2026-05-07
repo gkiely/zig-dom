@@ -320,10 +320,12 @@ fn installElementSlice(ctx: *quickjs.Context, global: quickjs.Value) DomClassesE
 
     try installGetter(ctx, element_proto, "tagName", jsElementTagNameGet);
     try installGetter(ctx, element_proto, "localName", jsElementLocalNameGet);
+    try installGetter(ctx, element_proto, "namespaceURI", jsElementNamespaceUriGet);
     try installAccessor(ctx, element_proto, "id", jsElementIdGet, jsElementIdSet);
     try installAccessor(ctx, element_proto, "className", jsElementClassNameGet, jsElementClassNameSet);
     try installAccessor(ctx, element_proto, "innerHTML", jsElementInnerHtmlGet, jsElementInnerHtmlSet);
     try installGetter(ctx, element_proto, "outerHTML", jsElementOuterHtmlGet);
+    try installGetter(ctx, element_proto, "style", jsElementStyleGet);
     try installMethod(ctx, element_proto, "getAttribute", jsElementGetAttribute, 1);
     try installMethod(ctx, element_proto, "getAttributeNode", jsElementGetAttributeNode, 1);
     try installMethod(ctx, element_proto, "setAttribute", jsElementSetAttribute, 2);
@@ -1197,6 +1199,18 @@ fn jsElementLocalNameGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) 
     return quickjs.Value.initStringLen(ctx, out);
 }
 
+fn jsElementNamespaceUriGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const local_name = jsElementLocalNameGet(ctx, this_value);
+    defer local_name.deinit(ctx);
+    const cstr = local_name.toCStringLen(ctx) orelse return quickjs.Value.initStringLen(ctx, "http://www.w3.org/1999/xhtml");
+    defer ctx.freeCString(cstr.ptr);
+    if (std.mem.eql(u8, cstr.ptr[0..cstr.len], "svg")) {
+        return quickjs.Value.initStringLen(ctx, "http://www.w3.org/2000/svg");
+    }
+    return quickjs.Value.initStringLen(ctx, "http://www.w3.org/1999/xhtml");
+}
+
 fn jsElementIdGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     return elementAttributeGet(ctx_opt, this_value, "id", "");
 }
@@ -1399,6 +1413,60 @@ fn jsElementOuterHtmlGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) 
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const this_handle = parseThisHandle(ctx, this_value, "outerHTML") orelse return quickjs.Value.exception;
     return nodeOuterHtmlToJs(ctx, this_handle, "outerHTML");
+}
+
+fn jsElementStyleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    _ = parseThisHandle(ctx, this_value, "style") orelse return quickjs.Value.exception;
+
+    const existing = this_value.getPropertyStr(ctx, "__zigStyle");
+    if (!existing.isException() and existing.isObject()) {
+        return existing;
+    }
+    existing.deinit(ctx);
+
+    const style = quickjs.Value.initObject(ctx);
+    if (style.isException()) return style;
+    installMethod(ctx, style, "getPropertyValue", jsComputedStyleGetPropertyValue, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, style, "setProperty", jsStyleSetProperty, 2) catch return quickjs.Value.exception;
+    installMethod(ctx, style, "removeProperty", jsStyleRemoveProperty, 1) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "cssText", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "animation", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "transition", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "__zigStyle", style.dup(ctx)) catch return quickjs.Value.exception;
+    return style;
+}
+
+fn jsStyleSetProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const name = parseStringArg(ctx, args, 0, "style.setProperty") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name.ptr);
+    const value = if (args.len > 1) args[1].toCStringLen(ctx) else null;
+    defer if (value) |text| ctx.freeCString(text.ptr);
+    this_value.setPropertyStr(ctx, name.ptr, quickjs.Value.initStringLen(ctx, if (value) |text| text.ptr[0..text.len] else "")) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsStyleRemoveProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const name = parseStringArg(ctx, args, 0, "style.removeProperty") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name.ptr);
+    const previous = this_value.getPropertyStr(ctx, name.ptr);
+    defer previous.deinit(ctx);
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const reflect = global.getPropertyStr(ctx, "Reflect");
+    defer reflect.deinit(ctx);
+    const delete_property = reflect.getPropertyStr(ctx, "deleteProperty");
+    defer delete_property.deinit(ctx);
+    const name_value = quickjs.Value.initStringLen(ctx, name.ptr[0..name.len]);
+    defer name_value.deinit(ctx);
+    const ignored = delete_property.call(ctx, reflect, &.{ this_value, name_value });
+    defer ignored.deinit(ctx);
+    if (previous.isUndefined()) return quickjs.Value.initStringLen(ctx, "");
+    return previous.dup(ctx);
 }
 
 fn jsNodeOuterHtmlGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
@@ -2616,6 +2684,7 @@ fn createWindowObject(ctx: *quickjs.Context, window_handle: u64, document: quick
         "HTMLTextAreaElement",
         "HTMLLabelElement",
         "HTMLAnchorElement",
+        "HTMLIFrameElement",
         "NodeList",
         "HTMLCollection",
         "Event",

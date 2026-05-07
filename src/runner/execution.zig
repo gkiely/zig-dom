@@ -89,19 +89,6 @@ const zig_dom_specifier = "zig-dom";
 const zig_dom_index_specifier = "zig-dom/index";
 const zig_dom_global_registrator_specifier = "zig-dom/global-registrator";
 const zig_dom_global_registrar_specifier = "zig-dom/global-registrar";
-const react_specifier = "react";
-const react_dom_specifier = "react-dom";
-const react_dom_client_specifier = "react-dom/client";
-const react_dom_test_utils_specifier = "react-dom/test-utils";
-const testing_library_specifier = "@testing-library/react";
-const graphemesplit_specifier = "graphemesplit";
-const use_sync_external_store_specifier = "use-sync-external-store";
-const use_sync_external_store_with_selector_specifier = "use-sync-external-store/with-selector";
-const use_sync_external_store_with_selector_js_specifier = "use-sync-external-store/with-selector.js";
-const use_sync_external_store_shim_specifier = "use-sync-external-store/shim";
-const use_sync_external_store_shim_index_specifier = "use-sync-external-store/shim/index.js";
-const use_sync_external_store_shim_with_selector_specifier = "use-sync-external-store/shim/with-selector";
-const use_sync_external_store_shim_with_selector_js_specifier = "use-sync-external-store/shim/with-selector.js";
 
 const bun_shim_source =
     \\const api = globalThis.__zigBunApi;
@@ -352,110 +339,6 @@ const node_perf_hooks_shim_source =
     \\export default { performance, PerformanceObserver, PerformanceEntry };
 ;
 
-const react_shim_source =
-    \\const React = globalThis.React;
-    \\export const createElement = React.createElement;
-    \\export const Fragment = React.Fragment;
-    \\export const useRef = React.useRef;
-    \\export const useState = React.useState;
-    \\export const useMemo = React.useMemo;
-    \\export const useCallback = React.useCallback;
-    \\export const useEffect = React.useEffect;
-    \\export const useLayoutEffect = React.useLayoutEffect;
-    \\export const useInsertionEffect = React.useInsertionEffect;
-    \\export const useReducer = React.useReducer;
-    \\export const useContext = React.useContext;
-    \\export const createContext = React.createContext;
-    \\export const isValidElement = React.isValidElement;
-    \\export const cloneElement = React.cloneElement;
-    \\export const useSyncExternalStore = React.useSyncExternalStore;
-    \\export const useEffectEvent = React.useEffectEvent;
-    \\export const useDebugValue = React.useDebugValue;
-    \\export const useId = React.useId;
-    \\export const memo = React.memo;
-    \\export const forwardRef = React.forwardRef;
-    \\export default React;
-;
-
-const react_dom_client_shim_source =
-    \\const Client = globalThis.ReactDOMClient;
-    \\export const createRoot = Client.createRoot;
-    \\export default Client;
-;
-
-const react_dom_shim_source =
-    \\const Client = globalThis.ReactDOMClient;
-    \\export function createPortal(children) { return children; }
-    \\export function flushSync(callback) { return typeof callback === "function" ? callback() : undefined; }
-    \\export function unmountComponentAtNode(container) {
-    \\  if (container && typeof container.replaceChildren === "function") container.replaceChildren();
-    \\  else if (container) container.innerHTML = "";
-    \\  return true;
-    \\}
-    \\export function render(element, container) {
-    \\  const root = Client.createRoot(container);
-    \\  root.render(element);
-    \\  return root;
-    \\}
-    \\export default { createPortal, flushSync, unmountComponentAtNode, render };
-;
-
-const react_dom_test_utils_shim_source =
-    \\export function act(callback) {
-    \\  return typeof callback === "function" ? callback() : undefined;
-    \\}
-    \\export default { act };
-;
-
-const testing_library_shim_source =
-    \\export const render = globalThis.render;
-    \\export const screen = globalThis.screen;
-    \\export const fireEvent = globalThis.fireEvent;
-    \\const api = { render, screen, fireEvent };
-    \\export default api;
-;
-
-const graphemesplit_shim_source =
-    \\export default function split(input) {
-    \\  return Array.from(String(input ?? ""));
-    \\}
-;
-
-const use_sync_external_store_shim_source =
-    \\function readSnapshot(getSnapshot, getServerSnapshot) {
-    \\  if (typeof getSnapshot === "function") {
-    \\    return getSnapshot();
-    \\  }
-    \\  if (typeof getServerSnapshot === "function") {
-    \\    return getServerSnapshot();
-    \\  }
-    \\  return undefined;
-    \\}
-    \\
-    \\export function useSyncExternalStore(_subscribe, getSnapshot, getServerSnapshot) {
-    \\  return readSnapshot(getSnapshot, getServerSnapshot);
-    \\}
-    \\
-    \\export default { useSyncExternalStore };
-;
-
-const use_sync_external_store_with_selector_shim_source =
-    \\import { useSyncExternalStore } from "use-sync-external-store";
-    \\
-    \\export function useSyncExternalStoreWithSelector(
-    \\  subscribe,
-    \\  getSnapshot,
-    \\  getServerSnapshot,
-    \\  selector,
-    \\  _isEqual
-    \\) {
-    \\  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-    \\  return typeof selector === "function" ? selector(snapshot) : snapshot;
-    \\}
-    \\
-    \\export default { useSyncExternalStoreWithSelector };
-;
-
 const max_module_source_bytes = 4 * 1024 * 1024;
 const max_tsconfig_bytes = 2 * 1024 * 1024;
 const max_package_json_bytes = 512 * 1024;
@@ -588,16 +471,7 @@ const ModuleLoaderState = struct {
         }
 
         if (try self.resolveNodeModule(module_base_name, module_name)) |resolved| {
-            if (fallbackShimModuleSource(module_name) != null and try self.pathLooksCommonJs(resolved)) {
-                self.allocator.free(resolved);
-                return self.allocator.dupe(u8, module_name);
-            }
-
             return resolved;
-        }
-
-        if (fallbackShimModuleSource(module_name) != null) {
-            return self.allocator.dupe(u8, module_name);
         }
 
         return error.UnsupportedExternalModule;
@@ -696,7 +570,7 @@ const ModuleLoaderState = struct {
                     },
                     else => return err,
                 };
-                if (builtInModuleSource(resolved) != null or fallbackShimModuleSource(resolved) != null or isMockModuleId(resolved)) {
+                if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) {
                     self.allocator.free(resolved);
                     continue;
                 }
@@ -743,10 +617,6 @@ const ModuleLoaderState = struct {
 
     fn loadModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]const u8 {
         if (builtInModuleSource(module_id)) |shim_source| {
-            return shim_source;
-        }
-
-        if (fallbackShimModuleSource(module_id)) |shim_source| {
             return shim_source;
         }
 
@@ -861,7 +731,7 @@ const ModuleLoaderState = struct {
 
         var hasher = std.hash.Wyhash.init(0);
         hasher.update(module_id);
-        hasher.update("cjs-bundle-v3");
+        hasher.update("cjs-external-react-v1");
         hasher.update(std.mem.asBytes(&stat.size));
         hasher.update(std.mem.asBytes(&stat.mtime.nanoseconds));
         const digest = hasher.final();
@@ -2833,55 +2703,6 @@ fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
     return null;
 }
 
-fn fallbackShimModuleSource(module_name: []const u8) ?[]const u8 {
-    if (builtInModuleSource(module_name)) |builtin| {
-        return builtin;
-    }
-
-    if (std.mem.eql(u8, module_name, react_specifier)) {
-        return react_shim_source;
-    }
-
-    if (std.mem.eql(u8, module_name, react_dom_specifier)) {
-        return react_dom_shim_source;
-    }
-
-    if (std.mem.eql(u8, module_name, react_dom_client_specifier)) {
-        return react_dom_client_shim_source;
-    }
-
-    if (std.mem.eql(u8, module_name, react_dom_test_utils_specifier)) {
-        return react_dom_test_utils_shim_source;
-    }
-
-    if (std.mem.eql(u8, module_name, testing_library_specifier)) {
-        return testing_library_shim_source;
-    }
-
-    if (std.mem.eql(u8, module_name, graphemesplit_specifier)) {
-        return graphemesplit_shim_source;
-    }
-
-    if (
-        std.mem.eql(u8, module_name, use_sync_external_store_specifier) or
-        std.mem.eql(u8, module_name, use_sync_external_store_shim_specifier) or
-        std.mem.eql(u8, module_name, use_sync_external_store_shim_index_specifier)
-    ) {
-        return use_sync_external_store_shim_source;
-    }
-
-    if (
-        std.mem.eql(u8, module_name, use_sync_external_store_with_selector_specifier) or
-        std.mem.eql(u8, module_name, use_sync_external_store_with_selector_js_specifier) or
-        std.mem.eql(u8, module_name, use_sync_external_store_shim_with_selector_specifier) or
-        std.mem.eql(u8, module_name, use_sync_external_store_shim_with_selector_js_specifier)
-    ) {
-        return use_sync_external_store_with_selector_shim_source;
-    }
-
-    return null;
-}
-
 fn isMockModuleId(module_id: []const u8) bool {
     return std.mem.startsWith(u8, module_id, "__zig_mock__/");
 }
@@ -3022,8 +2843,7 @@ test "isRelativeSpecifier detects relative paths" {
 test "shim sources resolve built-ins and fallback shims" {
     try std.testing.expect(builtInModuleSource("bun") != null);
     try std.testing.expect(builtInModuleSource("bun:test") != null);
-    try std.testing.expect(fallbackShimModuleSource("react") != null);
-    try std.testing.expect(fallbackShimModuleSource("react-dom/client") != null);
-    try std.testing.expect(fallbackShimModuleSource("@testing-library/react") != null);
-    try std.testing.expect(fallbackShimModuleSource("not-a-shim") == null);
+    try std.testing.expect(builtInModuleSource("zig-dom") != null);
+    try std.testing.expect(builtInModuleSource("react") == null);
+    try std.testing.expect(builtInModuleSource("@testing-library/react") == null);
 }
