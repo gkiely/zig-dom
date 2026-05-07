@@ -99,17 +99,18 @@ The recent regression was caused by bypassing setup/onLoad pruning for `@mui/ico
 
 ## General Validation Commands
 
-Use fast Debug builds for implementation loops:
+Use the combined fast incremental Debug test loop:
 
 ```sh
-zig build --summary none
-zig build test --summary none
-zig-out/bin/zig-dom test tests/runner/native-dom-*.test.js tests/runner/mock-spy.test.ts tests/runner/plugin-onload.test.ts tests/runner/testing-library-role.test.js
+zig build test run -Doptimize=Debug -fincremental --summary none -- test tests/runner/native-dom-*.test.js tests/runner/mock-spy.test.ts tests/runner/plugin-onload.test.ts tests/runner/testing-library-role.test.js
 ```
+
+Use `zig build run -- test ...` for runner-only validations so the CLI is built incrementally as part of the test command.
+For downstream single-file validations, wrap the runner with `/usr/bin/time -p timeout 10s ...`; exit code 124 means the test timed out and should be treated as a hang.
 
 Use ReleaseFast only for the perf guard or performance comparisons.
 
-Anything in test execution over 20s should be treated as a likely hang, async timeout, or Zig/runtime error.
+Anything in downstream single-file test execution over 10s should be treated as a likely hang, async timeout, or Zig/runtime error.
 
 ## Milestone 1: Broaden Simple YouNeedAWiki Components
 
@@ -171,8 +172,7 @@ Likely areas:
 Validation after each fixed file:
 
 ```sh
-zig build --summary none
-zig-out/bin/zig-dom test --root ../youneedawiki <fixed-test-file>
+/usr/bin/time -p timeout 10s zig build run -Doptimize=Debug -fincremental --summary none -- test --root ../youneedawiki <fixed-test-file>
 ```
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
@@ -197,7 +197,7 @@ Rules:
 Validation:
 
 ```sh
-zig-out/bin/zig-dom test tests/runner/native-dom-window-globals.test.js tests/runner/mock-spy.test.ts tests/runner/setup-preload.test.ts tests/runner/plugin-onload.test.ts
+zig build run -Doptimize=Debug -fincremental --summary none -- test tests/runner/native-dom-window-globals.test.js tests/runner/mock-spy.test.ts tests/runner/setup-preload.test.ts tests/runner/plugin-onload.test.ts
 ```
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
@@ -215,9 +215,9 @@ Target behavior:
 Suggested flags:
 
 ```sh
-zig-out/bin/zig-dom test --dom auto tests/runner/basic.test.ts
-zig-out/bin/zig-dom test --dom always tests/runner/native-dom-smoke.test.js
-zig-out/bin/zig-dom test --dom never tests/runner/basic.test.ts
+zig build run -Doptimize=Debug -fincremental --summary none -- test --dom auto tests/runner/basic.test.ts
+zig build run -Doptimize=Debug -fincremental --summary none -- test --dom always tests/runner/native-dom-smoke.test.js
+zig build run -Doptimize=Debug -fincremental --summary none -- test --dom never tests/runner/basic.test.ts
 ```
 
 Tasks:
@@ -231,10 +231,9 @@ Tasks:
 Validation:
 
 ```sh
-zig build --summary none
-zig-out/bin/zig-dom test --dom never tests/runner/basic.test.ts
-zig-out/bin/zig-dom test --dom auto tests/runner/basic.test.tsx
-zig-out/bin/zig-dom test --dom always tests/runner/native-dom-smoke.test.js
+zig build run -Doptimize=Debug -fincremental --summary none -- test --dom never tests/runner/basic.test.ts
+zig build run -Doptimize=Debug -fincremental --summary none -- test --dom auto tests/runner/basic.test.tsx
+zig build run -Doptimize=Debug -fincremental --summary none -- test --dom always tests/runner/native-dom-smoke.test.js
 ```
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
@@ -268,9 +267,9 @@ Tasks:
 Target command shapes:
 
 ```sh
-zig-out/bin/zig-dom wpt --file wpt/runner/tests/events-basic.any.ts
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/events.json --filter events-basic
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/fast-smoke.json --expected wpt/expected/fast-smoke.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --file wpt/runner/tests/events-basic.any.ts
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/events.json --filter events-basic
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/fast-smoke.json --expected wpt/expected/fast-smoke.json
 ```
 
 These flags/manifests are not all implemented yet. Implement them in this milestone before relying on them in later WPT work.
@@ -284,9 +283,8 @@ Acceptance:
 Validation:
 
 ```sh
-zig build --summary none
-zig-out/bin/zig-dom wpt --file wpt/runner/tests/events-basic.any.ts
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/fast-smoke.json --expected wpt/expected/fast-smoke.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --file wpt/runner/tests/events-basic.any.ts
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/fast-smoke.json --expected wpt/expected/fast-smoke.json
 ```
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
@@ -306,11 +304,11 @@ Recommended order:
 Commands:
 
 ```sh
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/events.json --expected wpt/expected/events.json
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/forms.json --expected wpt/expected/forms.json
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/selectors.json --expected wpt/expected/selectors.json
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/parser-fragments.json --expected wpt/expected/parser-fragments.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/events.json --expected wpt/expected/events.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/forms.json --expected wpt/expected/forms.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/selectors.json --expected wpt/expected/selectors.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/parser-fragments.json --expected wpt/expected/parser-fragments.json
 ```
 
 Rules:
@@ -351,8 +349,7 @@ Rules:
 Validation after each fixed file:
 
 ```sh
-zig build --summary none
-zig-out/bin/zig-dom test --root ../youneedawiki <fixed-test-file>
+/usr/bin/time -p timeout 10s zig build run -Doptimize=Debug -fincremental --summary none -- test --root ../youneedawiki <fixed-test-file>
 ```
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
@@ -371,9 +368,9 @@ Expand coverage for:
 Validation:
 
 ```sh
-zig-out/bin/zig-dom test tests/runner/native-dom-events.test.js tests/runner/native-dom-forms-elements.test.js
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/events.json --expected wpt/expected/events.json
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/forms.json --expected wpt/expected/forms.json
+zig build run -Doptimize=Debug -fincremental --summary none -- test tests/runner/native-dom-events.test.js tests/runner/native-dom-forms-elements.test.js
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/events.json --expected wpt/expected/events.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/forms.json --expected wpt/expected/forms.json
 ```
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
@@ -391,9 +388,9 @@ Expand support for:
 Validation:
 
 ```sh
-zig-out/bin/zig-dom test tests/runner/native-dom-querying.test.js tests/runner/native-dom-parsing-serialization.test.js tests/runner/testing-library-role.test.js
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/selectors.json --expected wpt/expected/selectors.json
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/parser-fragments.json --expected wpt/expected/parser-fragments.json
+zig build run -Doptimize=Debug -fincremental --summary none -- test tests/runner/native-dom-querying.test.js tests/runner/native-dom-parsing-serialization.test.js tests/runner/testing-library-role.test.js
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/selectors.json --expected wpt/expected/selectors.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/parser-fragments.json --expected wpt/expected/parser-fragments.json
 ```
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
@@ -403,13 +400,13 @@ Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 Once local WPT slices improve, run broader upstream smoke:
 
 ```sh
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/upstream-dom-smoke.json --expected wpt/expected/upstream-dom-smoke.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/upstream-dom-smoke.json --expected wpt/expected/upstream-dom-smoke.json
 ```
 
 Then start reducing failures in:
 
 ```sh
-zig-out/bin/zig-dom wpt --manifest wpt/manifest/upstream-dom.json --expected wpt/expected/upstream-dom.json
+zig build run -Doptimize=Debug -fincremental --summary none -- wpt --manifest wpt/manifest/upstream-dom.json --expected wpt/expected/upstream-dom.json
 ```
 
 Do not try to make all upstream WPT green in one pass. Pick a cluster, fix it, add local regression tests, update expected failures only when justified, then run the perf guard.
@@ -440,9 +437,7 @@ Tasks:
 Validation:
 
 ```sh
-zig build --summary none
-zig build test --summary none
-zig-out/bin/zig-dom test tests/runner/global-registrator-builtin.test.js tests/runner/zig-dom-builtin-module.test.js tests/runner/native-dom-*.test.js
+zig build run -Doptimize=Debug -fincremental --summary none -- test tests/runner/global-registrator-builtin.test.js tests/runner/zig-dom-builtin-module.test.js tests/runner/native-dom-*.test.js
 ```
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
