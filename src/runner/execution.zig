@@ -2744,13 +2744,25 @@ fn findImportStatementEnd(source: []const u8, start: usize) usize {
     return source.len;
 }
 
+fn findImportFromIndex(source: []const u8) ?usize {
+    var cursor: usize = 0;
+    while (std.mem.indexOfPos(u8, source, cursor, "from")) |index| {
+        const before_ok = index == 0 or !isIdentifierContinue(source[index - 1]);
+        const after = index + "from".len;
+        const after_ok = after >= source.len or !isIdentifierContinue(source[after]);
+        if (before_ok and after_ok) return index;
+        cursor = after;
+    }
+    return null;
+}
+
 fn isUnusedImportStatement(source: []const u8, statement: []const u8, statement_end: usize) bool {
     const trimmed = std.mem.trim(u8, statement, " \t\r\n");
     if (!std.mem.startsWith(u8, trimmed, "import ")) return false;
-    if (std.mem.indexOf(u8, trimmed, " from ") == null) return false;
+    if (findImportFromIndex(trimmed) == null) return false;
 
     const bindings_start = "import ".len;
-    const from_index = std.mem.indexOf(u8, trimmed, " from ") orelse return false;
+    const from_index = findImportFromIndex(trimmed) orelse return false;
     const bindings = std.mem.trim(u8, trimmed[bindings_start..from_index], " \t");
     if (bindings.len == 0 or std.mem.eql(u8, bindings, "type")) return true;
     if (std.mem.startsWith(u8, bindings, "{") and std.mem.endsWith(u8, bindings, "}")) {
@@ -2808,6 +2820,33 @@ fn onLoadTransformExtension(loader: []const u8) ?[]const u8 {
     }
 
     return null;
+}
+
+test "pruneUnusedImports removes only unused import statements" {
+    const source = "import { unused } from \"pkg\";export const value = 1;\n";
+    const out = try pruneUnusedImports(std.testing.allocator, source);
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expectEqualStrings("export const value = 1;\n", out);
+}
+
+test "foldNodeEnvConditionals keeps only active CommonJS branch" {
+    const source =
+        \\if (process.env.NODE_ENV !== 'production') {
+        \\  checkDCE();
+        \\}
+        \\if (process.env.NODE_ENV === 'production') {
+        \\  module.exports = require('./prod.js');
+        \\} else {
+        \\  module.exports = require('./dev.js');
+        \\}
+    ;
+    const out = try foldNodeEnvConditionals(std.testing.allocator, source);
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "require('./dev.js')") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "require('./prod.js')") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "checkDCE") != null);
 }
 
 fn canonicalizePath(allocator: Allocator, io: std.Io, path: []const u8) ![]u8 {
