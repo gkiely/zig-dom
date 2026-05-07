@@ -102,59 +102,7 @@ const bun_test_shim_source =
     \\export default bunTest;
 ;
 
-const zig_dom_global_registrator_shim_source =
-    \\function applyLocation(urlValue) {
-    \\  if (!urlValue || !globalThis.location) {
-    \\    return;
-    \\  }
-    \\
-    \\  try {
-    \\    const next = new URL(String(urlValue));
-    \\    globalThis.location.href = next.href;
-    \\    globalThis.location.protocol = next.protocol;
-    \\    globalThis.location.host = next.host;
-    \\    globalThis.location.hostname = next.hostname;
-    \\    globalThis.location.port = next.port;
-    \\    globalThis.location.pathname = next.pathname;
-    \\    globalThis.location.search = next.search;
-    \\    globalThis.location.hash = next.hash;
-    \\  } catch {
-    \\    // Ignore invalid URL input to keep setup resilient.
-    \\  }
-    \\}
-    \\
-    \\class GlobalRegistrator {
-    \\  static register(options = {}) {
-    \\    const target = globalThis.window && typeof globalThis.window === "object" ? globalThis.window : globalThis;
-    \\    GlobalRegistrator._window = target;
-    \\
-    \\    if (options && typeof options === "object") {
-    \\      applyLocation(options.url);
-    \\    }
-    \\
-    \\    return target;
-    \\  }
-    \\
-    \\  static reset() {
-    \\    if (globalThis.document && globalThis.document.body) {
-    \\      globalThis.document.body.innerHTML = "";
-    \\    }
-    \\  }
-    \\
-    \\  static unregister() {
-    \\    GlobalRegistrator._window = null;
-    \\  }
-    \\
-    \\  static currentWindow() {
-    \\    return GlobalRegistrator._window;
-    \\  }
-    \\}
-    \\
-    \\GlobalRegistrator._window = null;
-    \\
-    \\export { GlobalRegistrator };
-    \\export default { GlobalRegistrator };
-;
+const zig_dom_global_registrator_shim_source = @embedFile("builtins/zig-dom/global-registrator.js");
 
 const node_url_shim_source =
     \\const URLCtor = globalThis.URL;
