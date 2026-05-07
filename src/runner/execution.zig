@@ -484,6 +484,7 @@ const ModuleLoaderState = struct {
     io: std.Io,
     runtime: ?*Runtime,
     loaded_modules: std.StringHashMap(*ModuleDef),
+    source_cache: std.StringHashMap([]u8),
     mock_module_sources: std.StringHashMap([]u8),
     requested_exports: std.StringHashMap(ExportNameSet),
     path_alias_root: ?[]u8,
@@ -501,6 +502,7 @@ const ModuleLoaderState = struct {
             .io = io,
             .runtime = null,
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
+            .source_cache = std.StringHashMap([]u8).init(allocator),
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
             .requested_exports = std.StringHashMap(ExportNameSet).init(allocator),
             .path_alias_root = null,
@@ -530,6 +532,13 @@ const ModuleLoaderState = struct {
         }
         self.requested_exports.deinit();
 
+        var source_iterator = self.source_cache.iterator();
+        while (source_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.source_cache.deinit();
+
         var loaded_iterator = self.loaded_modules.iterator();
         while (loaded_iterator.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
@@ -543,6 +552,22 @@ const ModuleLoaderState = struct {
 
     fn requestedExportsFor(self: *ModuleLoaderState, module_id: []const u8) ?*ExportNameSet {
         return self.requested_exports.getPtr(module_id);
+    }
+
+    fn readFileCached(self: *ModuleLoaderState, path: []const u8, max_bytes: usize) ![]const u8 {
+        if (self.source_cache.get(path)) |source| return source;
+
+        const source = try std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            path,
+            self.allocator,
+            .limited(max_bytes),
+        );
+        errdefer self.allocator.free(source);
+        const key = try self.allocator.dupe(u8, path);
+        errdefer self.allocator.free(key);
+        try self.source_cache.put(key, source);
+        return source;
     }
 
     fn recordRequestedExport(self: *ModuleLoaderState, module_id: []const u8, export_name: []const u8) !void {
@@ -617,29 +642,17 @@ const ModuleLoaderState = struct {
         }
 
         if (std.mem.eql(u8, default_loader, "js")) {
-            const source = try std.Io.Dir.cwd().readFileAlloc(
-                self.io,
-                module_id,
-                self.allocator,
-                .limited(max_module_source_bytes),
-            );
+            const source = try self.readFileCached(module_id, max_module_source_bytes);
 
             if (isCommonJsSource(module_id, source)) {
-                self.allocator.free(source);
                 return try self.loadCommonJsModuleSource(module_id);
             }
 
-            return source;
+            return try self.allocator.dupe(u8, source);
         }
 
         if (std.mem.eql(u8, default_loader, "json")) {
-            const json = try std.Io.Dir.cwd().readFileAlloc(
-                self.io,
-                module_id,
-                self.allocator,
-                .limited(max_module_source_bytes),
-            );
-            defer self.allocator.free(json);
+            const json = try self.readFileCached(module_id, max_module_source_bytes);
 
             var source: std.ArrayList(u8) = .empty;
             errdefer source.deinit(self.allocator);
@@ -662,13 +675,7 @@ const ModuleLoaderState = struct {
     }
 
     fn loadCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
-        const source = try std.Io.Dir.cwd().readFileAlloc(
-            self.io,
-            module_id,
-            self.allocator,
-            .limited(max_module_source_bytes),
-        );
-        defer self.allocator.free(source);
+        const source = try self.readFileCached(module_id, max_module_source_bytes);
 
         return self.buildNativeCommonJsModuleSource(module_id, source);
     }
@@ -722,7 +729,13 @@ const ModuleLoaderState = struct {
             });
         }
 
-        const export_names = try self.collectCommonJsExportNamesDeep(module_id, pruned_source);
+        const export_names = if (self.requestedExportsFor(module_id)) |requested|
+            if (!requested.all and requested.initialized)
+                try self.commonJsExportNamesFromRequested(requested)
+            else
+                try self.collectCommonJsExportNamesDeep(module_id, pruned_source)
+        else
+            try self.collectCommonJsExportNamesDeep(module_id, pruned_source);
         defer {
             for (export_names) |name| self.allocator.free(name);
             self.allocator.free(export_names);
@@ -793,13 +806,7 @@ const ModuleLoaderState = struct {
         const loader = transform.loaderForPath(resolved) orelse return false;
         if (!std.mem.eql(u8, loader, "js")) return false;
 
-        const source = std.Io.Dir.cwd().readFileAlloc(
-            self.io,
-            resolved,
-            self.allocator,
-            .limited(max_module_source_bytes),
-        ) catch return false;
-        defer self.allocator.free(source);
+        const source = self.readFileCached(resolved, max_module_source_bytes) catch return false;
 
         if (!isCommonJsSource(resolved, source)) return false;
         return try self.commonJsSourceRequiresOnlyLazyCompatible(resolved, source);
@@ -822,13 +829,7 @@ const ModuleLoaderState = struct {
             const loader = transform.loaderForPath(resolved) orelse return false;
             if (!std.mem.eql(u8, loader, "js")) return false;
 
-            const child_source = std.Io.Dir.cwd().readFileAlloc(
-                self.io,
-                resolved,
-                self.allocator,
-                .limited(max_module_source_bytes),
-            ) catch return false;
-            defer self.allocator.free(child_source);
+            const child_source = self.readFileCached(resolved, max_module_source_bytes) catch return false;
 
             if (!isCommonJsSource(resolved, child_source)) return false;
         }
@@ -874,8 +875,7 @@ const ModuleLoaderState = struct {
         }
 
         const source = blk: {
-            const raw = try std.Io.Dir.cwd().readFileAlloc(self.io, resolved, self.allocator, .limited(max_module_source_bytes));
-            defer self.allocator.free(raw);
+            const raw = try self.readFileCached(resolved, max_module_source_bytes);
             if (!isCommonJsSource(resolved, raw)) return error.UnsupportedExternalModule;
             break :blk try self.buildLazyCommonJsScriptSource(resolved, raw);
         };
@@ -897,8 +897,7 @@ const ModuleLoaderState = struct {
     }
 
     fn loadCommonJsJsonValue(self: *ModuleLoaderState, ctx: *ModuleContext, module_id: []const u8) !quickjs.Value {
-        const json = try std.Io.Dir.cwd().readFileAlloc(self.io, module_id, self.allocator, .limited(max_module_source_bytes));
-        defer self.allocator.free(json);
+        const json = try self.readFileCached(module_id, max_module_source_bytes);
 
         const filename_z = try self.allocator.dupeZ(u8, module_id);
         defer self.allocator.free(filename_z);
@@ -1079,13 +1078,7 @@ const ModuleLoaderState = struct {
         const package_json_stat = std.Io.Dir.cwd().statFile(self.io, package_json_path, .{}) catch return null;
         if (package_json_stat.kind != .file) return null;
 
-        const package_json_source = try std.Io.Dir.cwd().readFileAlloc(
-            self.io,
-            package_json_path,
-            self.allocator,
-            .limited(max_package_json_bytes),
-        );
-        defer self.allocator.free(package_json_source);
+        const package_json_source = try self.readFileCached(package_json_path, max_package_json_bytes);
 
         var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, package_json_source, .{});
         defer parsed.deinit();
@@ -1185,6 +1178,23 @@ const ModuleLoaderState = struct {
         return names.toOwnedSlice(self.allocator);
     }
 
+    fn commonJsExportNamesFromRequested(self: *ModuleLoaderState, requested: *const ExportNameSet) ![]const []u8 {
+        var names: std.ArrayList([]u8) = .empty;
+        errdefer {
+            for (names.items) |name| self.allocator.free(name);
+            names.deinit(self.allocator);
+        }
+
+        var iterator = requested.names.iterator();
+        while (iterator.next()) |entry| {
+            const name = entry.key_ptr.*;
+            if (!isValidIdentifierName(name)) continue;
+            try names.append(self.allocator, try self.allocator.dupe(u8, name));
+        }
+
+        return names.toOwnedSlice(self.allocator);
+    }
+
     fn collectCommonJsExportNamesInto(
         self: *ModuleLoaderState,
         module_id: []const u8,
@@ -1215,13 +1225,7 @@ const ModuleLoaderState = struct {
             if (scanned.contains(resolved)) continue;
             if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) continue;
 
-            const child_source = std.Io.Dir.cwd().readFileAlloc(
-                self.io,
-                resolved,
-                self.allocator,
-                .limited(max_module_source_bytes),
-            ) catch continue;
-            defer self.allocator.free(child_source);
+            const child_source = self.readFileCached(resolved, max_module_source_bytes) catch continue;
 
             if (isCommonJsSource(resolved, child_source)) {
                 try self.collectCommonJsExportNamesInto(resolved, child_source, names, dedup, scanned);
@@ -1647,13 +1651,7 @@ fn escapeJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
             return null;
         }
 
-        const package_json_source = try std.Io.Dir.cwd().readFileAlloc(
-            self.io,
-            package_json_path,
-            self.allocator,
-            .limited(max_package_json_bytes),
-        );
-        defer self.allocator.free(package_json_source);
+        const package_json_source = try self.readFileCached(package_json_path, max_package_json_bytes);
 
         var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, package_json_source, .{});
         defer parsed.deinit();
@@ -1674,13 +1672,7 @@ fn escapeJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
             return null;
         }
 
-        const package_json_source = try std.Io.Dir.cwd().readFileAlloc(
-            self.io,
-            package_json_path,
-            self.allocator,
-            .limited(max_package_json_bytes),
-        );
-        defer self.allocator.free(package_json_source);
+        const package_json_source = try self.readFileCached(package_json_path, max_package_json_bytes);
 
         if (try self.resolveNodeModulePackageEntry(package_dir, package_json_source, true)) |resolved| {
             return resolved;
