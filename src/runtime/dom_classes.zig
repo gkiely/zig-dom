@@ -77,6 +77,7 @@ pub const DomClasses = struct {
         try installMethod(ctx, node_proto, "removeChild", jsNodeRemoveChild, 1);
         try installMethod(ctx, node_proto, "replaceChild", jsNodeReplaceChild, 2);
         try installMethod(ctx, node_proto, "cloneNode", jsNodeCloneNode, 1);
+        try installMethod(ctx, node_proto, "click", jsElementClick, 0);
         try installMethod(ctx, node_proto, "addEventListener", jsEventTargetAddEventListener, 3);
         try installMethod(ctx, node_proto, "removeEventListener", jsEventTargetRemoveEventListener, 3);
         try installMethod(ctx, node_proto, "dispatchEvent", jsEventTargetDispatchEvent, 1);
@@ -1647,7 +1648,9 @@ fn isKnownFastSelector(selector: []const u8) bool {
         std.mem.eql(u8, selector, "button") or
         std.mem.eql(u8, selector, "a") or
         std.mem.eql(u8, selector, "area") or
-        std.mem.eql(u8, selector, "*[role~=\"link\"]");
+        std.mem.eql(u8, selector, "*[role~=\"link\"]") or
+        std.mem.eql(u8, selector, "[title]") or
+        std.mem.eql(u8, selector, "svg > title");
 }
 
 fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, selector: []const u8) bool {
@@ -1658,6 +1661,22 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
     if (std.mem.eql(u8, selector, "button")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "button");
     if (std.mem.eql(u8, selector, "a")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "a");
     if (std.mem.eql(u8, selector, "area")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "area");
+    if (std.mem.eql(u8, selector, "[title]")) {
+        const title = elementAttributeString(ctx, element, "title") orelse return false;
+        defer ctx.freeCString(title.ptr);
+        return true;
+    }
+    if (std.mem.eql(u8, selector, "svg > title")) {
+        if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "title")) return false;
+        const parent = jsNodeParentElementGet(ctx, element);
+        defer parent.deinit(ctx);
+        if (parent.isNull() or parent.isUndefined() or parent.isException()) return false;
+        const parent_local_value = jsElementLocalNameGet(ctx, parent);
+        defer parent_local_value.deinit(ctx);
+        const parent_local = parent_local_value.toCStringLen(ctx) orelse return false;
+        defer ctx.freeCString(parent_local.ptr);
+        return std.ascii.eqlIgnoreCase(parent_local.ptr[0..parent_local.len], "svg");
+    }
     if (std.mem.eql(u8, selector, "a[href]") or std.mem.eql(u8, selector, "a[href]:not([href=\"\"])")) {
         if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "a")) return false;
         const href = elementAttributeString(ctx, element, "href") orelse return false;
@@ -1861,7 +1880,11 @@ fn jsDocumentQuerySelectorAll(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
 }
 
 fn needsFastSelectorFallback(selector: []const u8) bool {
-    return std.mem.indexOfScalar(u8, selector, ',') != null or std.mem.indexOf(u8, selector, ":not") != null or std.mem.indexOf(u8, selector, "[role~=") != null;
+    return std.mem.indexOfScalar(u8, selector, ',') != null or
+        std.mem.indexOf(u8, selector, ":not") != null or
+        std.mem.indexOf(u8, selector, "[role~=") != null or
+        std.mem.indexOf(u8, selector, ">") != null or
+        std.mem.eql(u8, std.mem.trim(u8, selector, " \t\n\r"), "[title]");
 }
 
 fn querySelectorAllFast(ctx: *quickjs.Context, root: quickjs.Value, selector: []const u8) quickjs.Value {
@@ -2170,6 +2193,35 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     event.setPropertyStr(ctx, "_currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
     return quickjs.Value.initBool(!boolProperty(ctx, event, "_canceled"));
+}
+
+fn jsElementClick(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const mouse_event_ctor = global.getPropertyStr(ctx, "MouseEvent");
+    defer mouse_event_ctor.deinit(ctx);
+    if (mouse_event_ctor.isException() or !mouse_event_ctor.isObject()) {
+        return quickjs.Value.undefined;
+    }
+
+    const type_arg = quickjs.Value.initStringLen(ctx, "click");
+    defer type_arg.deinit(ctx);
+    const options = quickjs.Value.initObject(ctx);
+    if (options.isException()) return quickjs.Value.exception;
+    defer options.deinit(ctx);
+    options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    options.setPropertyStr(ctx, "cancelable", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+
+    const event_args = [_]quickjs.Value{ type_arg, options };
+    const event = createEventObject(ctx, mouse_event_ctor, event_args[0..], .mouse);
+    defer event.deinit(ctx);
+    if (event.isException()) return event.dup(ctx);
+
+    const dispatched = jsEventTargetDispatchEvent(ctx, this_value, @ptrCast(&[_]quickjs.Value{event}));
+    defer dispatched.deinit(ctx);
+    return quickjs.Value.undefined;
 }
 
 fn documentWindowNodeGet(

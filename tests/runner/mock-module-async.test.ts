@@ -1,5 +1,5 @@
-import "./fixtures/setup/mock-module-async.ts";
 import { expect, test } from "bun:test";
+import "./fixtures/setup/mock-module-async.ts";
 
 test("mock.module supports async module override factories", async () => {
   const overridden = await import("virtual-async-target");

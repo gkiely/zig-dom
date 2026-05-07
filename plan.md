@@ -18,10 +18,15 @@ The first version should run `.js`, `.ts`, `.jsx`, and `.tsx` tests plus a usefu
 - Passing files:
   - `../youneedawiki/plugins/replaceLogs.test.ts`
   - `../youneedawiki/src/elements/PoweredBy/PoweredBy.test.tsx`
-- Current first blocker:
-  - `../youneedawiki/src/elements/Buttons/ViewInDrive.test.tsx` fails during collection with `module resolution failed`.
+  - `../youneedawiki/src/elements/Buttons/ViewInDrive.test.tsx`
+  - `../youneedawiki/src/elements/Buttons/Edit.test.tsx`
+- Current first blockers:
+  - `../youneedawiki/src/elements/Title/Title.test.tsx` runs under the 10s loop budget, but Testing Library role/name matching does not match heading names such as `/r\st/i` against rendered text like `r t`.
+  - `../youneedawiki/src/elements/Icon/Icon.test.tsx` runs under the 10s loop budget, but still has Testing Library role/matcher gaps.
+  - `../youneedawiki/src/elements/OrderedListChecklistMacro.test.tsx` currently exceeds the 10s iteration budget and should be treated as a performance blocker before behavior work.
 - Missing API / capability currently blocking next gate:
-  - Bare external package resolution/shimming for ESM imports from `node_modules` (example: `@r2wc/react-to-web-component`, then likely additional package imports in the same dependency chain).
+  - More complete Testing Library compatibility on top of native DOM accessible-name/role behavior.
+  - Faster graph preload/transform for larger TSX dependency graphs; anything over 10s is too slow for the target iteration loop.
 - Local fixture added for related runner support:
   - Setup/preload fixtures proving setup execution order and setup module loading path:
     - `tests/runner/setup-preload.test.ts`

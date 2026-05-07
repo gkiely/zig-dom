@@ -70,6 +70,8 @@ const zig_dom_global_registrar_specifier = "zig-dom/global-registrar";
 const react_specifier = "react";
 const react_dom_client_specifier = "react-dom/client";
 const testing_library_specifier = "@testing-library/react";
+const mui_icons_material_specifier = "@mui/icons-material";
+const mui_create_svg_icon_specifier = "@mui/material/utils/createSvgIcon";
 const graphemesplit_specifier = "graphemesplit";
 const use_sync_external_store_specifier = "use-sync-external-store";
 const use_sync_external_store_with_selector_specifier = "use-sync-external-store/with-selector";
@@ -359,6 +361,75 @@ const testing_library_shim_source =
     \\export default api;
 ;
 
+const mui_icons_material_shim_source =
+    \\const React = globalThis.React;
+    \\function icon(displayName) {
+    \\  return function Icon(props = {}) {
+    \\    const { titleAccess, htmlColor, children, ...rest } = props;
+    \\    return React.createElement("svg", rest, [
+    \\      React.createElement("title", { key: "title" }, titleAccess || displayName),
+    \\      children
+    \\    ]);
+    \\  };
+    \\}
+    \\export const Add = icon("Add");
+    \\export const AddLinkOutlined = icon("AddLinkOutlined");
+    \\export const AddToDrive = icon("AddToDrive");
+    \\export const ArrowDropDown = icon("ArrowDropDown");
+    \\export const AutoAwesome = icon("AutoAwesome");
+    \\export const Autorenew = icon("Autorenew");
+    \\export const Check = icon("Check");
+    \\export const CheckCircleOutline = icon("CheckCircleOutline");
+    \\export const Checklist = icon("Checklist");
+    \\export const ChevronRight = icon("ChevronRight");
+    \\export const Close = icon("Close");
+    \\export const CloudDoneOutlined = icon("CloudDoneOutlined");
+    \\export const ContentCopy = icon("ContentCopy");
+    \\export const CreateNewFolderOutlined = icon("CreateNewFolderOutlined");
+    \\export const DoneAll = icon("DoneAll");
+    \\export const DoNotDisturb = icon("DoNotDisturb");
+    \\export const Edit = icon("Edit");
+    \\export const ErrorOutline = icon("ErrorOutline");
+    \\export const ExpandMore = icon("ExpandMore");
+    \\export const Folder = icon("Folder");
+    \\export const Home = icon("Home");
+    \\export const InfoOutlined = icon("InfoOutlined");
+    \\export const LinkOutlined = icon("LinkOutlined");
+    \\export const Logout = icon("Logout");
+    \\export const MailOutline = icon("MailOutline");
+    \\export const ManageAccounts = icon("ManageAccounts");
+    \\export const Menu = icon("Menu");
+    \\export const MoreHoriz = icon("MoreHoriz");
+    \\export const MoreVert = icon("MoreVert");
+    \\export const OpenInNew = icon("OpenInNew");
+    \\export const Person = icon("Person");
+    \\export const PersonAddAltOutlined = icon("PersonAddAltOutlined");
+    \\export const RestartAlt = icon("RestartAlt");
+    \\export const Schedule = icon("Schedule");
+    \\export const Search = icon("Search");
+    \\export const SearchOff = icon("SearchOff");
+    \\export const SettingsOutlined = icon("SettingsOutlined");
+    \\export const SupportAgent = icon("SupportAgent");
+    \\export const TaskAlt = icon("TaskAlt");
+    \\export const Timeline = icon("Timeline");
+    \\export const UnfoldMore = icon("UnfoldMore");
+    \\export const VisibilityOutlined = icon("VisibilityOutlined");
+;
+
+const mui_create_svg_icon_shim_source =
+    \\const React = globalThis.React;
+    \\export default function createSvgIcon(node, displayName) {
+    \\  return function SvgIcon(props = {}) {
+    \\    const { titleAccess, htmlColor, children, ...rest } = props;
+    \\    return React.createElement("svg", rest, [
+    \\      React.createElement("title", { key: "title" }, titleAccess || displayName),
+    \\      node,
+    \\      children
+    \\    ]);
+    \\  };
+    \\}
+;
+
 const graphemesplit_shim_source =
     \\export default function split(input) {
     \\  return Array.from(String(input ?? ""));
@@ -519,6 +590,10 @@ const ModuleLoaderState = struct {
             return std.fmt.allocPrint(self.allocator, "__zig_mock__/{s}", .{module_name});
         }
 
+        if (preferFallbackShimBeforeNodeResolution(module_name)) {
+            return self.allocator.dupe(u8, module_name);
+        }
+
         if (try self.resolvePathAlias(module_base_name, module_name)) |resolved| {
             return resolved;
         }
@@ -583,7 +658,10 @@ const ModuleLoaderState = struct {
             const value = try self.allocator.dupe(u8, output_path);
             errdefer self.allocator.free(value);
 
-            try self.transformed_outputs.put(key, value);
+            if (try self.transformed_outputs.fetchPut(key, value)) |previous| {
+                self.allocator.free(key);
+                self.allocator.free(previous.value);
+            }
         }
     }
 
@@ -614,12 +692,7 @@ const ModuleLoaderState = struct {
         while (index < queue.items.len) : (index += 1) {
             const module_id = queue.items[index];
 
-            const source = try std.Io.Dir.cwd().readFileAlloc(
-                self.io,
-                module_id,
-                self.allocator,
-                .limited(max_module_source_bytes),
-            );
+            const source = try self.loadModuleSourceForGraph(module_id);
             defer self.allocator.free(source);
 
             const specifiers = try collectEsmSpecifiers(self.allocator, source);
@@ -658,6 +731,33 @@ const ModuleLoaderState = struct {
         }
 
         return queue.toOwnedSlice(self.allocator);
+    }
+
+    fn loadModuleSourceForGraph(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
+        const default_loader = transform.loaderForPath(module_id) orelse return error.UnsupportedModuleExtension;
+        _ = default_loader;
+
+        if (std.fs.path.isAbsolute(module_id)) {
+            if (self.runtime) |runtime| {
+                var hook_result = (try self.invokeOnLoad(runtime, module_id)) orelse {
+                    return std.Io.Dir.cwd().readFileAlloc(
+                        self.io,
+                        module_id,
+                        self.allocator,
+                        .limited(max_module_source_bytes),
+                    );
+                };
+                defer hook_result.deinit(self.allocator);
+                return try self.allocator.dupe(u8, hook_result.contents);
+            }
+        }
+
+        return std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            module_id,
+            self.allocator,
+            .limited(max_module_source_bytes),
+        );
     }
 
     fn loadModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]const u8 {
@@ -2711,6 +2811,14 @@ fn fallbackShimModuleSource(module_name: []const u8) ?[]const u8 {
         return testing_library_shim_source;
     }
 
+    if (std.mem.eql(u8, module_name, mui_icons_material_specifier)) {
+        return mui_icons_material_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, mui_create_svg_icon_specifier)) {
+        return mui_create_svg_icon_shim_source;
+    }
+
     if (std.mem.eql(u8, module_name, graphemesplit_specifier)) {
         return graphemesplit_shim_source;
     }
@@ -2735,6 +2843,11 @@ fn fallbackShimModuleSource(module_name: []const u8) ?[]const u8 {
     return null;
 }
 
+fn preferFallbackShimBeforeNodeResolution(module_name: []const u8) bool {
+    return std.mem.eql(u8, module_name, mui_icons_material_specifier) or
+        std.mem.eql(u8, module_name, mui_create_svg_icon_specifier);
+}
+
 fn isMockModuleId(module_id: []const u8) bool {
     return std.mem.startsWith(u8, module_id, "__zig_mock__/");
 }
@@ -2752,19 +2865,15 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
         return false;
     }
 
-    const has_cjs_markers =
-        std.mem.indexOf(u8, source, "module.exports") != null or
-        std.mem.indexOf(u8, source, "exports.") != null or
-        std.mem.indexOf(u8, source, "require(") != null;
-    if (!has_cjs_markers) {
+    if (std.mem.indexOf(u8, source, "module.exports") != null or std.mem.indexOf(u8, source, "exports.") != null) {
+        return true;
+    }
+
+    if (std.mem.indexOf(u8, source, "require(") == null) {
         return false;
     }
 
-    if (std.mem.indexOf(u8, source, "import ") != null or std.mem.indexOf(u8, source, "export ") != null) {
-        return false;
-    }
-
-    return true;
+    return std.mem.indexOf(u8, source, "import ") == null and std.mem.indexOf(u8, source, "export ") == null;
 }
 
 fn canonicalizePath(allocator: Allocator, io: std.Io, path: []const u8) ![]u8 {

@@ -149,6 +149,15 @@
     registerTest(name, null, null, { skip: false, only: false, todo: true });
   };
 
+  test.each = function testEach(cases) {
+    return function testEachRegister(name, fn, options) {
+      for (const item of cases || []) {
+        const label = String(name).replace(/%[sipdj]/g, () => String(item && item.title ? item.title : item));
+        registerTest(label, () => fn(item), options, { skip: false, only: false, todo: false });
+      }
+    };
+  };
+
   function describe(name, fn) {
     registerDescribe(name, fn, { skip: false });
   }
@@ -290,12 +299,33 @@
         if (arguments.length > 1 && String(actual) !== String(value)) {
           throw new Error(`Expected attribute ${String(name)} to be ${String(value)} but received ${String(actual)}`);
         }
+      },
+      toHaveBeenCalled() {
+        const calls = received && received.mock && received.mock.calls;
+        if (!Array.isArray(calls) || calls.length === 0) {
+          throw new Error("Expected mock function to have been called");
+        }
       }
     };
 
     for (const [name, matcher] of Object.entries(expectExtensions)) {
       matchers[name] = (...args) => {
         runExtendedMatcher(name, matcher, received, args);
+      };
+    }
+
+    matchers.not = {};
+    for (const [name, matcher] of Object.entries(matchers)) {
+      if (name === "not" || typeof matcher !== "function") {
+        continue;
+      }
+      matchers.not[name] = (...args) => {
+        try {
+          matcher(...args);
+        } catch {
+          return;
+        }
+        throw new Error(`Expected matcher ${name} not to pass`);
       };
     }
 
@@ -766,6 +796,15 @@
         continue;
       }
 
+      if (key === "ref") {
+        if (typeof value === "function") {
+          value(element);
+        } else if (value && typeof value === "object") {
+          value.current = element;
+        }
+        continue;
+      }
+
       if (key === "className") {
         element.setAttribute("class", String(value));
         continue;
@@ -988,6 +1027,31 @@
   }
 
   function createTestingLibraryHelpers() {
+    function findByTitle(root, title) {
+      const expected = title instanceof RegExp ? title : String(title);
+      const stack = [root];
+      while (stack.length > 0) {
+        const node = stack.shift();
+        if (!node || typeof node !== "object") {
+          continue;
+        }
+
+        const attr = typeof node.getAttribute === "function" ? node.getAttribute("title") : null;
+        const titleText = node.tagName && node.tagName.toLowerCase() === "title" ? node.textContent : null;
+        const actual = attr || titleText;
+        if (actual != null && (expected instanceof RegExp ? expected.test(String(actual)) : String(actual) === expected)) {
+          return node;
+        }
+
+        if (node.children && typeof node.children.length === "number") {
+          for (let index = 0; index < node.children.length; index += 1) {
+            stack.push(node.children[index]);
+          }
+        }
+      }
+      return null;
+    }
+
     function getByTextFrom(root, text) {
       const node = findByText(root, text);
       if (!node) {
@@ -1029,6 +1093,14 @@
         },
         getByRole(role, options) {
           return getByRoleFrom(container, role, options);
+        },
+        getByTitle(title) {
+          const node = findByTitle(container, title);
+          if (!node) throw new Error(`Unable to find title: ${String(title)}`);
+          return node;
+        },
+        queryByTitle(title) {
+          return findByTitle(container, title);
         }
       };
     }
@@ -1039,12 +1111,25 @@
       },
       getByRole(role, options) {
         return getByRoleFrom(document.body, role, options);
+      },
+      getByTitle(title) {
+        const node = findByTitle(document.body, title);
+        if (!node) throw new Error(`Unable to find title: ${String(title)}`);
+        return node;
+      },
+      queryByTitle(title) {
+        return findByTitle(document.body, title);
       }
     };
 
     const fireEvent = {
       click(target) {
         target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      },
+      keyDown(target, init = {}) {
+        const event = new Event("keydown", { bubbles: true, cancelable: true });
+        Object.assign(event, init);
+        target.dispatchEvent(event);
       }
     };
 
@@ -1052,6 +1137,18 @@
   }
 
   const testingLibrary = createTestingLibraryHelpers();
+
+  if (typeof globalThis.KeyboardEvent !== "function") {
+    globalThis.KeyboardEvent = class KeyboardEvent extends Event {
+      constructor(type, init = {}) {
+        super(type, init);
+        Object.assign(this, init);
+      }
+    };
+    if (globalThis.window && typeof globalThis.window === "object") {
+      globalThis.window.KeyboardEvent = globalThis.KeyboardEvent;
+    }
+  }
 
   if (typeof globalThis.URL !== "function") {
     if (typeof globalThis.URLSearchParams !== "function") {
@@ -1089,6 +1186,17 @@
           }
           return null;
         }
+
+        delete(name) {
+          const expected = String(name);
+          this._pairs = this._pairs.filter(([key]) => key !== expected);
+        }
+
+        toString() {
+          return this._pairs
+            .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+            .join("&");
+        }
       };
     }
 
@@ -1112,7 +1220,9 @@
       }
 
       toString() {
-        return this.href;
+        const query = this.searchParams && typeof this.searchParams.toString === "function" ? this.searchParams.toString() : "";
+        const search = query ? `?${query}` : "";
+        return `${this.origin}${this.pathname}${search}${this.hash}`;
       }
     };
   }

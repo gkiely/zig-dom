@@ -55,8 +55,8 @@ pub fn printHelp() void {
         \\zig-dom CLI (M1 skeleton)
         \\
         \\Usage:
-                \\  zig build run -- help
-                \\  zig build run -- test [--root <dir>] [--setup <file>]... [--dry-run] [patterns...]
+        \\  zig build run -- help
+        \\  zig build run -- test [--root <dir>] [--setup <file>]... [--dry-run] [patterns...]
         \\  zig build run -- wpt [args...]
         \\  zig build run -- wpt-sync
         \\  zig build run -- wpt-manifest [args...]
@@ -68,12 +68,12 @@ pub fn printHelp() void {
         \\  zig build run -- wpt-manifest --dir dom --out wpt/manifest/upstream-dom-smoke.json
         \\
         \\Notes:
-            \\  - test executes through the embedded QuickJS-ng runtime and Zig runner harness.
-            \\  - with --root, test auto-loads [test].preload from <root>/bunfig.toml when present.
-            \\  - explicit --setup values are additive and run after bunfig preloads.
+        \\  - test executes through the embedded QuickJS-ng runtime and Zig runner harness.
+        \\  - with --root, test auto-loads [test].preload from <root>/bunfig.toml when present.
+        \\  - explicit --setup values are additive and run after bunfig preloads.
         \\  - wpt and wpt-manifest forward to existing scripts in scripts/.
         \\
-        ,
+    ,
         .{},
     );
 }
