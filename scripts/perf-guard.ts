@@ -10,7 +10,18 @@ type TimingRange = {
   max: number;
 };
 
+function parseNumberFlag(name: string, defaultValue: number): number {
+  const index = process.argv.indexOf(name);
+  if (index === -1 || index + 1 >= process.argv.length) return defaultValue;
+  const parsed = Number.parseInt(process.argv[index + 1] ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return defaultValue;
+  return parsed;
+}
+
 const strictTiming = process.argv.includes("--strict-timing");
+const skipBuild = process.argv.includes("--skip-build");
+const skipTiming = process.argv.includes("--skip-timing");
+const runCount = parseNumberFlag("--runs", 2);
 const testFile = "../youneedawiki/src/elements/Buttons/Edit.test.tsx";
 const rootDir = "../youneedawiki";
 const expectedPass = 7;
@@ -105,29 +116,44 @@ function runTimedGuard(runName: string): RunResult {
 }
 
 function main(): void {
-  run("zig", ["build", "-Doptimize=ReleaseFast", "--summary", "none"], "ReleaseFast build");
+  if (!skipBuild) {
+    run("zig", ["build", "-Doptimize=ReleaseFast", "--summary", "none"], "ReleaseFast build");
+  }
 
-  const cold = runTimedGuard("Edit.test.tsx perf run 1 (cold-ish)");
-  const warm = runTimedGuard("Edit.test.tsx perf run 2 (immediate repeat)");
+  const runs: RunResult[] = [];
+  for (let index = 0; index < runCount; index += 1) {
+    const runName =
+      index === 0
+        ? "Edit.test.tsx perf run 1 (cold-ish)"
+        : `Edit.test.tsx perf run ${index + 1} (immediate repeat)`;
+    runs.push(runTimedGuard(runName));
+  }
 
-  checkSummary(cold, "Run 1");
-  checkSummary(warm, "Run 2");
+  for (let index = 0; index < runs.length; index += 1) {
+    checkSummary(runs[index]!, `Run ${index + 1}`);
+  }
 
   const warnings: string[] = [];
 
-  const coldTiming = checkTiming(cold, coldRange, "Run 1");
-  const warmTiming = checkTiming(warm, warmRange, "Run 2");
-
-  if (coldTiming.regressionWarning) {
-    warnings.push(coldTiming.regressionWarning);
-  }
-  if (warmTiming.regressionWarning) {
-    warnings.push(warmTiming.regressionWarning);
+  if (!skipTiming) {
+    for (let index = 0; index < runs.length; index += 1) {
+      const range = index === 0 ? coldRange : warmRange;
+      const check = checkTiming(runs[index]!, range, `Run ${index + 1}`);
+      if (check.regressionWarning) {
+        warnings.push(check.regressionWarning);
+      }
+    }
   }
 
   console.log("\nPerf guard summary:");
-  console.log(`- run1 real=${cold.realSeconds.toFixed(2)}s pass=${cold.passCount} fail=${cold.failCount}`);
-  console.log(`- run2 real=${warm.realSeconds.toFixed(2)}s pass=${warm.passCount} fail=${warm.failCount}`);
+  runs.forEach((result, index) => {
+    console.log(`- run${index + 1} real=${result.realSeconds.toFixed(2)}s pass=${result.passCount} fail=${result.failCount}`);
+  });
+
+  if (skipTiming) {
+    console.log("- timing checks skipped by --skip-timing");
+    return;
+  }
 
   if (warnings.length === 0) {
     console.log("- no slower-than-baseline regression detected");

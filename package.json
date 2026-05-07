@@ -23,7 +23,7 @@
     "build.zig.zon"
   ],
   "scripts": {
-    "perf:edit-guard": "bun run scripts/perf-edit-guard.ts",
+    "perf:guard": "bun run scripts/perf-guard.ts",
     "build:native": "bun run scripts/build-native.ts",
     "build:native:packages": "bun run scripts/build-native-packages.ts",
     "build:js": "bunx tsc -p tsconfig.json",

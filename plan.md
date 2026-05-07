@@ -89,16 +89,10 @@ WPT manifests already present:
 Run this at the end of every milestone and any substantial sub-chunk:
 
 ```sh
-zig build -Doptimize=ReleaseFast --summary none
-/usr/bin/time -p zig-out/bin/zig-dom test --root ../youneedawiki ../youneedawiki/src/elements/Buttons/Edit.test.tsx
+bun run perf:guard
 ```
 
 Acceptance:
-
-- Test passes: `pass=7 fail=0`.
-- ReleaseFast timing should stay close to the current baseline:
-  - cold-ish post-build: about `real 0.35-0.40`
-  - immediate repeat: about `real 0.16-0.22`
 - If it regresses, stop and find the commit/change before continuing.
 
 The recent regression was caused by bypassing setup/onLoad pruning for `@mui/icons-material`. Keep plugin/onLoad ownership intact and preserve generic requested-export pruning.
