@@ -568,7 +568,10 @@ const ModuleLoaderState = struct {
     }
 
     fn buildNativeCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
-        const specifiers = try collectCommonJsSpecifiers(self.allocator, source);
+        const folded_source = try foldNodeEnvConditionals(self.allocator, source);
+        defer self.allocator.free(folded_source);
+
+        const specifiers = try collectCommonJsSpecifiers(self.allocator, folded_source);
         defer {
             for (specifiers) |specifier| self.allocator.free(specifier);
             self.allocator.free(specifiers);
@@ -604,7 +607,7 @@ const ModuleLoaderState = struct {
             });
         }
 
-        const export_names = try self.collectCommonJsExportNamesDeep(module_id, source);
+        const export_names = try self.collectCommonJsExportNamesDeep(module_id, folded_source);
         defer {
             for (export_names) |name| self.allocator.free(name);
             self.allocator.free(export_names);
@@ -671,7 +674,7 @@ const ModuleLoaderState = struct {
             \\
         );
         try appendFmt(self.allocator, &out, "const __zigCommonJSExports = __zigLoadCommonJS('{s}', '{s}', __zigCjsDeps, function(module, exports, require, __filename, __dirname, global) {{\n", .{ module_literal, dirname_literal });
-        try out.appendSlice(self.allocator, source);
+        try out.appendSlice(self.allocator, folded_source);
         try out.appendSlice(self.allocator,
             \\
             \\});
@@ -2561,6 +2564,134 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
     }
 
     return std.mem.indexOf(u8, source, "import ") == null and std.mem.indexOf(u8, source, "export ") == null;
+}
+
+fn foldNodeEnvConditionals(allocator: Allocator, source: []const u8) ![]u8 {
+    const node_env = if (std.c.getenv("NODE_ENV")) |value| std.mem.span(value) else "test";
+    const is_production = std.mem.eql(u8, node_env, "production");
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        const match = findNodeEnvConditional(source, cursor) orelse {
+            try out.appendSlice(allocator, source[cursor..]);
+            break;
+        };
+
+        try out.appendSlice(allocator, source[cursor..match.start]);
+        const take_then = if (match.equals_production) is_production else !is_production;
+        try out.appendSlice(allocator, if (take_then) match.then_body else match.else_body);
+        cursor = match.end;
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+const NodeEnvConditional = struct {
+    start: usize,
+    end: usize,
+    equals_production: bool,
+    then_body: []const u8,
+    else_body: []const u8,
+};
+
+fn findNodeEnvConditional(source: []const u8, start: usize) ?NodeEnvConditional {
+    const equality_pattern = "if (process.env.NODE_ENV === 'production')";
+    const inequality_pattern = "if (process.env.NODE_ENV !== 'production')";
+
+    var cursor = start;
+    while (cursor < source.len) {
+        const equality_index = std.mem.indexOfPos(u8, source, cursor, equality_pattern);
+        const inequality_index = std.mem.indexOfPos(u8, source, cursor, inequality_pattern);
+
+        const match_start, const pattern_len, const equals_production = blk: {
+            if (equality_index == null and inequality_index == null) return null;
+            if (equality_index) |eq| {
+                if (inequality_index == null or eq < inequality_index.?) {
+                    break :blk .{ eq, equality_pattern.len, true };
+                }
+            }
+            break :blk .{ inequality_index.?, inequality_pattern.len, false };
+        };
+
+        var then_open = match_start + pattern_len;
+        while (then_open < source.len and std.ascii.isWhitespace(source[then_open])) : (then_open += 1) {}
+        if (then_open >= source.len or source[then_open] != '{') {
+            cursor = match_start + 1;
+            continue;
+        }
+
+        const then_close = findMatchingBrace(source, then_open) orelse {
+            cursor = match_start + 1;
+            continue;
+        };
+        var else_index = then_close + 1;
+        while (else_index < source.len and std.ascii.isWhitespace(source[else_index])) : (else_index += 1) {}
+        if (!std.mem.startsWith(u8, source[else_index..], "else")) {
+            cursor = match_start + 1;
+            continue;
+        }
+
+        var else_open = else_index + "else".len;
+        while (else_open < source.len and std.ascii.isWhitespace(source[else_open])) : (else_open += 1) {}
+        if (else_open >= source.len or source[else_open] != '{') {
+            cursor = match_start + 1;
+            continue;
+        }
+
+        const else_close = findMatchingBrace(source, else_open) orelse {
+            cursor = match_start + 1;
+            continue;
+        };
+        return .{
+            .start = match_start,
+            .end = else_close + 1,
+            .equals_production = equals_production,
+            .then_body = source[then_open + 1 .. then_close],
+            .else_body = source[else_open + 1 .. else_close],
+        };
+    }
+
+    return null;
+}
+
+fn findMatchingBrace(source: []const u8, open_index: usize) ?usize {
+    if (open_index >= source.len or source[open_index] != '{') return null;
+
+    var depth: usize = 0;
+    var cursor = open_index;
+    var quote: ?u8 = null;
+    var escaped = false;
+
+    while (cursor < source.len) : (cursor += 1) {
+        const ch = source[cursor];
+        if (quote) |q| {
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == q) {
+                quote = null;
+            }
+            continue;
+        }
+
+        if (ch == '"' or ch == '\'' or ch == '`') {
+            quote = ch;
+            continue;
+        }
+
+        if (ch == '{') {
+            depth += 1;
+        } else if (ch == '}') {
+            depth -= 1;
+            if (depth == 0) return cursor;
+        }
+    }
+
+    return null;
 }
 
 fn looksLikeJsxSource(source: []const u8) bool {
