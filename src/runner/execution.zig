@@ -32,6 +32,42 @@ const collection_flush_source =
     \\});
 ;
 
+const cjs_runtime_helpers_source =
+    \\globalThis.__zigCjsRegistry = globalThis.__zigCjsRegistry || new Map();
+    \\globalThis.__zigCjsNamespaceToRequireValue = function __zigCjsNamespaceToRequireValue(ns) {
+    \\  try {
+    \\    if (Object.prototype.hasOwnProperty.call(ns, "__zigCommonJSExports")) return ns.__zigCommonJSExports;
+    \\    if (Object.prototype.hasOwnProperty.call(ns, "default")) return ns.default;
+    \\    return ns;
+    \\  } catch {
+    \\    return {};
+    \\  }
+    \\};
+    \\globalThis.__zigLoadCommonJS = function __zigLoadCommonJS(id, dirname, deps, factory) {
+    \\  const registry = globalThis.__zigCjsRegistry || (globalThis.__zigCjsRegistry = new Map());
+    \\  if (registry.has(id)) return registry.get(id).exports;
+    \\  const module = { exports: {} };
+    \\  registry.set(id, module);
+    \\  const require = (specifier) => {
+    \\    const key = String(specifier);
+    \\    const load = deps && deps[key];
+    \\    return load ? load() : globalThis.__zigNativeRequire(id, key, "");
+    \\  };
+    \\  require.resolve = (specifier) => String(specifier);
+    \\  factory.call(module.exports, module, module.exports, require, id, dirname, globalThis);
+    \\  return module.exports;
+    \\};
+    \\globalThis.__zigGetCjsExports = function __zigGetCjsExports(id) {
+    \\  const registry = globalThis.__zigCjsRegistry;
+    \\  return registry && registry.has(id) ? registry.get(id).exports : undefined;
+    \\};
+    \\globalThis.__zigSetCjsJsonExports = function __zigSetCjsJsonExports(id, value) {
+    \\  const registry = globalThis.__zigCjsRegistry || (globalThis.__zigCjsRegistry = new Map());
+    \\  if (!registry.has(id)) registry.set(id, { exports: value });
+    \\  return registry.get(id).exports;
+    \\};
+;
+
 const setup_dom_probe_begin_source =
     \\globalThis.__zigSetupDocumentNodeNameHidden = false;
     \\try {
@@ -709,16 +745,6 @@ const ModuleLoaderState = struct {
         defer self.allocator.free(dirname_literal);
 
         try out.appendSlice(self.allocator,
-            \\const __zigCjsRegistry = globalThis.__zigCjsRegistry || (globalThis.__zigCjsRegistry = new Map());
-            \\function __zigCjsNamespaceToRequireValue(ns) {
-            \\  try {
-            \\    if (Object.prototype.hasOwnProperty.call(ns, "__zigCommonJSExports")) return ns.__zigCommonJSExports;
-            \\    if (Object.prototype.hasOwnProperty.call(ns, "default")) return ns.default;
-            \\    return ns;
-            \\  } catch {
-            \\    return {};
-            \\  }
-            \\}
             \\const __zigCjsDeps = {
             \\
         );
@@ -735,28 +761,15 @@ const ModuleLoaderState = struct {
             } else if (item.lazy) {
                 try appendFmt(self.allocator, &out, "  '{s}': () => globalThis.__zigNativeRequire('{s}', '{s}', '{s}'),\n", .{ specifier_literal, module_literal, specifier_literal, resolved_literal });
             } else {
-                try appendFmt(self.allocator, &out, "  '{s}': () => __zigCjsNamespaceToRequireValue({s}),\n", .{ specifier_literal, item.local });
+                try appendFmt(self.allocator, &out, "  '{s}': () => globalThis.__zigCjsNamespaceToRequireValue({s}),\n", .{ specifier_literal, item.local });
             }
         }
 
         try out.appendSlice(self.allocator,
             \\};
-            \\function __zigLoadCommonJS(id, dirname, deps, factory) {
-            \\  if (__zigCjsRegistry.has(id)) return __zigCjsRegistry.get(id).exports;
-            \\  const module = { exports: {} };
-            \\  __zigCjsRegistry.set(id, module);
-            \\  const require = (specifier) => {
-            \\    const load = deps[String(specifier)];
-            \\    if (!load) throw new Error(`Cannot find module '${specifier}' from ${id}`);
-            \\    return load();
-            \\  };
-            \\  require.resolve = (specifier) => String(specifier);
-            \\  factory.call(module.exports, module, module.exports, require, id, dirname, globalThis);
-            \\  return module.exports;
-            \\}
             \\
         );
-        try appendFmt(self.allocator, &out, "const __zigCommonJSExports = __zigLoadCommonJS('{s}', '{s}', __zigCjsDeps, function(module, exports, require, __filename, __dirname, global) {{\n", .{ module_literal, dirname_literal });
+        try appendFmt(self.allocator, &out, "const __zigCommonJSExports = globalThis.__zigLoadCommonJS('{s}', '{s}', __zigCjsDeps, function(module, exports, require, __filename, __dirname, global) {{\n", .{ module_literal, dirname_literal });
         try out.appendSlice(self.allocator, pruned_source);
         try out.appendSlice(self.allocator,
             \\
@@ -835,26 +848,11 @@ const ModuleLoaderState = struct {
 
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(self.allocator);
-        try out.appendSlice(self.allocator,
-            \\(() => {
-            \\const __zigCjsRegistry = globalThis.__zigCjsRegistry || (globalThis.__zigCjsRegistry = new Map());
-            \\function __zigLoadCommonJS(id, dirname, factory) {
-            \\  if (__zigCjsRegistry.has(id)) return __zigCjsRegistry.get(id).exports;
-            \\  const module = { exports: {} };
-            \\  __zigCjsRegistry.set(id, module);
-            \\  const require = (specifier) => globalThis.__zigNativeRequire(id, String(specifier), "");
-            \\  require.resolve = (specifier) => String(specifier);
-            \\  factory.call(module.exports, module, module.exports, require, id, dirname, globalThis);
-            \\  return module.exports;
-            \\}
-            \\
-        );
-        try appendFmt(self.allocator, &out, "return __zigLoadCommonJS('{s}', '{s}', function(module, exports, require, __filename, __dirname, global) {{\n", .{ module_literal, dirname_literal });
+        try appendFmt(self.allocator, &out, "globalThis.__zigLoadCommonJS('{s}', '{s}', null, function(module, exports, require, __filename, __dirname, global) {{\n", .{ module_literal, dirname_literal });
         try out.appendSlice(self.allocator, folded_source);
         try out.appendSlice(self.allocator,
             \\
             \\});
-            \\})()
             \\
         );
         return out.toOwnedSlice(self.allocator);
@@ -871,11 +869,11 @@ const ModuleLoaderState = struct {
             return cached;
         }
 
-        const source = if (std.mem.endsWith(u8, resolved, ".json")) blk: {
-            const json = try std.Io.Dir.cwd().readFileAlloc(self.io, resolved, self.allocator, .limited(max_module_source_bytes));
-            defer self.allocator.free(json);
-            break :blk try std.fmt.allocPrint(self.allocator, "({s})", .{json});
-        } else blk: {
+        if (std.mem.endsWith(u8, resolved, ".json")) {
+            return self.loadCommonJsJsonValue(ctx, resolved);
+        }
+
+        const source = blk: {
             const raw = try std.Io.Dir.cwd().readFileAlloc(self.io, resolved, self.allocator, .limited(max_module_source_bytes));
             defer self.allocator.free(raw);
             if (!isCommonJsSource(resolved, raw)) return error.UnsupportedExternalModule;
@@ -898,19 +896,56 @@ const ModuleLoaderState = struct {
         return value;
     }
 
-    fn getCachedCommonJsValue(self: *ModuleLoaderState, ctx: *ModuleContext, module_id: []const u8) !?quickjs.Value {
-        const module_literal = try escapeJsSingleQuotedString(self.allocator, module_id);
-        defer self.allocator.free(module_literal);
-        const source = try std.fmt.allocPrint(
-            self.allocator,
-            "(globalThis.__zigCjsRegistry && globalThis.__zigCjsRegistry.has('{s}')) ? globalThis.__zigCjsRegistry.get('{s}').exports : undefined",
-            .{ module_literal, module_literal },
-        );
-        defer self.allocator.free(source);
-        const source_z = try self.allocator.dupeZ(u8, source);
-        defer self.allocator.free(source_z);
+    fn loadCommonJsJsonValue(self: *ModuleLoaderState, ctx: *ModuleContext, module_id: []const u8) !quickjs.Value {
+        const json = try std.Io.Dir.cwd().readFileAlloc(self.io, module_id, self.allocator, .limited(max_module_source_bytes));
+        defer self.allocator.free(json);
 
-        const value = ctx.eval(source_z[0..source.len], "<zig-cjs-cache-get>", .{});
+        const filename_z = try self.allocator.dupeZ(u8, module_id);
+        defer self.allocator.free(filename_z);
+
+        var parsed = quickjs.Value.parseJSON(ctx, json, filename_z);
+        if (parsed.isException()) {
+            const exception = ctx.getException();
+            exception.deinit(ctx);
+
+            const source = try std.fmt.allocPrint(self.allocator, "({s})", .{json});
+            defer self.allocator.free(source);
+            const source_z = try self.allocator.dupeZ(u8, source);
+            defer self.allocator.free(source_z);
+            parsed = ctx.eval(source_z[0..source.len], filename_z, .{});
+            if (parsed.isException()) return error.EvaluationFailed;
+        }
+        errdefer parsed.deinit(ctx);
+
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const setter = global.getPropertyStr(ctx, "__zigSetCjsJsonExports");
+        defer setter.deinit(ctx);
+        if (!setter.isFunction(ctx)) {
+            return parsed;
+        }
+
+        const id = quickjs.Value.initStringLen(ctx, module_id);
+        defer id.deinit(ctx);
+        const args = [_]quickjs.Value{ id, parsed };
+        const result = setter.call(ctx, quickjs.Value.undefined, &args);
+        parsed.deinit(ctx);
+        if (result.isException()) return error.EvaluationFailed;
+        return result;
+    }
+
+    fn getCachedCommonJsValue(self: *ModuleLoaderState, ctx: *ModuleContext, module_id: []const u8) !?quickjs.Value {
+        _ = self;
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const getter = global.getPropertyStr(ctx, "__zigGetCjsExports");
+        defer getter.deinit(ctx);
+        if (!getter.isFunction(ctx)) return null;
+
+        const id = quickjs.Value.initStringLen(ctx, module_id);
+        defer id.deinit(ctx);
+        const args = [_]quickjs.Value{id};
+        const value = getter.call(ctx, quickjs.Value.undefined, &args);
         if (value.isException()) return error.EvaluationFailed;
         if (value.isUndefined()) {
             value.deinit(ctx);
@@ -2996,6 +3031,8 @@ fn installNativeRequire(vm: *Runtime) !void {
     const func = quickjs.Value.initCFunction(ctx, jsNativeRequire, "__zigNativeRequire", 3);
     if (func.isException()) return error.EvaluationFailed;
     global.setPropertyStr(ctx, "__zigNativeRequire", func) catch return error.EvaluationFailed;
+
+    vm.evalScript("<zig-cjs-runtime-helpers>", cjs_runtime_helpers_source) catch return error.EvaluationFailed;
 }
 
 fn jsNativeRequire(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
