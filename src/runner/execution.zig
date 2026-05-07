@@ -9,6 +9,8 @@ const Exception = runtime_pkg.Exception;
 const ModuleContext = runtime_pkg.ModuleContext;
 const ModuleDef = runtime_pkg.ModuleDef;
 
+const platform_source = @embedFile("runner_platform.js");
+const mocks_source = @embedFile("runner_mocks.js");
 const harness_source = @embedFile("runner_harness.js");
 const run_bootstrap_source =
     \\globalThis.__zigDone = false;
@@ -2280,6 +2282,14 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
 
     var vm = try Runtime.init(allocator, io);
     defer vm.deinit();
+
+    vm.evalScript("<zig-runner-platform>", platform_source) catch |err| {
+        return failureFromRuntimeException(allocator, path, "failed to initialize runner platform", err, &vm);
+    };
+
+    vm.evalScript("<zig-runner-mocks>", mocks_source) catch |err| {
+        return failureFromRuntimeException(allocator, path, "failed to initialize runner mocks", err, &vm);
+    };
 
     vm.evalScript("<zig-runner-harness>", harness_source) catch |err| {
         return failureFromRuntimeException(allocator, path, "failed to initialize runner harness", err, &vm);

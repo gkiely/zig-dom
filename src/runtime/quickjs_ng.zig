@@ -2,6 +2,8 @@ const std = @import("std");
 const quickjs = @import("quickjs");
 const zig_dom = @import("../zig_dom.zig");
 const dom_classes = @import("dom_classes.zig");
+const host_platform = @import("host_platform.zig");
+const host_assertions = @import("host_assertions.zig");
 
 const Allocator = std.mem.Allocator;
 var host_io: ?std.Io = null;
@@ -55,6 +57,8 @@ pub const Runtime = struct {
 
         try runtime.installHostGlobals();
         try runtime.installNativeDomGlobals();
+        try runtime.installHostPlatformGlobals();
+        try runtime.installHostAssertions();
         return runtime;
     }
 
@@ -512,6 +516,15 @@ pub const Runtime = struct {
             };
         }
         self.dom_window_handle = window_handle;
+    }
+
+    fn installHostPlatformGlobals(self: *Runtime) RuntimeError!void {
+        host_platform.install(self.ctx) catch return error.EvaluationFailed;
+        host_platform.linkWindow(self.ctx) catch return error.EvaluationFailed;
+    }
+
+    fn installHostAssertions(self: *Runtime) RuntimeError!void {
+        host_assertions.install(self.ctx) catch return error.EvaluationFailed;
     }
 };
 
