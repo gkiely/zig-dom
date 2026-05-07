@@ -75,6 +75,7 @@ const vanilla_extract_css_shim_source =
 ;
 
 const max_module_source_bytes = 4 * 1024 * 1024;
+const max_tsconfig_bytes = 2 * 1024 * 1024;
 
 pub const FileResult = struct {
     path: []u8,
@@ -118,11 +119,18 @@ pub const Summary = struct {
 };
 
 const ModuleLoaderState = struct {
+    const PathAlias = struct {
+        pattern: []u8,
+        target: []u8,
+    };
+
     allocator: Allocator,
     io: std.Io,
     loaded_modules: std.StringHashMap(*ModuleDef),
     module_sources: std.StringHashMap([]u8),
     transformed_outputs: std.StringHashMap([]u8),
+    path_alias_root: ?[]u8,
+    path_aliases: std.ArrayList(PathAlias),
 
     fn init(allocator: Allocator, io: std.Io) ModuleLoaderState {
         return .{
@@ -131,10 +139,14 @@ const ModuleLoaderState = struct {
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
             .module_sources = std.StringHashMap([]u8).init(allocator),
             .transformed_outputs = std.StringHashMap([]u8).init(allocator),
+            .path_alias_root = null,
+            .path_aliases = .empty,
         };
     }
 
     fn deinit(self: *ModuleLoaderState) void {
+        self.clearPathAliases();
+
         var source_iterator = self.module_sources.iterator();
         while (source_iterator.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
@@ -161,16 +173,8 @@ const ModuleLoaderState = struct {
             return self.allocator.dupe(u8, module_name);
         }
 
-        if (std.mem.startsWith(u8, module_name, "~/")) {
-            return self.resolveProjectAlias(module_base_name, "src", module_name[2..]);
-        }
-
-        if (std.mem.startsWith(u8, module_name, "@/shared/")) {
-            return self.resolveProjectAlias(module_base_name, "shared", module_name[9..]);
-        }
-
-        if (std.mem.startsWith(u8, module_name, "@/")) {
-            return self.resolveProjectAlias(module_base_name, "", module_name[2..]);
+        if (try self.resolvePathAlias(module_base_name, module_name)) |resolved| {
+            return resolved;
         }
 
         if (std.fs.path.isAbsolute(module_name)) {
@@ -399,27 +403,117 @@ const ModuleLoaderState = struct {
         return null;
     }
 
-    fn resolveProjectAlias(
-        self: *ModuleLoaderState,
-        module_base_name: []const u8,
-        project_subdir: []const u8,
-        specifier_suffix: []const u8,
-    ) ![]u8 {
-        if (!std.fs.path.isAbsolute(module_base_name)) {
+    fn resolvePathAlias(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) !?[]u8 {
+        const loaded = try self.loadPathAliasesForModule(module_base_name);
+        if (!loaded) {
+            return null;
+        }
+
+        var matched_alias = false;
+        for (self.path_aliases.items) |alias| {
+            const resolved = self.tryResolveSingleAlias(module_name, alias.pattern, alias.target) catch |err| switch (err) {
+                error.ModuleNotFound => {
+                    matched_alias = true;
+                    continue;
+                },
+                else => return err,
+            };
+
+            if (resolved) |path| {
+                return path;
+            }
+        }
+
+        if (matched_alias) {
             return error.ModuleNotFound;
         }
 
-        var current_dir = try self.allocator.dupe(u8, std.fs.path.dirname(module_base_name) orelse return error.ModuleNotFound);
-        defer self.allocator.free(current_dir);
+        return null;
+    }
+
+    fn tryResolveSingleAlias(self: *ModuleLoaderState, module_name: []const u8, pattern: []const u8, target: []const u8) !?[]u8 {
+        const wildcard = std.mem.indexOfScalar(u8, pattern, '*');
+        var wildcard_value: []const u8 = "";
+
+        if (wildcard) |wildcard_index| {
+            const pattern_prefix = pattern[0..wildcard_index];
+            const pattern_suffix = pattern[wildcard_index + 1 ..];
+            if (!std.mem.startsWith(u8, module_name, pattern_prefix)) {
+                return null;
+            }
+            if (pattern_suffix.len > 0 and !std.mem.endsWith(u8, module_name, pattern_suffix)) {
+                return null;
+            }
+            if (module_name.len < pattern_prefix.len + pattern_suffix.len) {
+                return null;
+            }
+
+            wildcard_value = module_name[pattern_prefix.len .. module_name.len - pattern_suffix.len];
+        } else if (!std.mem.eql(u8, module_name, pattern)) {
+            return null;
+        }
+
+        const root = self.path_alias_root orelse return null;
+
+        var mapped_target_builder: std.ArrayList(u8) = .empty;
+        defer mapped_target_builder.deinit(self.allocator);
+
+        if (std.mem.indexOfScalar(u8, target, '*')) |target_wildcard| {
+            try mapped_target_builder.appendSlice(self.allocator, target[0..target_wildcard]);
+            try mapped_target_builder.appendSlice(self.allocator, wildcard_value);
+            try mapped_target_builder.appendSlice(self.allocator, target[target_wildcard + 1 ..]);
+        } else {
+            try mapped_target_builder.appendSlice(self.allocator, target);
+        }
+
+        const mapped_target = try mapped_target_builder.toOwnedSlice(self.allocator);
+        defer self.allocator.free(mapped_target);
+
+        const candidate = try std.fs.path.resolve(self.allocator, &.{ root, mapped_target });
+        errdefer self.allocator.free(candidate);
+
+        const resolved = try self.resolvePathWithProbing(candidate);
+        return resolved;
+    }
+
+    fn loadPathAliasesForModule(self: *ModuleLoaderState, module_base_name: []const u8) !bool {
+        const root = (try self.findTsconfigRoot(module_base_name)) orelse return false;
+
+        if (self.path_alias_root) |existing_root| {
+            if (std.mem.eql(u8, existing_root, root)) {
+                self.allocator.free(root);
+                return true;
+            }
+        }
+
+        self.clearPathAliases();
+        self.path_alias_root = root;
+
+        const tsconfig_path = try std.fs.path.resolve(self.allocator, &.{ root, "tsconfig.json" });
+        defer self.allocator.free(tsconfig_path);
+
+        const source = try std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            tsconfig_path,
+            self.allocator,
+            .limited(max_tsconfig_bytes),
+        );
+        defer self.allocator.free(source);
+
+        try self.parseTsconfigPathAliases(source);
+        return true;
+    }
+
+    fn findTsconfigRoot(self: *ModuleLoaderState, module_base_name: []const u8) !?[]u8 {
+        if (!std.fs.path.isAbsolute(module_base_name)) {
+            return null;
+        }
+
+        var current_dir = try self.allocator.dupe(u8, std.fs.path.dirname(module_base_name) orelse return null);
 
         while (true) {
-            if (self.directoryContainsFile(current_dir, "tsconfig.json") or self.directoryContainsFile(current_dir, "package.json")) {
-                const candidate = if (project_subdir.len > 0)
-                    try std.fs.path.resolve(self.allocator, &.{ current_dir, project_subdir, specifier_suffix })
-                else
-                    try std.fs.path.resolve(self.allocator, &.{ current_dir, specifier_suffix });
-                errdefer self.allocator.free(candidate);
-                return self.resolvePathWithProbing(candidate);
+            if (self.directoryContainsFile(current_dir, "tsconfig.json")) {
+                return current_dir;
             }
 
             const parent = std.fs.path.dirname(current_dir) orelse break;
@@ -432,7 +526,108 @@ const ModuleLoaderState = struct {
             current_dir = next_dir;
         }
 
-        return error.ModuleNotFound;
+        self.allocator.free(current_dir);
+        return null;
+    }
+
+    fn parseTsconfigPathAliases(self: *ModuleLoaderState, source: []const u8) !void {
+        const paths_key_index = std.mem.indexOf(u8, source, "\"paths\"") orelse return;
+
+        var index = paths_key_index + "\"paths\"".len;
+        skipJsonTrivia(source, &index);
+        if (index >= source.len or source[index] != ':') {
+            return;
+        }
+        index += 1;
+
+        skipJsonTrivia(source, &index);
+        if (index >= source.len or source[index] != '{') {
+            return;
+        }
+
+        const object_end = findMatchingJsonBrace(source, index) orelse return;
+
+        index += 1;
+        while (index < object_end) {
+            skipJsonTrivia(source, &index);
+            if (index >= object_end) {
+                break;
+            }
+
+            if (source[index] == ',') {
+                index += 1;
+                continue;
+            }
+
+            if (source[index] != '"') {
+                index += 1;
+                continue;
+            }
+
+            const key_result = try parseJsonStringAlloc(self.allocator, source, index);
+            defer self.allocator.free(key_result.value);
+            index = key_result.next_index;
+
+            skipJsonTrivia(source, &index);
+            if (index >= object_end or source[index] != ':') {
+                continue;
+            }
+            index += 1;
+
+            skipJsonTrivia(source, &index);
+            if (index >= object_end or source[index] != '[') {
+                continue;
+            }
+            index += 1;
+
+            while (index < object_end) {
+                skipJsonTrivia(source, &index);
+                if (index >= object_end) {
+                    break;
+                }
+
+                if (source[index] == ']') {
+                    index += 1;
+                    break;
+                }
+
+                if (source[index] == ',') {
+                    index += 1;
+                    continue;
+                }
+
+                if (source[index] != '"') {
+                    index += 1;
+                    continue;
+                }
+
+                const target_result = try parseJsonStringAlloc(self.allocator, source, index);
+                index = target_result.next_index;
+
+                const pattern = try self.allocator.dupe(u8, key_result.value);
+                errdefer self.allocator.free(pattern);
+
+                try self.path_aliases.append(self.allocator, .{
+                    .pattern = pattern,
+                    .target = target_result.value,
+                });
+            }
+        }
+    }
+
+    fn clearPathAliases(self: *ModuleLoaderState) void {
+        if (self.path_alias_root) |root| {
+            self.allocator.free(root);
+            self.path_alias_root = null;
+        }
+
+        for (self.path_aliases.items) |alias| {
+            self.allocator.free(alias.pattern);
+            self.allocator.free(alias.target);
+        }
+        self.path_aliases.clearRetainingCapacity();
+        self.path_aliases.deinit(self.allocator);
+        self.path_aliases = .empty;
     }
 
     fn directoryContainsFile(self: *ModuleLoaderState, dir_path: []const u8, basename: []const u8) bool {
@@ -452,6 +647,161 @@ const ModuleLoaderState = struct {
         return stat.kind == .file;
     }
 };
+
+const JsonStringResult = struct {
+    value: []u8,
+    next_index: usize,
+};
+
+fn parseJsonStringAlloc(allocator: Allocator, source: []const u8, start_index: usize) !JsonStringResult {
+    if (start_index >= source.len or source[start_index] != '"') {
+        return error.InvalidJsonString;
+    }
+
+    var index = start_index + 1;
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(allocator);
+
+    while (index < source.len) {
+        const ch = source[index];
+        if (ch == '"') {
+            return .{
+                .value = try output.toOwnedSlice(allocator),
+                .next_index = index + 1,
+            };
+        }
+
+        if (ch == '\\') {
+            if (index + 1 >= source.len) {
+                return error.InvalidJsonString;
+            }
+
+            const escaped = source[index + 1];
+            const decoded = switch (escaped) {
+                '"' => '"',
+                '\\' => '\\',
+                '/' => '/',
+                'b' => 0x08,
+                'f' => 0x0c,
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                else => escaped,
+            };
+
+            try output.append(allocator, decoded);
+            index += 2;
+            continue;
+        }
+
+        try output.append(allocator, ch);
+        index += 1;
+    }
+
+    return error.InvalidJsonString;
+}
+
+fn skipJsonTrivia(source: []const u8, index: *usize) void {
+    while (index.* < source.len) {
+        const ch = source[index.*];
+        if (std.ascii.isWhitespace(ch)) {
+            index.* += 1;
+            continue;
+        }
+
+        if (ch == '/' and index.* + 1 < source.len and source[index.* + 1] == '/') {
+            index.* += 2;
+            while (index.* < source.len and source[index.*] != '\n') {
+                index.* += 1;
+            }
+            continue;
+        }
+
+        if (ch == '/' and index.* + 1 < source.len and source[index.* + 1] == '*') {
+            index.* += 2;
+            while (index.* + 1 < source.len) {
+                if (source[index.*] == '*' and source[index.* + 1] == '/') {
+                    index.* += 2;
+                    break;
+                }
+                index.* += 1;
+            }
+            continue;
+        }
+
+        break;
+    }
+}
+
+fn findMatchingJsonBrace(source: []const u8, open_brace_index: usize) ?usize {
+    if (open_brace_index >= source.len or source[open_brace_index] != '{') {
+        return null;
+    }
+
+    var index = open_brace_index;
+    var depth: usize = 0;
+    var in_string = false;
+    var escaped = false;
+
+    while (index < source.len) : (index += 1) {
+        const ch = source[index];
+
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (ch == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            in_string = true;
+            continue;
+        }
+
+        if (ch == '/' and index + 1 < source.len and source[index + 1] == '/') {
+            index += 2;
+            while (index < source.len and source[index] != '\n') : (index += 1) {}
+            continue;
+        }
+
+        if (ch == '/' and index + 1 < source.len and source[index + 1] == '*') {
+            index += 2;
+            while (index + 1 < source.len) : (index += 1) {
+                if (source[index] == '*' and source[index + 1] == '/') {
+                    index += 1;
+                    break;
+                }
+            }
+            continue;
+        }
+
+        if (ch == '{') {
+            depth += 1;
+            continue;
+        }
+
+        if (ch == '}') {
+            if (depth == 0) {
+                return null;
+            }
+
+            depth -= 1;
+            if (depth == 0) {
+                return index;
+            }
+        }
+    }
+
+    return null;
+}
 
 const ParsedLiteral = struct {
     specifier: []const u8,
