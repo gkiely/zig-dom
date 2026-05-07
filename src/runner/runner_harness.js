@@ -1,6 +1,20 @@
 (() => {
   const DEFAULT_TIMEOUT_MS = 5000;
 
+  if (!globalThis.console || typeof globalThis.console !== "object") {
+    const noop = () => {};
+    globalThis.console = {
+      assert: noop,
+      clear: noop,
+      debug: noop,
+      error: noop,
+      info: noop,
+      log: noop,
+      trace: noop,
+      warn: noop,
+    };
+  }
+
   const rootScope = createScope("<root>", null, false);
   let activeScope = rootScope;
   const collectionErrors = [];
@@ -24,7 +38,9 @@
       return "Unknown error";
     }
     if (error && error.stack) {
-      return String(error.stack);
+      const message = String(error);
+      const stack = String(error.stack);
+      return stack.includes(message) ? stack : `${message}\n${stack}`;
     }
     return String(error);
   }

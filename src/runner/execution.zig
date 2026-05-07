@@ -135,7 +135,12 @@ const node_fs_shim_source =
     \\function unsupported(name) {
     \\  throw new Error(`node:fs.${name} is not implemented in this runner`);
     \\}
-    \\export function readFileSync() { unsupported("readFileSync"); }
+    \\export function readFileSync(path, encoding = "utf8") {
+    \\  if (encoding !== "utf8" && encoding !== "utf-8") {
+    \\    unsupported("readFileSync encoding " + encoding);
+    \\  }
+    \\  return globalThis.__zigReadFileSync(String(path), encoding);
+    \\}
     \\export function writeFileSync() { unsupported("writeFileSync"); }
     \\export function existsSync() { return false; }
     \\export default { readFileSync, writeFileSync, existsSync };
@@ -775,7 +780,7 @@ const ModuleLoaderState = struct {
 
         var hasher = std.hash.Wyhash.init(0);
         hasher.update(module_id);
-        hasher.update("cjs-bundle-v2");
+        hasher.update("cjs-bundle-v3");
         hasher.update(std.mem.asBytes(&stat.size));
         hasher.update(std.mem.asBytes(&stat.mtime.nanoseconds));
         const digest = hasher.final();
@@ -2319,7 +2324,7 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         };
     }
 
-    var vm = try Runtime.init(allocator);
+    var vm = try Runtime.init(allocator, io);
     defer vm.deinit();
 
     vm.evalScript("<zig-runner-harness>", harness_source) catch |err| {
@@ -2556,8 +2561,13 @@ fn moduleLoad(
         return existing;
     }
 
-    const source = state.loadModuleSource(module_id) catch {
-        _ = quickjs.c.JS_ThrowReferenceError(ctx.cval(), "module loading failed");
+    const source = state.loadModuleSource(module_id) catch |err| {
+        _ = quickjs.c.JS_ThrowReferenceError(
+            ctx.cval(),
+            "module loading failed: %s (%s)",
+            module_name.ptr,
+            @errorName(err).ptr,
+        );
         return null;
     };
 

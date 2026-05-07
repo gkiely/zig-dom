@@ -57,6 +57,36 @@ if (entries.length === 0) {
   process.exit(0);
 }
 
+function addCommonJsNamedExports(source: string): string {
+  const names = new Set<string>();
+  for (const match of source.matchAll(/\bexports\.([A-Za-z_$][\w$]*)\b/g)) {
+    const name = match[1];
+    if (name !== "default" && name !== "__esModule") {
+      names.add(name);
+    }
+  }
+
+  if (names.size === 0) {
+    return source;
+  }
+
+  const defaultExport = source.match(/export default ([^;\n]+);?\s*$/);
+  if (!defaultExport) {
+    return source;
+  }
+
+  const defaultExpression = defaultExport[1];
+  const replacement = [
+    `const __zigCommonJsDefault = ${defaultExpression};`,
+    "export default __zigCommonJsDefault;",
+    ...Array.from(names)
+      .sort()
+      .map((name) => `export const ${name} = __zigCommonJsDefault.${name};`)
+  ].join("\n");
+
+  return source.slice(0, defaultExport.index) + replacement + "\n";
+}
+
 mkdirSync(resolve(cacheDir), { recursive: true });
 const transpilers: Record<Loader, Bun.Transpiler> = {
   ts: new Bun.Transpiler({ loader: "ts" }),
@@ -102,6 +132,7 @@ for (const entry of entries) {
     normalized = (await bundled.outputs[0].text())
       .replaceAll("import.meta.env", "globalThis.__zigImportMetaEnv")
       .replaceAll("import.meta.require", "globalThis.__zigImportMetaRequire");
+    normalized = addCommonJsNamedExports(normalized);
   } else {
     const source = await Bun.file(resolve(entry.file)).text();
     const transformed = transpilers[entry.loader].transformSync(source);

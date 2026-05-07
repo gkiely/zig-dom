@@ -4,6 +4,7 @@ const zig_dom = @import("../zig_dom.zig");
 
 const Allocator = std.mem.Allocator;
 const dom_bootstrap_source = @embedFile("dom_bootstrap.js");
+var host_io: ?std.Io = null;
 
 pub const Context = quickjs.Context;
 pub const ModuleDef = quickjs.ModuleDef;
@@ -34,7 +35,9 @@ pub const Runtime = struct {
     ctx: *quickjs.Context,
     dom_window_handle: u64,
 
-    pub fn init(allocator: Allocator) RuntimeError!Runtime {
+    pub fn init(allocator: Allocator, io: std.Io) RuntimeError!Runtime {
+        host_io = io;
+
         const rt = quickjs.Runtime.init() catch return error.OutOfMemory;
         errdefer rt.deinit();
 
@@ -48,6 +51,7 @@ pub const Runtime = struct {
             .dom_window_handle = 0,
         };
 
+        try runtime.installHostGlobals();
         try runtime.installNativeDomGlobals();
         return runtime;
     }
@@ -300,6 +304,13 @@ pub const Runtime = struct {
         return self.allocator.dupe(u8, std.mem.span(fallback)) catch error.OutOfMemory;
     }
 
+    fn installHostGlobals(self: *Runtime) RuntimeError!void {
+        const global = self.ctx.getGlobalObject();
+        defer global.deinit(self.ctx);
+
+        try installNativeFunction(self.ctx, global, "__zigReadFileSync", jsReadFileSync, 2);
+    }
+
     fn installNativeDomGlobals(self: *Runtime) RuntimeError!void {
         var window_handle: u64 = 0;
         if (zig_dom.zig_dom_create_window(&window_handle) != 0) {
@@ -491,6 +502,28 @@ fn installNativeFunction(
     }
 
     target.setPropertyStr(ctx, name.ptr, value) catch return error.EvaluationFailed;
+}
+
+fn jsReadFileSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const path_value = parseStringArg(ctx, args, 0, "readFileSync") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(path_value.ptr);
+
+    const path = path_value.ptr[0..path_value.len];
+    const io = host_io orelse {
+        return quickjs.Value.initStringLen(ctx, "readFileSync failed: host I/O is unavailable").throw(ctx);
+    };
+
+    const source = std.Io.Dir.cwd().readFileAlloc(io, path, std.heap.c_allocator, .limited(10 * 1024 * 1024)) catch |err| {
+        var message_buffer: [512]u8 = undefined;
+        const message = std.fmt.bufPrint(&message_buffer, "readFileSync failed for {s}: {s}", .{ path, @errorName(err) }) catch "readFileSync failed";
+        return quickjs.Value.initStringLen(ctx, message).throw(ctx);
+    };
+    defer std.heap.c_allocator.free(source);
+
+    return quickjs.Value.initStringLen(ctx, source);
 }
 
 fn jsDocumentCreateElement(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {

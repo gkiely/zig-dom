@@ -28,10 +28,10 @@ pub const Runtime = struct {
     allocator: std.mem.Allocator,
     adapter: quickjs_ng.Runtime,
 
-    pub fn init(allocator: std.mem.Allocator) RuntimeError!Runtime {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) RuntimeError!Runtime {
         return .{
             .allocator = allocator,
-            .adapter = try quickjs_ng.Runtime.init(allocator),
+            .adapter = try quickjs_ng.Runtime.init(allocator, io),
         };
     }
 

@@ -98,6 +98,87 @@
     }
   }
 
+  function parseAttributeSelector(selector) {
+    const match = String(selector).match(/^\[([A-Za-z_:-][\w:.-]*)(?:=(["']?)(.*?)\2)?\]$/);
+    if (!match) {
+      return null;
+    }
+    return {
+      name: match[1],
+      value: match[3],
+      hasValue: match[3] !== undefined
+    };
+  }
+
+  function elementMatchesSimpleSelector(element, selector) {
+    const trimmed = String(selector).trim();
+    if (!trimmed) {
+      return false;
+    }
+
+    const notSelectors = [];
+    let base = trimmed.replace(/:not\((\[[^\]]+\])\)/g, (_full, inner) => {
+      notSelectors.push(inner);
+      return "";
+    });
+
+    const tagMatch = base.match(/^[A-Za-z][\w:-]*/);
+    if (tagMatch && element.localName !== tagMatch[0].toLowerCase()) {
+      return false;
+    }
+    if (!tagMatch && base.startsWith("*")) {
+      base = base.slice(1);
+    }
+
+    const attributeMatches = base.match(/\[[^\]]+\]/g) || [];
+    for (const rawAttribute of attributeMatches) {
+      const attribute = parseAttributeSelector(rawAttribute);
+      if (!attribute || !element.hasAttribute(attribute.name)) {
+        return false;
+      }
+      if (attribute.hasValue && element.getAttribute(attribute.name) !== attribute.value) {
+        return false;
+      }
+    }
+
+    for (const rawNotAttribute of notSelectors) {
+      const attribute = parseAttributeSelector(rawNotAttribute);
+      if (!attribute) {
+        return null;
+      }
+      if (!element.hasAttribute(attribute.name)) {
+        continue;
+      }
+      if (!attribute.hasValue || element.getAttribute(attribute.name) === attribute.value) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  function elementMatchesSelectorList(element, selector) {
+    const text = String(selector);
+    const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
+    if (parts.length === 0) {
+      return false;
+    }
+
+    for (const part of parts) {
+      if (/[>+~\s]/.test(part)) {
+        continue;
+      }
+      const matched = elementMatchesSimpleSelector(element, part);
+      if (matched === null) {
+        continue;
+      }
+      if (matched) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   class EventTarget {
     constructor() {
       this._listeners = new Map();
@@ -457,7 +538,7 @@
       if (this.nodeType === Node.DOCUMENT_NODE) {
         return null;
       }
-      const owner = native.nodeOwnerDocument(this[HANDLE]);
+      const owner = native.nodeOwnerDocument(this[HANDLE]) || this[OWNER_DOCUMENT_HANDLE];
       return wrapNode(owner);
     }
 
@@ -612,11 +693,24 @@
     }
 
     querySelector(selector) {
+      const local = this.querySelectorAll(selector);
+      if (String(selector).includes(",") && local.length > 0) {
+        return local.item(0);
+      }
       const handle = native.nodeQuerySelector(this[HANDLE], String(selector));
       return wrapNode(handle);
     }
 
     querySelectorAll(selector) {
+      if (String(selector).includes(",")) {
+        const matches = [];
+        walkDescendants(this, (node) => {
+          if (node.nodeType === Node.ELEMENT_NODE && node.matches(selector)) {
+            matches.push(node);
+          }
+        });
+        return new NodeList(() => matches, { static: true });
+      }
       const handles = native.nodeQuerySelectorAll(this[HANDLE], String(selector));
       return new NodeList(() => wrapHandleArray(handles), { static: true });
     }
@@ -1007,6 +1101,24 @@
       return value == null ? null : String(value);
     }
 
+    getAttributeNode(name) {
+      const attributeName = String(name);
+      if (!this.hasAttribute(attributeName)) {
+        return null;
+      }
+      const value = this.getAttribute(attributeName);
+      return {
+        name: attributeName,
+        nodeName: attributeName,
+        localName: attributeName,
+        value,
+        nodeValue: value,
+        textContent: value,
+        ownerElement: this,
+        nodeType: 2
+      };
+    }
+
     setAttribute(name, value) {
       native.elementSetAttribute(this[HANDLE], String(name), toStringValue(value));
     }
@@ -1034,6 +1146,10 @@
 
     getAttributeNames() {
       return parseAttributes(this).map((entry) => String(entry.name));
+    }
+
+    get attributes() {
+      return this.getAttributeNames().map((name) => this.getAttributeNode(name));
     }
 
     get dataset() {
@@ -1160,6 +1276,11 @@
     }
 
     matches(selector) {
+      const localMatch = elementMatchesSelectorList(this, selector);
+      if (localMatch !== null) {
+        return localMatch;
+      }
+
       const scope = this.parentNode || this.ownerDocument || document;
       return scope
         .querySelectorAll(String(selector))
@@ -1483,10 +1604,23 @@
     }
 
     querySelector(selector) {
+      const local = this.querySelectorAll(selector);
+      if (String(selector).includes(",") && local.length > 0) {
+        return local.item(0);
+      }
       return wrapNode(native.documentQuerySelector(this[HANDLE], String(selector)));
     }
 
     querySelectorAll(selector) {
+      if (String(selector).includes(",")) {
+        const matches = [];
+        walkDescendants(this, (node) => {
+          if (node.nodeType === Node.ELEMENT_NODE && node.matches(selector)) {
+            matches.push(node);
+          }
+        });
+        return new NodeList(() => matches, { static: true });
+      }
       const handles = native.documentQuerySelectorAll(this[HANDLE], String(selector));
       return new NodeList(() => wrapHandleArray(handles), { static: true });
     }
