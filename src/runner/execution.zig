@@ -1,76 +1,15 @@
 const std = @import("std");
 const runtime_pkg = @import("../runtime/runtime.zig");
 const transform = @import("transform.zig");
+const quickjs = @import("quickjs");
 
 const Allocator = std.mem.Allocator;
 const Runtime = runtime_pkg.Runtime;
 const Exception = runtime_pkg.Exception;
+const ModuleContext = runtime_pkg.ModuleContext;
+const ModuleDef = runtime_pkg.ModuleDef;
 
 const harness_source = @embedFile("runner_harness.js");
-const module_runtime_source =
-    \\globalThis.__zigModuleExports = Object.create(null);
-    \\globalThis.__zigBuiltinModule = function(id) {
-    \\  if (id === "shim:bun:test") {
-    \\    const mod = {
-    \\      test: globalThis.test,
-    \\      it: globalThis.it,
-    \\      describe: globalThis.describe,
-    \\      expect: globalThis.expect,
-    \\      beforeAll: globalThis.beforeAll,
-    \\      beforeEach: globalThis.beforeEach,
-    \\      afterEach: globalThis.afterEach,
-    \\      afterAll: globalThis.afterAll,
-    \\    };
-    \\    mod.default = mod;
-    \\    mod.__esModule = true;
-    \\    return mod;
-    \\  }
-    \\
-    \\  if (id === "shim:react") {
-    \\    const react = globalThis.React;
-    \\    return Object.assign({}, react, {
-    \\      default: react,
-    \\      __esModule: true,
-    \\    });
-    \\  }
-    \\
-    \\  if (id === "shim:react-dom/client") {
-    \\    const client = globalThis.ReactDOMClient;
-    \\    return Object.assign({}, client, {
-    \\      default: client,
-    \\      __esModule: true,
-    \\    });
-    \\  }
-    \\
-    \\  if (id === "shim:@testing-library/react") {
-    \\    const api = {
-    \\      render: globalThis.render,
-    \\      screen: globalThis.screen,
-    \\      fireEvent: globalThis.fireEvent,
-    \\    };
-    \\    api.default = api;
-    \\    api.__esModule = true;
-    \\    return api;
-    \\  }
-    \\
-    \\  return null;
-    \\};
-    \\globalThis.__zigRegisterModule = function(id, exports) {
-    \\  globalThis.__zigModuleExports[id] = exports;
-    \\};
-    \\globalThis.__zigRequire = function(id) {
-    \\  if (Object.prototype.hasOwnProperty.call(globalThis.__zigModuleExports, id)) {
-    \\    return globalThis.__zigModuleExports[id];
-    \\  }
-    \\
-    \\  const builtin = globalThis.__zigBuiltinModule(id);
-    \\  if (builtin !== null) {
-    \\    return builtin;
-    \\  }
-    \\
-    \\  throw new Error(`Cannot resolve module: ${id}`);
-    \\};
-;
 const run_bootstrap_source =
     \\globalThis.__zigDone = false;
     \\globalThis.__zigRunError = "";
@@ -86,10 +25,44 @@ const run_bootstrap_source =
     \\  });
 ;
 
-const shim_bun_test_id = "shim:bun:test";
-const shim_react_id = "shim:react";
-const shim_react_dom_client_id = "shim:react-dom/client";
-const shim_testing_library_id = "shim:@testing-library/react";
+const bun_test_specifier = "bun:test";
+const react_specifier = "react";
+const react_dom_client_specifier = "react-dom/client";
+const testing_library_specifier = "@testing-library/react";
+
+const bun_test_shim_source =
+    \\export const test = globalThis.test;
+    \\export const it = globalThis.it;
+    \\export const describe = globalThis.describe;
+    \\export const expect = globalThis.expect;
+    \\export const beforeAll = globalThis.beforeAll;
+    \\export const beforeEach = globalThis.beforeEach;
+    \\export const afterEach = globalThis.afterEach;
+    \\export const afterAll = globalThis.afterAll;
+    \\const bunTest = { test, it, describe, expect, beforeAll, beforeEach, afterEach, afterAll };
+    \\export default bunTest;
+;
+
+const react_shim_source =
+    \\const React = globalThis.React;
+    \\export const createElement = React.createElement;
+    \\export const Fragment = React.Fragment;
+    \\export default React;
+;
+
+const react_dom_client_shim_source =
+    \\const Client = globalThis.ReactDOMClient;
+    \\export const createRoot = Client.createRoot;
+    \\export default Client;
+;
+
+const testing_library_shim_source =
+    \\export const render = globalThis.render;
+    \\export const screen = globalThis.screen;
+    \\export const fireEvent = globalThis.fireEvent;
+    \\const api = { render, screen, fireEvent };
+    \\export default api;
+;
 
 pub const FileResult = struct {
     path: []u8,
@@ -132,167 +105,103 @@ pub const Summary = struct {
     }
 };
 
-const RequireCall = struct {
-    specifier_start: usize,
-    specifier_end: usize,
-    specifier: []const u8,
-};
-
-const CachedModule = struct {
-    id: []u8,
-    source: []u8,
-    dependencies: []const []u8,
-
-    fn deinit(self: *CachedModule, allocator: Allocator) void {
-        allocator.free(self.id);
-        allocator.free(self.source);
-        for (self.dependencies) |dependency| {
-            allocator.free(dependency);
-        }
-        allocator.free(self.dependencies);
-    }
-};
-
-const ModuleCache = struct {
+const ModuleLoaderState = struct {
     allocator: Allocator,
     io: std.Io,
-    modules: std.StringHashMap(CachedModule),
+    loaded_modules: std.StringHashMap(*ModuleDef),
+    transformed_sources: std.StringHashMap([]u8),
 
-    fn init(allocator: Allocator, io: std.Io) ModuleCache {
+    fn init(allocator: Allocator, io: std.Io) ModuleLoaderState {
         return .{
             .allocator = allocator,
             .io = io,
-            .modules = std.StringHashMap(CachedModule).init(allocator),
+            .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
+            .transformed_sources = std.StringHashMap([]u8).init(allocator),
         };
     }
 
-    fn deinit(self: *ModuleCache) void {
-        var iterator = self.modules.iterator();
-        while (iterator.next()) |entry| {
-            var module = entry.value_ptr.*;
-            module.deinit(self.allocator);
+    fn deinit(self: *ModuleLoaderState) void {
+        var source_iterator = self.transformed_sources.iterator();
+        while (source_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
         }
-        self.modules.deinit();
+        self.transformed_sources.deinit();
+
+        var loaded_iterator = self.loaded_modules.iterator();
+        while (loaded_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.loaded_modules.deinit();
     }
 
-    fn getOrLoad(self: *ModuleCache, module_id: []const u8) !*const CachedModule {
-        if (self.modules.getPtr(module_id)) |existing| {
-            return existing;
+    fn normalizeSpecifier(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) ![]u8 {
+        if (shimModuleSource(module_name) != null) {
+            return self.allocator.dupe(u8, module_name);
         }
 
-        var loaded = try self.loadModule(module_id);
-        errdefer loaded.deinit(self.allocator);
+        if (std.fs.path.isAbsolute(module_name)) {
+            return self.resolveAbsolutePath(module_name);
+        }
 
-        try self.modules.put(loaded.id, loaded);
-        return self.modules.getPtr(module_id).?;
+        if (isRelativeSpecifier(module_name)) {
+            return self.resolveRelativePath(module_base_name, module_name);
+        }
+
+        return error.UnsupportedExternalModule;
     }
 
-    fn loadModule(self: *ModuleCache, module_id: []const u8) !CachedModule {
-        if (isShimModuleId(module_id)) {
-            return .{
-                .id = try self.allocator.dupe(u8, module_id),
-                .source = try self.allocator.dupe(u8, ""),
-                .dependencies = try self.allocator.alloc([]u8, 0),
-            };
+    fn loadModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]const u8 {
+        if (shimModuleSource(module_id)) |shim_source| {
+            return shim_source;
         }
 
-        const loader = transform.loaderForPath(module_id) orelse return error.UnsupportedModuleExtension;
-        _ = loader;
+        if (self.transformed_sources.get(module_id)) |cached| {
+            return cached;
+        }
+
+        _ = transform.loaderForPath(module_id) orelse return error.UnsupportedModuleExtension;
 
         const output_path = try transform.buildModuleOutputPath(self.allocator, module_id);
         defer self.allocator.free(output_path);
 
         try transform.transformModuleToPath(self.allocator, self.io, module_id, output_path);
 
-        const transformed = try std.Io.Dir.cwd().readFileAlloc(self.io, output_path, self.allocator, .limited(4 * 1024 * 1024));
-        defer self.allocator.free(transformed);
+        const transformed = try std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            output_path,
+            self.allocator,
+            .limited(4 * 1024 * 1024),
+        );
 
-        return self.buildCachedModuleFromSource(module_id, transformed);
+        const key = try self.allocator.dupe(u8, module_id);
+        errdefer self.allocator.free(key);
+
+        try self.transformed_sources.put(key, transformed);
+        return self.transformed_sources.get(module_id).?;
     }
 
-    fn buildCachedModuleFromSource(self: *ModuleCache, module_id: []const u8, source: []const u8) !CachedModule {
-        const require_calls = try collectRequireCalls(self.allocator, source);
-        defer self.allocator.free(require_calls);
-
-        var dependencies: std.ArrayList([]u8) = .empty;
-        errdefer {
-            for (dependencies.items) |dependency| {
-                self.allocator.free(dependency);
-            }
-            dependencies.deinit(self.allocator);
-        }
-
-        var resolved_specs = try self.allocator.alloc([]const u8, require_calls.len);
-        defer self.allocator.free(resolved_specs);
-
-        for (require_calls, 0..) |call, index| {
-            var resolved = try self.resolveImport(module_id, call.specifier);
-            if (findDependency(dependencies.items, resolved)) |existing| {
-                self.allocator.free(resolved);
-                resolved = existing;
-            } else {
-                try dependencies.append(self.allocator, resolved);
-            }
-
-            resolved_specs[index] = resolved;
-        }
-
-        const rewritten_source = if (require_calls.len == 0)
-            try self.allocator.dupe(u8, source)
-        else
-            try rewriteRequireSpecifiers(self.allocator, source, require_calls, resolved_specs);
-
-        return .{
-            .id = try self.allocator.dupe(u8, module_id),
-            .source = rewritten_source,
-            .dependencies = try dependencies.toOwnedSlice(self.allocator),
-        };
-    }
-
-    fn resolveImport(self: *ModuleCache, module_id: []const u8, specifier: []const u8) ![]u8 {
-        if (std.fs.path.isAbsolute(specifier)) {
-            return self.resolveAbsolutePath(specifier);
-        }
-
-        if (isRelativeSpecifier(specifier)) {
-            return self.resolveRelativePath(module_id, specifier);
-        }
-
-        if (shimIdForSpecifier(specifier)) |shim_id| {
-            return self.allocator.dupe(u8, shim_id);
-        }
-
-        return error.UnsupportedExternalModule;
-    }
-
-    fn resolveRelativePath(self: *ModuleCache, importer_path: []const u8, specifier: []const u8) ![]u8 {
-        const importer_dir = std.fs.path.dirname(importer_path) orelse ".";
-        const candidate = try std.fs.path.resolve(self.allocator, &.{ importer_dir, specifier });
-        errdefer self.allocator.free(candidate);
-
-        if (self.pathIsFile(candidate)) {
-            _ = transform.loaderForPath(candidate) orelse return error.UnsupportedModuleExtension;
-            return candidate;
-        }
-
-        if (std.fs.path.extension(candidate).len > 0) {
+    fn resolveRelativePath(self: *ModuleLoaderState, module_base_name: []const u8, specifier: []const u8) ![]u8 {
+        if (!std.fs.path.isAbsolute(module_base_name)) {
             return error.ModuleNotFound;
         }
 
-        if (try self.resolvePathWithoutExtension(candidate)) |resolved| {
-            self.allocator.free(candidate);
-            return resolved;
-        }
+        const base_dir = std.fs.path.dirname(module_base_name) orelse return error.ModuleNotFound;
+        const candidate = try std.fs.path.resolve(self.allocator, &.{ base_dir, specifier });
+        errdefer self.allocator.free(candidate);
 
-        return error.ModuleNotFound;
+        return self.resolvePathWithProbing(candidate);
     }
 
-    fn resolveAbsolutePath(self: *ModuleCache, specifier: []const u8) ![]u8 {
+    fn resolveAbsolutePath(self: *ModuleLoaderState, specifier: []const u8) ![]u8 {
         const candidate = try std.fs.path.resolve(self.allocator, &.{specifier});
         errdefer self.allocator.free(candidate);
 
-        if (self.pathIsFile(candidate)) {
-            _ = transform.loaderForPath(candidate) orelse return error.UnsupportedModuleExtension;
+        return self.resolvePathWithProbing(candidate);
+    }
+
+    fn resolvePathWithProbing(self: *ModuleLoaderState, candidate: []u8) ![]u8 {
+        if (self.pathIsSupportedFile(candidate)) {
             return candidate;
         }
 
@@ -308,12 +217,12 @@ const ModuleCache = struct {
         return error.ModuleNotFound;
     }
 
-    fn resolvePathWithoutExtension(self: *ModuleCache, base_path: []const u8) !?[]u8 {
+    fn resolvePathWithoutExtension(self: *ModuleLoaderState, base_path: []const u8) !?[]u8 {
         const extensions = [_][]const u8{ ".ts", ".tsx", ".jsx", ".js" };
 
         for (extensions) |extension| {
             const candidate = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ base_path, extension });
-            if (self.pathIsFile(candidate)) {
+            if (self.pathIsSupportedFile(candidate)) {
                 return candidate;
             }
             self.allocator.free(candidate);
@@ -321,7 +230,7 @@ const ModuleCache = struct {
 
         for (extensions) |extension| {
             const candidate = try std.fmt.allocPrint(self.allocator, "{s}/index{s}", .{ base_path, extension });
-            if (self.pathIsFile(candidate)) {
+            if (self.pathIsSupportedFile(candidate)) {
                 return candidate;
             }
             self.allocator.free(candidate);
@@ -330,7 +239,11 @@ const ModuleCache = struct {
         return null;
     }
 
-    fn pathIsFile(self: *ModuleCache, path: []const u8) bool {
+    fn pathIsSupportedFile(self: *ModuleLoaderState, path: []const u8) bool {
+        if (transform.loaderForPath(path) == null) {
+            return false;
+        }
+
         const stat = std.Io.Dir.cwd().statFile(self.io, path, .{}) catch return false;
         return stat.kind == .file;
     }
@@ -345,9 +258,6 @@ pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8) !Summary 
         results.deinit(allocator);
     }
 
-    var module_cache = ModuleCache.init(allocator, io);
-    defer module_cache.deinit();
-
     var totals = Summary{
         .files = &.{},
         .total_passed = 0,
@@ -358,7 +268,7 @@ pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8) !Summary 
     };
 
     for (paths) |path| {
-        var file_result = try runSingleFile(allocator, io, path, &module_cache);
+        var file_result = try runSingleFile(allocator, io, path);
         errdefer file_result.deinit(allocator);
 
         totals.total_passed += file_result.passed;
@@ -374,11 +284,11 @@ pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8) !Summary 
     return totals;
 }
 
-fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, module_cache: *ModuleCache) !FileResult {
-    const module_entry_id = canonicalizePath(allocator, path) catch |err| {
+fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8) !FileResult {
+    const entry_module_id = canonicalizePath(allocator, io, path) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
-    defer allocator.free(module_entry_id);
+    defer allocator.free(entry_module_id);
 
     var vm = try Runtime.init(allocator);
     defer vm.deinit();
@@ -387,33 +297,18 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, module_cach
         return failureFromRuntimeException(allocator, path, "failed to initialize runner harness", err, &vm);
     };
 
-    vm.evalScript("<zig-module-runtime>", module_runtime_source) catch |err| {
-        return failureFromRuntimeException(allocator, path, "failed to initialize module runtime", err, &vm);
-    };
+    var module_loader_state = ModuleLoaderState.init(allocator, io);
+    defer module_loader_state.deinit();
 
-    const module_order = buildEvaluationOrder(allocator, module_cache, module_entry_id) catch |err| {
+    vm.setModuleLoaderFunc(ModuleLoaderState, &module_loader_state, moduleNormalize, moduleLoad);
+
+    const entry_source = module_loader_state.loadModuleSource(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
-    defer allocator.free(module_order);
 
-    for (module_order) |module_id| {
-        if (isShimModuleId(module_id)) {
-            continue;
-        }
-
-        const module = module_cache.getOrLoad(module_id) catch |err| {
-            return collectionFailureFromError(allocator, path, "collection failed", err);
-        };
-
-        const define_script = buildModuleDefineScript(allocator, module) catch |err| {
-            return collectionFailureFromError(allocator, path, "collection failed", err);
-        };
-        defer allocator.free(define_script);
-
-        vm.evalScript(module.id, define_script) catch |err| {
-            return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
-        };
-    }
+    vm.evalModule(entry_module_id, entry_source) catch |err| {
+        return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
+    };
 
     vm.evalScript("<zig-runner-bootstrap>", run_bootstrap_source) catch |err| {
         return failureFromRuntimeException(allocator, path, "failed to start file execution", err, &vm);
@@ -497,141 +392,98 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, module_cach
     };
 }
 
-fn buildEvaluationOrder(
-    allocator: Allocator,
-    module_cache: *ModuleCache,
-    entry_module_id: []const u8,
-) ![]const []const u8 {
-    var order: std.ArrayList([]const u8) = .empty;
-    errdefer order.deinit(allocator);
+fn moduleNormalize(
+    state_opt: ?*ModuleLoaderState,
+    ctx: *ModuleContext,
+    module_base_name: [:0]const u8,
+    module_name: [:0]const u8,
+) ?[*:0]u8 {
+    const state = state_opt orelse return null;
 
-    var visiting = std.StringHashMap(void).init(allocator);
-    defer visiting.deinit();
+    const resolved = state.normalizeSpecifier(module_base_name, module_name) catch {
+        _ = quickjs.c.JS_ThrowReferenceError(ctx.cval(), "module resolution failed");
+        return null;
+    };
+    defer state.allocator.free(resolved);
 
-    var visited = std.StringHashMap(void).init(allocator);
-    defer visited.deinit();
-
-    try visitModule(&order, &visiting, &visited, module_cache, entry_module_id);
-    return order.toOwnedSlice(allocator);
+    return allocJsCString(ctx, resolved) orelse blk: {
+        _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
+        break :blk null;
+    };
 }
 
-fn visitModule(
-    order: *std.ArrayList([]const u8),
-    visiting: *std.StringHashMap(void),
-    visited: *std.StringHashMap(void),
-    module_cache: *ModuleCache,
-    module_id: []const u8,
-) !void {
-    if (visited.contains(module_id)) {
-        return;
+fn moduleLoad(
+    state_opt: ?*ModuleLoaderState,
+    ctx: *ModuleContext,
+    module_name: [:0]const u8,
+) ?*ModuleDef {
+    const state = state_opt orelse return null;
+    const module_id: []const u8 = module_name;
+
+    if (state.loaded_modules.get(module_id)) |existing| {
+        return existing;
     }
 
-    if (visiting.contains(module_id)) {
-        return error.CyclicModuleDependency;
+    const source = state.loadModuleSource(module_id) catch {
+        _ = quickjs.c.JS_ThrowReferenceError(ctx.cval(), "module loading failed");
+        return null;
+    };
+
+    const source_z = state.allocator.dupeZ(u8, source) catch {
+        _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
+        return null;
+    };
+    defer state.allocator.free(source_z);
+
+    const compiled = ctx.eval(source_z[0..source.len], module_name, .{ .type = .module, .compile_only = true });
+    if (compiled.isException()) {
+        return null;
     }
+    defer compiled.deinit(ctx);
 
-    try visiting.put(module_id, {});
-    defer _ = visiting.remove(module_id);
+    const module_ptr_any = quickjs.c.JS_VALUE_GET_PTR(compiled.cval()) orelse {
+        _ = quickjs.c.JS_ThrowReferenceError(ctx.cval(), "compiled module missing");
+        return null;
+    };
+    const module_ptr: *ModuleDef = @ptrCast(@alignCast(module_ptr_any));
 
-    const module = try module_cache.getOrLoad(module_id);
-    for (module.dependencies) |dependency| {
-        try visitModule(order, visiting, visited, module_cache, dependency);
-    }
+    const key = state.allocator.dupe(u8, module_id) catch {
+        _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
+        return null;
+    };
 
-    try visited.put(module.id, {});
-    try order.append(module_cache.allocator, module.id);
+    state.loaded_modules.put(key, module_ptr) catch {
+        state.allocator.free(key);
+        _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
+        return null;
+    };
+
+    return module_ptr;
 }
 
-fn collectRequireCalls(allocator: Allocator, source: []const u8) ![]RequireCall {
-    var calls: std.ArrayList(RequireCall) = .empty;
-    errdefer calls.deinit(allocator);
-
-    const token = "require(";
-    var cursor: usize = 0;
-
-    while (cursor < source.len) {
-        const start = std.mem.indexOfPos(u8, source, cursor, token) orelse break;
-        var arg_start = start + token.len;
-        while (arg_start < source.len and std.ascii.isWhitespace(source[arg_start])) {
-            arg_start += 1;
-        }
-
-        if (arg_start >= source.len) {
-            break;
-        }
-
-        const quote = source[arg_start];
-        if (quote != '\'' and quote != '"') {
-            cursor = start + token.len;
-            continue;
-        }
-
-        const spec_start = arg_start + 1;
-        var spec_end = spec_start;
-        while (spec_end < source.len) {
-            if (source[spec_end] == '\\') {
-                spec_end += 2;
-                continue;
-            }
-
-            if (source[spec_end] == quote) {
-                break;
-            }
-
-            spec_end += 1;
-        }
-
-        if (spec_end >= source.len) {
-            break;
-        }
-
-        var close_paren = spec_end + 1;
-        while (close_paren < source.len and std.ascii.isWhitespace(source[close_paren])) {
-            close_paren += 1;
-        }
-
-        if (close_paren >= source.len or source[close_paren] != ')') {
-            cursor = spec_end + 1;
-            continue;
-        }
-
-        try calls.append(allocator, .{
-            .specifier_start = spec_start,
-            .specifier_end = spec_end,
-            .specifier = source[spec_start..spec_end],
-        });
-
-        cursor = close_paren + 1;
-    }
-
-    return calls.toOwnedSlice(allocator);
+fn allocJsCString(ctx: *ModuleContext, text: []const u8) ?[*:0]u8 {
+    const raw = quickjs.c.js_malloc(ctx.cval(), text.len + 1) orelse return null;
+    const bytes: [*]u8 = @ptrCast(raw);
+    @memcpy(bytes[0..text.len], text);
+    bytes[text.len] = 0;
+    return @ptrCast(bytes);
 }
 
-fn rewriteRequireSpecifiers(
-    allocator: Allocator,
-    source: []const u8,
-    require_calls: []const RequireCall,
-    resolved_specs: []const []const u8,
-) ![]u8 {
-    var rewritten: std.ArrayList(u8) = .empty;
-    errdefer rewritten.deinit(allocator);
-
-    var cursor: usize = 0;
-    for (require_calls, 0..) |call, index| {
-        try rewritten.appendSlice(allocator, source[cursor..call.specifier_start]);
-        try rewritten.appendSlice(allocator, resolved_specs[index]);
-        cursor = call.specifier_end;
+fn shimModuleSource(module_name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, module_name, bun_test_specifier)) {
+        return bun_test_shim_source;
     }
-    try rewritten.appendSlice(allocator, source[cursor..]);
 
-    return rewritten.toOwnedSlice(allocator);
-}
+    if (std.mem.eql(u8, module_name, react_specifier)) {
+        return react_shim_source;
+    }
 
-fn findDependency(dependencies: []const []u8, candidate: []const u8) ?[]u8 {
-    for (dependencies) |dependency| {
-        if (std.mem.eql(u8, dependency, candidate)) {
-            return dependency;
-        }
+    if (std.mem.eql(u8, module_name, react_dom_client_specifier)) {
+        return react_dom_client_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, testing_library_specifier)) {
+        return testing_library_shim_source;
     }
 
     return null;
@@ -641,79 +493,10 @@ fn isRelativeSpecifier(specifier: []const u8) bool {
     return std.mem.startsWith(u8, specifier, "./") or std.mem.startsWith(u8, specifier, "../");
 }
 
-fn shimIdForSpecifier(specifier: []const u8) ?[]const u8 {
-    if (std.mem.eql(u8, specifier, "bun:test")) {
-        return shim_bun_test_id;
-    }
-
-    if (std.mem.eql(u8, specifier, "react")) {
-        return shim_react_id;
-    }
-
-    if (std.mem.eql(u8, specifier, "react-dom/client")) {
-        return shim_react_dom_client_id;
-    }
-
-    if (std.mem.eql(u8, specifier, "@testing-library/react")) {
-        return shim_testing_library_id;
-    }
-
-    return null;
-}
-
-fn isShimModuleId(module_id: []const u8) bool {
-    if (std.mem.eql(u8, module_id, shim_bun_test_id)) {
-        return true;
-    }
-
-    if (std.mem.eql(u8, module_id, shim_react_id)) {
-        return true;
-    }
-
-    if (std.mem.eql(u8, module_id, shim_react_dom_client_id)) {
-        return true;
-    }
-
-    if (std.mem.eql(u8, module_id, shim_testing_library_id)) {
-        return true;
-    }
-
-    return false;
-}
-
-fn buildModuleDefineScript(allocator: Allocator, module: *const CachedModule) ![]u8 {
-    const id_literal = try toJsStringLiteral(allocator, module.id);
-    defer allocator.free(id_literal);
-
-    return std.fmt.allocPrint(
-        allocator,
-        "(() => {{\nconst module = {{ exports: {{}} }};\nconst exports = module.exports;\nconst require = globalThis.__zigRequire;\n{s}\nglobalThis.__zigRegisterModule({s}, module.exports);\n}})();",
-        .{ module.source, id_literal },
-    );
-}
-
-fn toJsStringLiteral(allocator: Allocator, input: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-
-    try out.append(allocator, '"');
-    for (input) |char| {
-        switch (char) {
-            '\\' => try out.appendSlice(allocator, "\\\\"),
-            '"' => try out.appendSlice(allocator, "\\\""),
-            '\n' => try out.appendSlice(allocator, "\\n"),
-            '\r' => try out.appendSlice(allocator, "\\r"),
-            '\t' => try out.appendSlice(allocator, "\\t"),
-            else => try out.append(allocator, char),
-        }
-    }
-    try out.append(allocator, '"');
-
-    return out.toOwnedSlice(allocator);
-}
-
-fn canonicalizePath(allocator: Allocator, path: []const u8) ![]u8 {
-    return std.fs.path.resolve(allocator, &.{path});
+fn canonicalizePath(allocator: Allocator, io: std.Io, path: []const u8) ![]u8 {
+    const resolved = try std.Io.Dir.cwd().realPathFileAlloc(io, path, allocator);
+    defer allocator.free(resolved);
+    return allocator.dupe(u8, resolved[0..resolved.len]);
 }
 
 fn failureFromRuntimeException(
@@ -804,46 +587,16 @@ fn formatExceptionText(allocator: Allocator, context: []const u8, exception: Exc
     return std.fmt.allocPrint(allocator, "{s}: {s}", .{ context, exception.message });
 }
 
-test "collectRequireCalls finds static requires" {
-    const allocator = std.testing.allocator;
-    const source =
-        \\const a = require("./alpha");
-        \\const b = require('@testing-library/react');
-    ;
-
-    const calls = try collectRequireCalls(allocator, source);
-    defer allocator.free(calls);
-
-    try std.testing.expectEqual(@as(usize, 2), calls.len);
-    try std.testing.expectEqualStrings("./alpha", calls[0].specifier);
-    try std.testing.expectEqualStrings("@testing-library/react", calls[1].specifier);
+test "isRelativeSpecifier detects relative paths" {
+    try std.testing.expect(isRelativeSpecifier("./foo"));
+    try std.testing.expect(isRelativeSpecifier("../foo"));
+    try std.testing.expect(!isRelativeSpecifier("foo"));
 }
 
-test "rewriteRequireSpecifiers updates module ids" {
-    const allocator = std.testing.allocator;
-    const source =
-        \\const dep = require("./dep");
-        \\const shim = require("bun:test");
-    ;
-
-    const calls = try collectRequireCalls(allocator, source);
-    defer allocator.free(calls);
-
-    const rewritten = try rewriteRequireSpecifiers(
-        allocator,
-        source,
-        calls,
-        &.{ "/abs/dep.ts", "shim:bun:test" },
-    );
-    defer allocator.free(rewritten);
-
-    try std.testing.expect(std.mem.indexOf(u8, rewritten, "require(\"/abs/dep.ts\")") != null);
-    try std.testing.expect(std.mem.indexOf(u8, rewritten, "require(\"shim:bun:test\")") != null);
-}
-
-test "shimIdForSpecifier resolves known shims" {
-    try std.testing.expectEqualStrings(shim_bun_test_id, shimIdForSpecifier("bun:test").?);
-    try std.testing.expectEqualStrings(shim_react_dom_client_id, shimIdForSpecifier("react-dom/client").?);
-    try std.testing.expectEqualStrings(shim_testing_library_id, shimIdForSpecifier("@testing-library/react").?);
-    try std.testing.expect(shimIdForSpecifier("not-a-shim") == null);
+test "shimModuleSource resolves known shims" {
+    try std.testing.expect(shimModuleSource("bun:test") != null);
+    try std.testing.expect(shimModuleSource("react") != null);
+    try std.testing.expect(shimModuleSource("react-dom/client") != null);
+    try std.testing.expect(shimModuleSource("@testing-library/react") != null);
+    try std.testing.expect(shimModuleSource("not-a-shim") == null);
 }

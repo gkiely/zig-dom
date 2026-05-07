@@ -62,7 +62,7 @@ pub fn buildModuleOutputPath(allocator: Allocator, path: []const u8) ![]u8 {
     const digest = std.hash.Wyhash.hash(0, path);
     return std.fmt.allocPrint(
         allocator,
-        "./.zig-dom-cache/transformed/modules/{x}-{s}.cjs",
+        "./.zig-dom-cache/transformed/modules/{x}-{s}.js",
         .{ digest, sanitized.items },
     );
 }

@@ -1,6 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import ts from "typescript";
 
 type Entry = {
   file: string;
@@ -87,19 +86,10 @@ const transpilers: Record<Loader, Bun.Transpiler> = {
 for (const entry of entries) {
   const source = await Bun.file(resolve(entry.file)).text();
   const transformed = transpilers[entry.loader].transformSync(source);
-  const commonJs = ts.transpileModule(transformed, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2020,
-      jsx: ts.JsxEmit.React,
-      esModuleInterop: true,
-      allowSyntheticDefaultImports: true
-    }
-  }).outputText;
   const outPath = resolve(entry.out);
 
   mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, commonJs, "utf8");
+  writeFileSync(outPath, transformed, "utf8");
 }
 
 console.log(`Transformed ${entries.length} file(s).`);

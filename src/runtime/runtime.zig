@@ -21,6 +21,9 @@ pub const Exception = struct {
     }
 };
 
+pub const ModuleContext = quickjs_ng.Context;
+pub const ModuleDef = quickjs_ng.ModuleDef;
+
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
     adapter: quickjs_ng.Runtime,
@@ -38,6 +41,20 @@ pub const Runtime = struct {
 
     pub fn evalScript(self: *Runtime, filename: []const u8, source: []const u8) RuntimeError!void {
         try self.adapter.evalScript(filename, source);
+    }
+
+    pub fn evalModule(self: *Runtime, filename: []const u8, source: []const u8) RuntimeError!void {
+        try self.adapter.evalModule(filename, source);
+    }
+
+    pub fn setModuleLoaderFunc(
+        self: *Runtime,
+        comptime T: type,
+        userdata: ?*T,
+        comptime module_normalize: ?quickjs_ng.Runtime.ModuleNormalizeFunc(T),
+        comptime module_loader: ?quickjs_ng.Runtime.ModuleLoaderFunc(T),
+    ) void {
+        self.adapter.setModuleLoaderFunc(T, userdata, module_normalize, module_loader);
     }
 
     pub fn isJobPending(self: *Runtime) bool {

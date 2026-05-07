@@ -5,6 +5,9 @@ const zig_dom = @import("../zig_dom.zig");
 const Allocator = std.mem.Allocator;
 const dom_bootstrap_source = @embedFile("dom_bootstrap.js");
 
+pub const Context = quickjs.Context;
+pub const ModuleDef = quickjs.ModuleDef;
+
 pub const RuntimeError = error{
     OutOfMemory,
     EvaluationFailed,
@@ -61,13 +64,57 @@ pub const Runtime = struct {
     pub fn evalScript(self: *Runtime, filename: []const u8, source: []const u8) RuntimeError!void {
         const filename_z = self.allocator.dupeZ(u8, filename) catch return error.OutOfMemory;
         defer self.allocator.free(filename_z);
+        const source_z = self.allocator.dupeZ(u8, source) catch return error.OutOfMemory;
+        defer self.allocator.free(source_z);
 
-        const result = self.ctx.eval(source, filename_z, .{});
+        const result = self.ctx.eval(source_z[0..source.len], filename_z, .{});
         defer result.deinit(self.ctx);
 
         if (result.isException()) {
             return error.EvaluationFailed;
         }
+    }
+
+    pub fn evalModule(self: *Runtime, filename: []const u8, source: []const u8) RuntimeError!void {
+        const filename_z = self.allocator.dupeZ(u8, filename) catch return error.OutOfMemory;
+        defer self.allocator.free(filename_z);
+        const source_z = self.allocator.dupeZ(u8, source) catch return error.OutOfMemory;
+        defer self.allocator.free(source_z);
+
+        const compiled = self.ctx.eval(source_z[0..source.len], filename_z, .{ .type = .module, .compile_only = true });
+        if (compiled.isException()) {
+            compiled.deinit(self.ctx);
+            return error.EvaluationFailed;
+        }
+
+        compiled.resolveModule(self.ctx) catch {
+            compiled.deinit(self.ctx);
+            return error.EvaluationFailed;
+        };
+
+        const result = self.ctx.evalFunction(compiled);
+        defer result.deinit(self.ctx);
+        if (result.isException()) {
+            return error.EvaluationFailed;
+        }
+    }
+
+    pub fn ModuleNormalizeFunc(comptime T: type) type {
+        return quickjs.Runtime.ModuleNormalizeFunc(T);
+    }
+
+    pub fn ModuleLoaderFunc(comptime T: type) type {
+        return quickjs.Runtime.ModuleLoaderFunc(T);
+    }
+
+    pub fn setModuleLoaderFunc(
+        self: *Runtime,
+        comptime T: type,
+        userdata: ?*T,
+        comptime module_normalize: ?quickjs.Runtime.ModuleNormalizeFunc(T),
+        comptime module_loader: ?quickjs.Runtime.ModuleLoaderFunc(T),
+    ) void {
+        self.rt.setModuleLoaderFunc(T, userdata, module_normalize, module_loader);
     }
 
     pub fn isJobPending(self: *Runtime) bool {
