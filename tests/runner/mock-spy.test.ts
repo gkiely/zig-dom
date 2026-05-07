@@ -105,3 +105,31 @@ test("stacked spyOn with once values preserves sequential fetch results", async 
   second.mockRestore();
   first.mockRestore();
 });
+
+test("spyOn works for non-configurable writable methods", () => {
+  const target = {
+    request(args: unknown) {
+      return args;
+    }
+  } as { request: (args: unknown) => unknown };
+
+  const original = target.request;
+  Object.defineProperty(target, "request", {
+    value: original,
+    writable: true,
+    configurable: false,
+    enumerable: true
+  });
+
+  const first = spyOn(target, "request");
+  target.request({ kind: "first" });
+  const second = spyOn(target, "request");
+  target.request({ kind: "second" });
+
+  expect(first).toBe(second);
+  expect(second.mock.calls.length).toBe(2);
+  expect(second).toHaveBeenNthCalledWith(2, expect.objectContaining({ kind: "second" }));
+
+  second.mockRestore();
+});
+

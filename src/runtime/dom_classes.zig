@@ -1755,7 +1755,23 @@ fn isKnownFastSelector(selector: []const u8) bool {
 }
 
 fn isRoleTokenSelector(selector: []const u8) bool {
-    return std.mem.startsWith(u8, selector, "*[role~=\"") and std.mem.endsWith(u8, selector, "\"]");
+    return roleTokenSelectorValue(selector) != null;
+}
+
+fn roleTokenSelectorValue(selector: []const u8) ?[]const u8 {
+    const suffix = "\"]";
+    const star_prefix = "*[role~=\"";
+    const bare_prefix = "[role~=\"";
+
+    if (std.mem.startsWith(u8, selector, star_prefix) and std.mem.endsWith(u8, selector, suffix) and selector.len > star_prefix.len + suffix.len) {
+        return selector[star_prefix.len .. selector.len - suffix.len];
+    }
+
+    if (std.mem.startsWith(u8, selector, bare_prefix) and std.mem.endsWith(u8, selector, suffix) and selector.len > bare_prefix.len + suffix.len) {
+        return selector[bare_prefix.len .. selector.len - suffix.len];
+    }
+
+    return null;
 }
 
 fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, selector: []const u8) bool {
@@ -1780,6 +1796,31 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
         const value = elementAttributeString(ctx, element, "type");
         if (value) |owned| ctx.freeCString(owned.ptr);
         return value == null;
+    }
+    if (std.mem.eql(u8, selector, "input:not([list])")) {
+        if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
+        const list = elementAttributeString(ctx, element, "list");
+        if (list) |owned| ctx.freeCString(owned.ptr);
+        return list == null;
+    }
+    if (std.mem.eql(u8, selector, "input:not([type]):not([list])")) {
+        if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
+        const type_value = elementAttributeString(ctx, element, "type");
+        if (type_value) |owned| ctx.freeCString(owned.ptr);
+        if (type_value != null) return false;
+        const list = elementAttributeString(ctx, element, "list");
+        if (list) |owned| ctx.freeCString(owned.ptr);
+        return list == null;
+    }
+    if (std.mem.startsWith(u8, selector, "input[type=\"") and std.mem.endsWith(u8, selector, "\"]:not([list])")) {
+        if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
+        const expected = selector["input[type=\"".len .. selector.len - "\"]:not([list])".len];
+        const type_value = elementAttributeString(ctx, element, "type") orelse return false;
+        defer ctx.freeCString(type_value.ptr);
+        if (!std.ascii.eqlIgnoreCase(type_value.ptr[0..type_value.len], expected)) return false;
+        const list = elementAttributeString(ctx, element, "list");
+        if (list) |owned| ctx.freeCString(owned.ptr);
+        return list == null;
     }
     if (std.mem.eql(u8, selector, "input[type=\"text\"]") or std.mem.eql(u8, selector, "input[type=\"search\"]")) {
         if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
@@ -1812,17 +1853,17 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
         defer ctx.freeCString(href.ptr);
         return if (std.mem.eql(u8, selector, "a[href]:not([href=\"\"])")) href.len > 0 else true;
     }
-    if (matchesTagAttributeSelector(ctx, element, local.ptr[0..local.len], selector)) |matched| {
-        return matched;
-    }
-    if (isRoleTokenSelector(selector)) {
-        const expected_role = selector["*[role~=\"".len .. selector.len - "\"]".len];
+    if (roleTokenSelectorValue(selector)) |expected_role| {
         const role = elementAttributeString(ctx, element, "role") orelse return false;
         defer ctx.freeCString(role.ptr);
         var iter = std.mem.tokenizeScalar(u8, role.ptr[0..role.len], ' ');
         while (iter.next()) |token| {
             if (std.mem.eql(u8, token, expected_role)) return true;
         }
+        return false;
+    }
+    if (matchesTagAttributeSelector(ctx, element, local.ptr[0..local.len], selector)) |matched| {
+        return matched;
     }
     return false;
 }
@@ -1832,20 +1873,21 @@ fn matchesTagAttributeSelector(ctx: *quickjs.Context, element: quickjs.Value, lo
         if (std.mem.indexOfScalar(u8, selector[0..not_index], '[') != null) {
             // Combined selectors such as img[alt]:not([alt=""]) are handled below.
         } else {
-        if (!std.mem.endsWith(u8, selector, "])")) return null;
-        const tag = selector[0..not_index];
-        if (tag.len == 0 or !std.ascii.eqlIgnoreCase(local, tag)) return false;
-        const attr = selector[not_index + ":not([".len .. selector.len - "])".len];
-        if (std.mem.indexOfScalar(u8, attr, '=') != null) return null;
-        const value = elementAttributeString(ctx, element, attr);
-        if (value) |owned| ctx.freeCString(owned.ptr);
-        return value == null;
+            if (!std.mem.endsWith(u8, selector, "])")) return null;
+            const tag = selector[0..not_index];
+            if (tag.len == 0 or !std.ascii.eqlIgnoreCase(local, tag)) return false;
+            const attr = selector[not_index + ":not([".len .. selector.len - "])".len];
+            if (std.mem.indexOfScalar(u8, attr, '=') != null) return null;
+            const value = elementAttributeString(ctx, element, attr);
+            if (value) |owned| ctx.freeCString(owned.ptr);
+            return value == null;
         }
     }
 
     const bracket = std.mem.indexOfScalar(u8, selector, '[') orelse return null;
     if (bracket == 0) return null;
     const tag = selector[0..bracket];
+    if (std.mem.eql(u8, tag, "*")) return null;
     if (!std.ascii.eqlIgnoreCase(local, tag)) return false;
 
     if (std.mem.indexOf(u8, selector[bracket..], "]:not([")) |relative_not| {
@@ -2203,13 +2245,15 @@ fn jsClassListAdd(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_arg
     const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
     defer element.deinit(ctx);
     if (!classListHasToken(ctx, element, token.ptr[0..token.len])) {
-        const current = elementAttributeString(ctx, element, "class") orelse return quickjs.Value.exception;
-        defer ctx.freeCString(current.ptr);
+        const current_opt = elementAttributeString(ctx, element, "class");
+        defer if (current_opt) |current| ctx.freeCString(current.ptr);
+        const current_len = if (current_opt) |current| current.len else 0;
+        const current_text = if (current_opt) |current| current.ptr[0..current.len] else "";
         var buffer: [512]u8 = undefined;
-        const next = if (current.len == 0)
+        const next = if (current_len == 0)
             std.fmt.bufPrint(&buffer, "{s}", .{token.ptr[0..token.len]}) catch token.ptr[0..token.len]
         else
-            std.fmt.bufPrint(&buffer, "{s} {s}", .{ current.ptr[0..current.len], token.ptr[0..token.len] }) catch current.ptr[0..current.len];
+            std.fmt.bufPrint(&buffer, "{s} {s}", .{ current_text, token.ptr[0..token.len] }) catch current_text;
         setElementStringAttribute(ctx, element, "class", next) catch return quickjs.Value.exception;
     }
     return quickjs.Value.undefined;
@@ -2222,11 +2266,12 @@ fn jsClassListRemove(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_
     defer ctx.freeCString(token.ptr);
     const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
     defer element.deinit(ctx);
-    const current = elementAttributeString(ctx, element, "class") orelse return quickjs.Value.exception;
-    defer ctx.freeCString(current.ptr);
+    const current_opt = elementAttributeString(ctx, element, "class");
+    defer if (current_opt) |current| ctx.freeCString(current.ptr);
+    const current_text = if (current_opt) |current| current.ptr[0..current.len] else "";
     var out: [512]u8 = undefined;
     var stream = std.Io.Writer.fixed(&out);
-    var iter = std.mem.tokenizeScalar(u8, current.ptr[0..current.len], ' ');
+    var iter = std.mem.tokenizeScalar(u8, current_text, ' ');
     var first = true;
     while (iter.next()) |part| {
         if (std.mem.eql(u8, part, token.ptr[0..token.len])) continue;
@@ -2414,6 +2459,13 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     event.setPropertyStr(ctx, "eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "_currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
+
+    if (std.mem.eql(u8, type_arg.ptr[0..type_arg.len], "click") and !boolProperty(ctx, event, "defaultPrevented")) {
+        const action_result = applyClickDefaultAction(ctx, this_value);
+        defer action_result.deinit(ctx);
+        if (action_result.isException()) return quickjs.Value.exception;
+    }
+
     return quickjs.Value.initBool(!boolProperty(ctx, event, "_canceled"));
 }
 
@@ -2443,6 +2495,75 @@ fn jsElementClick(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []co
 
     const dispatched = jsEventTargetDispatchEvent(ctx, this_value, @ptrCast(&[_]quickjs.Value{event}));
     defer dispatched.deinit(ctx);
+
+    return quickjs.Value.undefined;
+}
+
+fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs.Value {
+    const local = jsElementLocalNameGet(ctx, target);
+    defer local.deinit(ctx);
+    const local_text = local.toCStringLen(ctx) orelse return quickjs.Value.undefined;
+    defer ctx.freeCString(local_text.ptr);
+
+    const is_button = std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "button");
+    const is_input = std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "input");
+    if (!is_button and !is_input) {
+        return quickjs.Value.undefined;
+    }
+
+    const type_value_opt = elementAttributeString(ctx, target, "type");
+    defer if (type_value_opt) |value| ctx.freeCString(value.ptr);
+    const type_value = if (type_value_opt) |value| value.ptr[0..value.len] else "";
+
+    const should_submit = if (is_button)
+        (type_value.len == 0 or std.ascii.eqlIgnoreCase(type_value, "submit"))
+    else
+        std.ascii.eqlIgnoreCase(type_value, "submit");
+    const should_reset = std.ascii.eqlIgnoreCase(type_value, "reset");
+
+    if (!should_submit and !should_reset) {
+        return quickjs.Value.undefined;
+    }
+
+    const form = jsElementFormGet(ctx, target);
+    defer form.deinit(ctx);
+    if (!form.isObject()) {
+        return quickjs.Value.undefined;
+    }
+
+    if (should_submit) {
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const event_ctor = global.getPropertyStr(ctx, "Event");
+        defer event_ctor.deinit(ctx);
+        if (event_ctor.isException() or !event_ctor.isObject()) return quickjs.Value.undefined;
+
+        const submit_type = quickjs.Value.initStringLen(ctx, "submit");
+        defer submit_type.deinit(ctx);
+        const submit_options = quickjs.Value.initObject(ctx);
+        if (submit_options.isException()) return quickjs.Value.exception;
+        defer submit_options.deinit(ctx);
+        submit_options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+        submit_options.setPropertyStr(ctx, "cancelable", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+
+        const submit_args = [_]quickjs.Value{ submit_type, submit_options };
+        const submit_event = createEventObject(ctx, event_ctor, submit_args[0..], .event);
+        defer submit_event.deinit(ctx);
+        if (submit_event.isException()) return submit_event.dup(ctx);
+
+        const submit_dispatched = jsEventTargetDispatchEvent(ctx, form, @ptrCast(&[_]quickjs.Value{submit_event}));
+        defer submit_dispatched.deinit(ctx);
+        return quickjs.Value.undefined;
+    }
+
+    const reset_fn = form.getPropertyStr(ctx, "reset");
+    defer reset_fn.deinit(ctx);
+    if (reset_fn.isFunction(ctx)) {
+        const reset_result = reset_fn.call(ctx, form, &.{});
+        defer reset_result.deinit(ctx);
+        if (reset_result.isException()) return quickjs.Value.exception;
+    }
+
     return quickjs.Value.undefined;
 }
 
@@ -2734,8 +2855,9 @@ fn classListElement(ctx: *quickjs.Context, class_list: quickjs.Value) ?quickjs.V
 
 fn elementAttributeString(ctx: *quickjs.Context, element: quickjs.Value, name: []const u8) ?CStringArg {
     const handle = parseThisHandle(ctx, element, name) orelse return null;
-    const value = elementAttributeValueToJs(ctx, handle, name, "", name);
+    const value = elementAttributeValueToJs(ctx, handle, name, null, name);
     defer value.deinit(ctx);
+    if (value.isNull() or value.isUndefined()) return null;
     const cstr = value.toCStringLen(ctx) orelse return null;
     return .{ .ptr = cstr.ptr, .len = cstr.len };
 }

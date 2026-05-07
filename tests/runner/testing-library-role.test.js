@@ -15,3 +15,26 @@ test("testing-library can find implicit img roles", () => {
   expect(document.querySelector("img").matches('img[alt]:not([alt=""])')).toBe(true);
   expect(screen.getByRole("img").getAttribute("src")).toBe("/icon.png");
 });
+
+test("testing-library can find explicit menu role in modal-like markup", () => {
+  document.body.innerHTML =
+    '<div aria-hidden="true"><button>Add new</button></div>' +
+    '<div role="presentation"><div><ul role="menu" tabindex="-1"><li role="menuitem">Document</li></ul></div></div>';
+
+  expect(screen.getByRole("menu").getAttribute("tabindex")).toBe("-1");
+  expect(screen.getByRole("menuitem", { name: /document/i }).textContent).toBe("Document");
+});
+
+test("testing-library can find implicit textbox from unlabeled text input", () => {
+  document.body.innerHTML = '<input aria-label="Share url" value="http://localhost/app/page/wiki-0/page-1">';
+
+  const input = document.querySelector("input");
+  expect(input.matches("input:not([list])")).toBe(true);
+  const textbox = screen.getByRole("textbox", { name: /share url/i });
+  expect(textbox.getAttribute("value")).toBe("http://localhost/app/page/wiki-0/page-1");
+});
+
+test("testing-library can find explicit complementary role", () => {
+  document.body.innerHTML = '<aside class="outline" role="complementary"><nav class="outlineNav"></nav></aside>';
+  expect(screen.getByRole("complementary").getAttribute("role")).toBe("complementary");
+});

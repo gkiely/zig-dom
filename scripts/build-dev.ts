@@ -25,7 +25,7 @@ function splitArgs(): { input: string | null; runnerArgs: string[]; timeoutMs: n
   const args = process.argv.slice(2);
   const runnerArgs: string[] = [];
   let input: string | null = null;
-  let timeoutMs = 10_000;
+  let timeoutMs = 30_000;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
@@ -145,11 +145,18 @@ function resolveTestFiles(input: string): TestTargetGroup[] {
 async function run(args: string[], timeoutMs: number, label: string): Promise<number> {
   const child = spawn("zig", args, {
     detached: true,
-    stdio: "inherit"
+    stdio: ["inherit", "pipe", "pipe"]
   });
 
   return await new Promise((resolve, reject) => {
     let settled = false;
+    child.stdout?.on("data", (chunk) => {
+      process.stdout.write(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      process.stderr.write(chunk);
+    });
+
     const timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -161,7 +168,7 @@ async function run(args: string[], timeoutMs: number, label: string): Promise<nu
           process.kill(-child.pid!, "SIGKILL");
         } catch {}
       }, 500).unref();
-      console.error(`build:dev timed out after ${(timeoutMs / 1000).toFixed(1)}s. Increase with --timeout <seconds>.`);
+      console.error(`${label} timed out after ${(timeoutMs / 1000).toFixed(1)}s. Increase with --timeout <seconds>.`);
       resolve(124);
     }, timeoutMs);
 
@@ -172,11 +179,15 @@ async function run(args: string[], timeoutMs: number, label: string): Promise<nu
       reject(error);
     });
 
-    child.on("exit", (code, signal) => {
+    child.on("close", (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      resolve(code ?? (signal ? 1 : 0));
+      const exitCode = code ?? (signal ? 1 : 0);
+      if (exitCode !== 0) {
+        console.error(`${label} failed with exit code ${exitCode}`);
+      }
+      resolve(exitCode);
     });
   });
 }

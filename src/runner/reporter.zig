@@ -1,5 +1,11 @@
 const std = @import("std");
 
+const red = "\x1b[31m";
+const bold_red = "\x1b[1;31m";
+const yellow = "\x1b[33m";
+const dim = "\x1b[2m";
+const reset = "\x1b[0m";
+
 pub fn printDiscovered(count: usize) void {
     std.debug.print("Discovered {d} test file{s}.\n", .{ count, if (count == 1) "" else "s" });
 }
@@ -37,11 +43,36 @@ pub fn printFileResult(
 }
 
 pub fn printFailureReport(path: []const u8, report: []const u8) void {
-    std.debug.print("\nFailures in {s}:\n{s}\n", .{ path, report });
+    std.debug.print("\n{s}Failures in {s}:{s}\n", .{ bold_red, path, reset });
+    printColoredReport(report);
+    std.debug.print("\n", .{});
 }
 
 pub fn printCollectionReport(path: []const u8, report: []const u8) void {
-    std.debug.print("\nCollection errors in {s}:\n{s}\n", .{ path, report });
+    std.debug.print("\n{s}Collection errors in {s}:{s}\n", .{ bold_red, path, reset });
+    printColoredReport(report);
+    std.debug.print("\n", .{});
+}
+
+fn printColoredReport(report: []const u8) void {
+    var lines = std.mem.splitScalar(u8, report, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) {
+            std.debug.print("\n", .{});
+        } else if (std.mem.startsWith(u8, line, "    at ")) {
+            std.debug.print("{s}{s}{s}\n", .{ dim, line, reset });
+        } else if (std.mem.indexOf(u8, line, "Expected") != null or
+            std.mem.indexOf(u8, line, "Unable to find") != null or
+            std.mem.indexOf(u8, line, "not a function") != null or
+            std.mem.indexOf(u8, line, "is not defined") != null)
+        {
+            std.debug.print("{s}{s}{s}\n", .{ yellow, line, reset });
+        } else if (!std.mem.startsWith(u8, line, " ") and !std.mem.startsWith(u8, line, "\t")) {
+            std.debug.print("{s}{s}{s}\n", .{ red, line, reset });
+        } else {
+            std.debug.print("{s}\n", .{line});
+        }
+    }
 }
 
 pub fn printSummary(

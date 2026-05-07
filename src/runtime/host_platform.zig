@@ -45,6 +45,7 @@ pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
     try linkWindowProperty(ctx, global, window, "Headers");
     try linkWindowProperty(ctx, global, window, "Request");
     try linkWindowProperty(ctx, global, window, "Response");
+    try linkWindowProperty(ctx, global, window, "FormData");
     try linkWindowProperty(ctx, global, window, "Blob");
     try linkWindowProperty(ctx, global, window, "fetch");
     try linkWindowProperty(ctx, global, window, "Image");
@@ -291,6 +292,10 @@ fn installFetchApi(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!v
         if (ctor.isException()) return error.JSError;
         global.setPropertyStr(ctx, "Blob", ctor) catch return error.JSError;
     }
+    // Always install a runner-specific FormData to support new FormData(form) in DOM tests.
+    const form_data_ctor = quickjs.Value.initCFunction2(ctx, jsFormDataCtor, "FormData", 1, .constructor_or_func, 0);
+    if (form_data_ctor.isException()) return error.JSError;
+    global.setPropertyStr(ctx, "FormData", form_data_ctor) catch return error.JSError;
     try setFunctionIfMissing(ctx, global, "fetch", jsFetch, 1);
 }
 
@@ -558,7 +563,7 @@ fn jsUrlCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quick
     obj.setPropertyStr(ctx, "pathname", quickjs.Value.initStringLen(ctx, pathname)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "search", quickjs.Value.initStringLen(ctx, search)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "hash", quickjs.Value.initStringLen(ctx, hash)) catch return quickjs.Value.exception;
-    const origin = if (protocol.len > 0 and host.len > 0) href[0 .. (protocol.len + 2 + host.len)] else "";
+    const origin = if (protocol.len > 0 and host.len > 0) href[0..(protocol.len + 2 + host.len)] else "";
     obj.setPropertyStr(ctx, "origin", quickjs.Value.initStringLen(ctx, origin)) catch return quickjs.Value.exception;
     const params = quickjs.Value.initObject(ctx);
     if (params.isException()) return quickjs.Value.exception;
@@ -591,6 +596,236 @@ fn jsHeadersCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const q
         if (init.isObject()) copyHeaderObject(ctx, obj, init) catch return quickjs.Value.exception;
     }
     return obj;
+}
+
+fn jsFormDataCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const obj = quickjs.Value.initObject(ctx);
+    if (obj.isException()) return quickjs.Value.exception;
+
+    const map = quickjs.Value.initObject(ctx);
+    if (map.isException()) return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "__zigFormDataMap", map) catch return quickjs.Value.exception;
+
+    setFunction(ctx, obj, "append", jsFormDataAppend, 2) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "get", jsFormDataGet, 1) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "getAll", jsFormDataGetAll, 1) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "set", jsFormDataSet, 2) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "has", jsFormDataHas, 1) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "delete", jsFormDataDelete, 1) catch return quickjs.Value.exception;
+
+    if (args.len > 0) {
+        const source = quickjs.Value.fromCVal(args[0]);
+        if (source.isObject()) {
+            populateFormDataFromFormLike(ctx, obj, source) catch return quickjs.Value.exception;
+        }
+    }
+
+    return obj;
+}
+
+fn jsFormDataAppend(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const name = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (name) |text| ctx.freeCString(text.ptr);
+    const value = if (args.len > 1) quickjs.Value.fromCVal(args[1]).toCStringLen(ctx) else null;
+    defer if (value) |text| ctx.freeCString(text.ptr);
+
+    if (name) |key| {
+        appendFormDataValue(
+            ctx,
+            this_value,
+            key.ptr,
+            key.len,
+            if (value) |v| v.ptr[0..v.len] else "",
+        ) catch return quickjs.Value.exception;
+    }
+
+    return quickjs.Value.undefined;
+}
+
+fn jsFormDataGet(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const name = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (name) |text| ctx.freeCString(text.ptr);
+    const key = if (name) |text| text else return quickjs.Value.null;
+
+    const map = this_value.getPropertyStr(ctx, "__zigFormDataMap");
+    defer map.deinit(ctx);
+    if (map.isException() or !map.isObject()) return quickjs.Value.null;
+
+    const bucket = map.getPropertyStr(ctx, key.ptr);
+    defer bucket.deinit(ctx);
+    if (bucket.isException() or bucket.isUndefined() or bucket.isNull() or !bucket.isObject()) return quickjs.Value.null;
+
+    const first = bucket.getPropertyUint32(ctx, 0);
+    if (first.isException() or first.isUndefined()) {
+        first.deinit(ctx);
+        return quickjs.Value.null;
+    }
+    return first;
+}
+
+fn jsFormDataGetAll(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const name = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (name) |text| ctx.freeCString(text.ptr);
+    const key = if (name) |text| text else return quickjs.Value.initArray(ctx);
+
+    const map = this_value.getPropertyStr(ctx, "__zigFormDataMap");
+    defer map.deinit(ctx);
+    if (map.isException() or !map.isObject()) return quickjs.Value.initArray(ctx);
+
+    const bucket = map.getPropertyStr(ctx, key.ptr);
+    defer bucket.deinit(ctx);
+    if (bucket.isException() or bucket.isUndefined() or bucket.isNull() or !bucket.isObject()) return quickjs.Value.initArray(ctx);
+    return bucket.dup(ctx);
+}
+
+fn jsFormDataSet(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const name = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (name) |text| ctx.freeCString(text.ptr);
+    const value = if (args.len > 1) quickjs.Value.fromCVal(args[1]).toCStringLen(ctx) else null;
+    defer if (value) |text| ctx.freeCString(text.ptr);
+    const key = if (name) |text| text else return quickjs.Value.undefined;
+
+    const map = this_value.getPropertyStr(ctx, "__zigFormDataMap");
+    defer map.deinit(ctx);
+    if (map.isException() or !map.isObject()) return quickjs.Value.exception;
+
+    const bucket = quickjs.Value.initArray(ctx);
+    if (bucket.isException()) return quickjs.Value.exception;
+    bucket.setPropertyUint32(ctx, 0, quickjs.Value.initStringLen(ctx, if (value) |v| v.ptr[0..v.len] else "")) catch return quickjs.Value.exception;
+    map.setPropertyStr(ctx, key.ptr, bucket) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsFormDataHas(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const name = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (name) |text| ctx.freeCString(text.ptr);
+    const key = if (name) |text| text else return quickjs.Value.initBool(false);
+
+    const map = this_value.getPropertyStr(ctx, "__zigFormDataMap");
+    defer map.deinit(ctx);
+    if (map.isException() or !map.isObject()) return quickjs.Value.initBool(false);
+
+    const has = map.hasPropertyStr(ctx, key.ptr) catch false;
+    return quickjs.Value.initBool(has);
+}
+
+fn jsFormDataDelete(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const name = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (name) |text| ctx.freeCString(text.ptr);
+    const key = if (name) |text| text else return quickjs.Value.undefined;
+
+    const map = this_value.getPropertyStr(ctx, "__zigFormDataMap");
+    defer map.deinit(ctx);
+    if (map.isException() or !map.isObject()) return quickjs.Value.undefined;
+
+    _ = map.deletePropertyStr(ctx, key.ptr) catch false;
+    return quickjs.Value.undefined;
+}
+
+fn appendFormDataValue(ctx: *quickjs.Context, form_data: quickjs.Value, key_ptr: [*:0]const u8, key_len: usize, value: []const u8) PlatformError!void {
+    const map = form_data.getPropertyStr(ctx, "__zigFormDataMap");
+    defer map.deinit(ctx);
+    if (map.isException() or !map.isObject()) return error.JSError;
+
+    var bucket = map.getPropertyStr(ctx, key_ptr);
+    defer bucket.deinit(ctx);
+    if (bucket.isException() or bucket.isUndefined() or bucket.isNull() or !bucket.isObject()) {
+        bucket.deinit(ctx);
+        bucket = quickjs.Value.initArray(ctx);
+        if (bucket.isException()) return error.JSError;
+        map.setPropertyStr(ctx, key_ptr, bucket.dup(ctx)) catch return error.JSError;
+    }
+
+    const length = bucket.getLength(ctx) catch 0;
+    bucket.setPropertyUint32(ctx, @intCast(@max(length, 0)), quickjs.Value.initStringLen(ctx, value)) catch return error.JSError;
+
+    _ = key_len;
+}
+
+fn populateFormDataFromFormLike(ctx: *quickjs.Context, form_data: quickjs.Value, form: quickjs.Value) PlatformError!void {
+    const elements = form.getPropertyStr(ctx, "elements");
+    defer elements.deinit(ctx);
+    if (elements.isException() or !elements.isObject()) return;
+
+    const length = elements.getLength(ctx) catch 0;
+    var index: i64 = 0;
+    while (index < length) : (index += 1) {
+        const control = elements.getPropertyUint32(ctx, @intCast(index));
+        defer control.deinit(ctx);
+        if (control.isException() or !control.isObject()) continue;
+
+        const disabled = control.getPropertyStr(ctx, "disabled");
+        defer disabled.deinit(ctx);
+        if (!disabled.isException() and (disabled.toBool(ctx) catch false)) continue;
+
+        const name_value = control.getPropertyStr(ctx, "name");
+        defer name_value.deinit(ctx);
+        const name = name_value.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(name.ptr);
+        if (name.len == 0) continue;
+
+        const tag_name_value = control.getPropertyStr(ctx, "tagName");
+        defer tag_name_value.deinit(ctx);
+        const tag_name = tag_name_value.toCStringLen(ctx);
+        defer if (tag_name) |text| ctx.freeCString(text.ptr);
+        const is_select = if (tag_name) |text| std.ascii.eqlIgnoreCase(text.ptr[0..text.len], "select") else false;
+
+        if (is_select) {
+            const multiple = control.getPropertyStr(ctx, "multiple");
+            defer multiple.deinit(ctx);
+            if (!multiple.isException() and (multiple.toBool(ctx) catch false)) {
+                const options = control.getPropertyStr(ctx, "options");
+                defer options.deinit(ctx);
+                if (!options.isException() and options.isObject()) {
+                    const option_len = options.getLength(ctx) catch 0;
+                    var option_index: i64 = 0;
+                    while (option_index < option_len) : (option_index += 1) {
+                        const option = options.getPropertyUint32(ctx, @intCast(option_index));
+                        defer option.deinit(ctx);
+                        if (option.isException() or !option.isObject()) continue;
+
+                        const selected = option.getPropertyStr(ctx, "selected");
+                        defer selected.deinit(ctx);
+                        if (selected.isException() or !(selected.toBool(ctx) catch false)) continue;
+
+                        const option_value = option.getPropertyStr(ctx, "value");
+                        defer option_value.deinit(ctx);
+                        const text = option_value.toCStringLen(ctx) orelse continue;
+                        defer ctx.freeCString(text.ptr);
+                        try appendFormDataValue(ctx, form_data, name.ptr, name.len, text.ptr[0..text.len]);
+                    }
+                }
+                continue;
+            }
+        }
+
+        const type_value = control.getPropertyStr(ctx, "type");
+        defer type_value.deinit(ctx);
+        const input_type = type_value.toCStringLen(ctx);
+        defer if (input_type) |text| ctx.freeCString(text.ptr);
+        if (input_type) |kind| {
+            const kind_slice = kind.ptr[0..kind.len];
+            if (std.ascii.eqlIgnoreCase(kind_slice, "checkbox") or std.ascii.eqlIgnoreCase(kind_slice, "radio")) {
+                const checked = control.getPropertyStr(ctx, "checked");
+                defer checked.deinit(ctx);
+                if (checked.isException() or !(checked.toBool(ctx) catch false)) continue;
+            }
+            if (std.ascii.eqlIgnoreCase(kind_slice, "file")) continue;
+        }
+
+        const value_prop = control.getPropertyStr(ctx, "value");
+        defer value_prop.deinit(ctx);
+        const value = value_prop.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(value.ptr);
+        try appendFormDataValue(ctx, form_data, name.ptr, name.len, value.ptr[0..value.len]);
+    }
 }
 
 fn copyHeaderObject(ctx: *quickjs.Context, headers: quickjs.Value, init: quickjs.Value) PlatformError!void {
