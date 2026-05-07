@@ -729,13 +729,7 @@ const ModuleLoaderState = struct {
             });
         }
 
-        const export_names = if (self.requestedExportsFor(module_id)) |requested|
-            if (!requested.all and requested.initialized)
-                try self.commonJsExportNamesFromRequested(requested)
-            else
-                try self.collectCommonJsExportNamesDeep(module_id, pruned_source)
-        else
-            try self.collectCommonJsExportNamesDeep(module_id, pruned_source);
+        const export_names = try self.collectCommonJsExportNamesDeep(module_id, pruned_source);
         defer {
             for (export_names) |name| self.allocator.free(name);
             self.allocator.free(export_names);
@@ -1175,23 +1169,6 @@ const ModuleLoaderState = struct {
         }
 
         try self.collectCommonJsExportNamesInto(module_id, source, &names, &dedup, &scanned);
-        return names.toOwnedSlice(self.allocator);
-    }
-
-    fn commonJsExportNamesFromRequested(self: *ModuleLoaderState, requested: *const ExportNameSet) ![]const []u8 {
-        var names: std.ArrayList([]u8) = .empty;
-        errdefer {
-            for (names.items) |name| self.allocator.free(name);
-            names.deinit(self.allocator);
-        }
-
-        var iterator = requested.names.iterator();
-        while (iterator.next()) |entry| {
-            const name = entry.key_ptr.*;
-            if (!isValidIdentifierName(name)) continue;
-            try names.append(self.allocator, try self.allocator.dupe(u8, name));
-        }
-
         return names.toOwnedSlice(self.allocator);
     }
 
