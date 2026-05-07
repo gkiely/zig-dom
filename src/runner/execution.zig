@@ -32,12 +32,40 @@ const collection_flush_source =
     \\});
 ;
 
+const bun_specifier = "bun";
 const bun_test_specifier = "bun:test";
+const node_url_specifier = "url";
+const node_url_colon_specifier = "node:url";
+const node_fs_specifier = "fs";
+const node_fs_colon_specifier = "node:fs";
+const node_path_specifier = "path";
+const node_path_colon_specifier = "node:path";
+const node_util_specifier = "util";
+const node_util_colon_specifier = "node:util";
+const node_buffer_specifier = "buffer";
+const node_buffer_colon_specifier = "node:buffer";
+const node_crypto_specifier = "crypto";
+const node_crypto_colon_specifier = "node:crypto";
+const node_http_specifier = "http";
+const node_http_colon_specifier = "node:http";
+const node_https_specifier = "https";
+const node_https_colon_specifier = "node:https";
+const node_net_specifier = "net";
+const node_net_colon_specifier = "node:net";
+const node_zlib_specifier = "zlib";
+const node_zlib_colon_specifier = "node:zlib";
+const node_child_process_specifier = "child_process";
+const node_child_process_colon_specifier = "node:child_process";
+const node_stream_specifier = "stream";
+const node_stream_colon_specifier = "node:stream";
+const node_stream_web_specifier = "stream/web";
+const node_stream_web_colon_specifier = "node:stream/web";
+const node_vm_specifier = "vm";
+const node_vm_colon_specifier = "node:vm";
+const node_perf_hooks_colon_specifier = "node:perf_hooks";
 const react_specifier = "react";
 const react_dom_client_specifier = "react-dom/client";
 const testing_library_specifier = "@testing-library/react";
-const vanilla_extract_css_specifier = "@vanilla-extract/css";
-const classnames_specifier = "classnames";
 const graphemesplit_specifier = "graphemesplit";
 const use_sync_external_store_specifier = "use-sync-external-store";
 const use_sync_external_store_with_selector_specifier = "use-sync-external-store/with-selector";
@@ -47,18 +75,237 @@ const use_sync_external_store_shim_index_specifier = "use-sync-external-store/sh
 const use_sync_external_store_shim_with_selector_specifier = "use-sync-external-store/shim/with-selector";
 const use_sync_external_store_shim_with_selector_js_specifier = "use-sync-external-store/shim/with-selector.js";
 
+const bun_shim_source =
+    \\const api = globalThis.__zigBunApi;
+    \\export const plugin = api.plugin;
+    \\export const $ = api.$;
+    \\export const file = api.file;
+    \\const bunApi = { plugin, $, file };
+    \\export default bunApi;
+;
+
 const bun_test_shim_source =
     \\const api = globalThis.__zigBunTestApi;
     \\export const test = api.test;
     \\export const it = api.it;
     \\export const describe = api.describe;
     \\export const expect = api.expect;
+    \\export const mock = api.mock;
+    \\export const spyOn = api.spyOn;
     \\export const beforeAll = api.beforeAll;
     \\export const beforeEach = api.beforeEach;
     \\export const afterEach = api.afterEach;
     \\export const afterAll = api.afterAll;
-    \\const bunTest = { test, it, describe, expect, beforeAll, beforeEach, afterEach, afterAll };
+    \\const bunTest = { test, it, describe, expect, mock, spyOn, beforeAll, beforeEach, afterEach, afterAll };
     \\export default bunTest;
+;
+
+const node_url_shim_source =
+    \\const URLCtor = globalThis.URL;
+    \\const URLSearchParamsCtor = globalThis.URLSearchParams;
+    \\export const URL = URLCtor;
+    \\export const URLSearchParams = URLSearchParamsCtor;
+    \\export function pathToFileURL(pathLike) {
+    \\  const raw = String(pathLike ?? "");
+    \\  if (raw.startsWith("file:")) {
+    \\    return new URLCtor(raw);
+    \\  }
+    \\  const normalized = raw.replace(/\\\\/g, "/");
+    \\  const prefixed = normalized.startsWith("/") ? normalized : `/${normalized}`;
+    \\  return new URLCtor(`file://${prefixed}`);
+    \\}
+    \\export function fileURLToPath(input) {
+    \\  const parsed = input instanceof URLCtor ? input : new URLCtor(String(input ?? ""));
+    \\  if (parsed.protocol !== "file:") {
+    \\    throw new TypeError("fileURLToPath expects a file URL");
+    \\  }
+    \\  return decodeURIComponent(parsed.pathname || "");
+    \\}
+    \\export default { URL, URLSearchParams, pathToFileURL, fileURLToPath };
+;
+
+const node_fs_shim_source =
+    \\function unsupported(name) {
+    \\  throw new Error(`node:fs.${name} is not implemented in this runner`);
+    \\}
+    \\export function readFileSync() { unsupported("readFileSync"); }
+    \\export function writeFileSync() { unsupported("writeFileSync"); }
+    \\export function existsSync() { return false; }
+    \\export default { readFileSync, writeFileSync, existsSync };
+;
+
+const node_http_shim_source =
+    \\function unsupported(name) {
+    \\  throw new Error(`node:http.${name} is not implemented in this runner`);
+    \\}
+    \\export function request() { unsupported("request"); }
+    \\export function get() { unsupported("get"); }
+    \\export function createServer() { unsupported("createServer"); }
+    \\export default { request, get, createServer };
+;
+
+const node_https_shim_source =
+    \\import * as http from "http";
+    \\export const request = http.request;
+    \\export const get = http.get;
+    \\export default { request, get };
+;
+
+const node_net_shim_source =
+    \\function unsupported(name) {
+    \\  throw new Error(`node:net.${name} is not implemented in this runner`);
+    \\}
+    \\export function createConnection() { unsupported("createConnection"); }
+    \\export function createServer() { unsupported("createServer"); }
+    \\export function isIP() { return 0; }
+    \\export default { createConnection, createServer, isIP };
+;
+
+const node_zlib_shim_source =
+    \\function unsupported(name) {
+    \\  throw new Error(`node:zlib.${name} is not implemented in this runner`);
+    \\}
+    \\export function gzipSync() { unsupported("gzipSync"); }
+    \\export function gunzipSync() { unsupported("gunzipSync"); }
+    \\export default { gzipSync, gunzipSync };
+;
+
+const node_child_process_shim_source =
+    \\function unsupported(name) {
+    \\  throw new Error(`node:child_process.${name} is not implemented in this runner`);
+    \\}
+    \\export function spawn() { unsupported("spawn"); }
+    \\export function exec() { unsupported("exec"); }
+    \\export default { spawn, exec };
+;
+
+const node_path_shim_source =
+    \\function normalize(value) {
+    \\  return String(value ?? "").replace(/\\\\/g, "/");
+    \\}
+    \\export function join(...parts) {
+    \\  return parts.map((part) => normalize(part)).filter(Boolean).join("/").replace(/\/+/g, "/");
+    \\}
+    \\export function resolve(...parts) {
+    \\  return join(...parts);
+    \\}
+    \\export function dirname(input) {
+    \\  const normalized = normalize(input);
+    \\  const index = normalized.lastIndexOf("/");
+    \\  return index <= 0 ? "." : normalized.slice(0, index);
+    \\}
+    \\export function basename(input) {
+    \\  const normalized = normalize(input);
+    \\  const index = normalized.lastIndexOf("/");
+    \\  return index < 0 ? normalized : normalized.slice(index + 1);
+    \\}
+    \\export function extname(input) {
+    \\  const base = basename(input);
+    \\  const index = base.lastIndexOf(".");
+    \\  return index <= 0 ? "" : base.slice(index);
+    \\}
+    \\export default { join, resolve, dirname, basename, extname };
+;
+
+const node_util_shim_source =
+    \\export function inspect(value) {
+    \\  try {
+    \\    return JSON.stringify(value);
+    \\  } catch {
+    \\    return String(value);
+    \\  }
+    \\}
+    \\export function format(...values) {
+    \\  return values.map((value) => String(value)).join(" ");
+    \\}
+    \\export function promisify(fn) {
+    \\  return (...args) =>
+    \\    new Promise((resolve, reject) => {
+    \\      fn(...args, (error, value) => {
+    \\        if (error) reject(error);
+    \\        else resolve(value);
+    \\      });
+    \\    });
+    \\}
+    \\export const TextEncoder = globalThis.TextEncoder;
+    \\export const TextDecoder = globalThis.TextDecoder;
+    \\export default { inspect, format, promisify, TextEncoder, TextDecoder };
+;
+
+const node_buffer_shim_source =
+    \\class BufferImpl extends Uint8Array {
+    \\  static from(input) {
+    \\    if (typeof input === "string") {
+    \\      return new TextEncoder().encode(input);
+    \\    }
+    \\    if (Array.isArray(input) || ArrayBuffer.isView(input)) {
+    \\      return new Uint8Array(input);
+    \\    }
+    \\    if (input instanceof ArrayBuffer) {
+    \\      return new Uint8Array(input);
+    \\    }
+    \\    return new Uint8Array(0);
+    \\  }
+    \\  static isBuffer(value) {
+    \\    return value instanceof Uint8Array;
+    \\  }
+    \\}
+    \\export const Buffer = BufferImpl;
+    \\export const Blob = globalThis.Blob;
+    \\export default { Buffer, Blob };
+;
+
+const node_crypto_shim_source =
+    \\const cryptoApi = globalThis.crypto || {};
+    \\export function randomUUID() {
+    \\  if (typeof cryptoApi.randomUUID === "function") {
+    \\    return cryptoApi.randomUUID();
+    \\  }
+    \\  return "00000000-0000-4000-8000-000000000000";
+    \\}
+    \\export const webcrypto = cryptoApi;
+    \\export default { randomUUID, webcrypto };
+;
+
+const node_stream_shim_source =
+    \\class Readable {}
+    \\class Writable {}
+    \\class Transform {}
+    \\class Duplex {}
+    \\export { Readable, Writable, Transform, Duplex };
+    \\export default { Readable, Writable, Transform, Duplex };
+;
+
+const node_stream_web_shim_source =
+    \\export const ReadableStream = globalThis.ReadableStream;
+    \\export const WritableStream = globalThis.WritableStream;
+    \\export const TransformStream = globalThis.TransformStream;
+    \\export default { ReadableStream, WritableStream, TransformStream };
+;
+
+const node_vm_shim_source =
+    \\function unsupported(name) {
+    \\  throw new Error(`node:vm.${name} is not implemented in this runner`);
+    \\}
+    \\export function runInNewContext() { unsupported("runInNewContext"); }
+    \\export function runInContext() { unsupported("runInContext"); }
+    \\export function runInThisContext() { unsupported("runInThisContext"); }
+    \\export class Script {
+    \\  constructor() {}
+    \\  runInThisContext() { unsupported("Script.runInThisContext"); }
+    \\}
+    \\export default { runInNewContext, runInContext, runInThisContext, Script };
+;
+
+const node_perf_hooks_shim_source =
+    \\export const performance = globalThis.performance;
+    \\export class PerformanceObserver {
+    \\  observe() {}
+    \\  disconnect() {}
+    \\  takeRecords() { return []; }
+    \\}
+    \\export class PerformanceEntry {}
+    \\export default { performance, PerformanceObserver, PerformanceEntry };
 ;
 
 const react_shim_source =
@@ -98,71 +345,6 @@ const testing_library_shim_source =
     \\export const fireEvent = globalThis.fireEvent;
     \\const api = { render, screen, fireEvent };
     \\export default api;
-;
-
-const vanilla_extract_css_shim_source =
-    \\let __zigStyleCounter = 0;
-    \\function nextName(prefix) {
-    \\  __zigStyleCounter += 1;
-    \\  return prefix + String(__zigStyleCounter);
-    \\}
-    \\
-    \\export function style(_rules) {
-    \\  return nextName("ve-");
-    \\}
-    \\
-    \\export function globalStyle(_selector, _rules) {
-    \\  // no-op in lightweight harness
-    \\}
-    \\
-    \\export function keyframes(_rules) {
-    \\  return nextName("kf-");
-    \\}
-    \\
-    \\export function createThemeContract(tokens) {
-    \\  return tokens;
-    \\}
-    \\
-    \\export function createTheme(contractOrTokens, maybeTokens) {
-    \\  const className = nextName("theme-");
-    \\  if (arguments.length === 1) {
-    \\    return [className, contractOrTokens];
-    \\  }
-    \\  return className;
-    \\}
-    \\export default { style, globalStyle, keyframes, createTheme, createThemeContract };
-;
-
-const classnames_shim_source =
-    \\function flatten(values, output) {
-    \\  for (const value of values) {
-    \\    if (!value) {
-    \\      continue;
-    \\    }
-    \\
-    \\    if (Array.isArray(value)) {
-    \\      flatten(value, output);
-    \\      continue;
-    \\    }
-    \\
-    \\    if (typeof value === "object") {
-    \\      for (const key of Object.keys(value)) {
-    \\        if (value[key]) {
-    \\          output.push(key);
-    \\        }
-    \\      }
-    \\      continue;
-    \\    }
-    \\
-    \\    output.push(String(value));
-    \\  }
-    \\}
-    \\
-    \\export default function classNames(...values) {
-    \\  const parts = [];
-    \\  flatten(values, parts);
-    \\  return parts.join(" ");
-    \\}
 ;
 
 const graphemesplit_shim_source =
@@ -259,9 +441,11 @@ const ModuleLoaderState = struct {
 
     allocator: Allocator,
     io: std.Io,
+    runtime: ?*Runtime,
     loaded_modules: std.StringHashMap(*ModuleDef),
     module_sources: std.StringHashMap([]u8),
     transformed_outputs: std.StringHashMap([]u8),
+    mock_module_sources: std.StringHashMap([]u8),
     path_alias_root: ?[]u8,
     path_aliases: std.ArrayList(PathAlias),
 
@@ -269,9 +453,11 @@ const ModuleLoaderState = struct {
         return .{
             .allocator = allocator,
             .io = io,
+            .runtime = null,
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
             .module_sources = std.StringHashMap([]u8).init(allocator),
             .transformed_outputs = std.StringHashMap([]u8).init(allocator),
+            .mock_module_sources = std.StringHashMap([]u8).init(allocator),
             .path_alias_root = null,
             .path_aliases = .empty,
         };
@@ -294,6 +480,13 @@ const ModuleLoaderState = struct {
         }
         self.transformed_outputs.deinit();
 
+        var mock_iterator = self.mock_module_sources.iterator();
+        while (mock_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.mock_module_sources.deinit();
+
         var loaded_iterator = self.loaded_modules.iterator();
         while (loaded_iterator.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
@@ -302,8 +495,16 @@ const ModuleLoaderState = struct {
     }
 
     fn normalizeSpecifier(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) ![]u8 {
-        if (shimModuleSource(module_name) != null) {
+        if (self.runtime) |runtime| {
+            try self.syncMockModulesFromRuntime(runtime);
+        }
+
+        if (builtInModuleSource(module_name) != null) {
             return self.allocator.dupe(u8, module_name);
+        }
+
+        if (self.mock_module_sources.contains(module_name)) {
+            return std.fmt.allocPrint(self.allocator, "__zig_mock__/{s}", .{module_name});
         }
 
         if (try self.resolvePathAlias(module_base_name, module_name)) |resolved| {
@@ -319,7 +520,16 @@ const ModuleLoaderState = struct {
         }
 
         if (try self.resolveNodeModule(module_base_name, module_name)) |resolved| {
+            if (fallbackShimModuleSource(module_name) != null and try self.pathLooksCommonJs(resolved)) {
+                self.allocator.free(resolved);
+                return self.allocator.dupe(u8, module_name);
+            }
+
             return resolved;
+        }
+
+        if (fallbackShimModuleSource(module_name) != null) {
+            return self.allocator.dupe(u8, module_name);
         }
 
         return error.UnsupportedExternalModule;
@@ -420,7 +630,7 @@ const ModuleLoaderState = struct {
                     },
                     else => return err,
                 };
-                if (shimModuleSource(resolved) != null) {
+                if (builtInModuleSource(resolved) != null or fallbackShimModuleSource(resolved) != null or isMockModuleId(resolved)) {
                     self.allocator.free(resolved);
                     continue;
                 }
@@ -439,22 +649,45 @@ const ModuleLoaderState = struct {
     }
 
     fn loadModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]const u8 {
-        if (shimModuleSource(module_id)) |shim_source| {
+        if (builtInModuleSource(module_id)) |shim_source| {
             return shim_source;
+        }
+
+        if (fallbackShimModuleSource(module_id)) |shim_source| {
+            return shim_source;
+        }
+
+        if (isMockModuleId(module_id)) {
+            const specifier = module_id["__zig_mock__/".len..];
+            const source = self.mock_module_sources.get(specifier) orelse return error.ModuleNotFound;
+            return source;
         }
 
         if (self.module_sources.get(module_id)) |cached| {
             return cached;
         }
 
-        const loader = transform.loaderForPath(module_id) orelse return error.UnsupportedModuleExtension;
-        if (std.mem.eql(u8, loader, "js")) {
+        const default_loader = transform.loaderForPath(module_id) orelse return error.UnsupportedModuleExtension;
+
+        if (try self.loadModuleSourceFromOnLoad(module_id, default_loader)) |hook_source| {
+            try self.cacheModuleSource(module_id, hook_source);
+            return self.module_sources.get(module_id).?;
+        }
+
+        if (std.mem.eql(u8, default_loader, "js")) {
             const source = try std.Io.Dir.cwd().readFileAlloc(
                 self.io,
                 module_id,
                 self.allocator,
                 .limited(max_module_source_bytes),
             );
+
+            if (isCommonJsSource(module_id, source)) {
+                self.allocator.free(source);
+                const transformed = try self.loadCommonJsModuleSource(module_id);
+                try self.cacheModuleSource(module_id, transformed);
+                return self.module_sources.get(module_id).?;
+            }
 
             try self.cacheModuleSource(module_id, source);
             return self.module_sources.get(module_id).?;
@@ -479,6 +712,406 @@ const ModuleLoaderState = struct {
         try self.module_sources.put(key, source);
     }
 
+    fn loadCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
+        var output_path_owned: ?[]u8 = self.transformed_outputs.get(module_id);
+        if (output_path_owned == null) {
+            const output_path = try self.buildCommonJsOutputPath(module_id);
+            errdefer self.allocator.free(output_path);
+
+            const key = try self.allocator.dupe(u8, module_id);
+            errdefer self.allocator.free(key);
+
+            try self.transformed_outputs.put(key, output_path);
+            output_path_owned = output_path;
+        }
+
+        const output_path = output_path_owned.?;
+        const stat = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
+            error.FileNotFound => null,
+            else => return err,
+        };
+
+        if (stat == null or stat.?.kind != .file) {
+            const exit_code = try self.runSingleTransform(module_id, "cjs", output_path);
+            if (exit_code != 0) {
+                return error.TransformCommandFailed;
+            }
+        }
+
+        return std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            output_path,
+            self.allocator,
+            .limited(max_module_source_bytes),
+        );
+    }
+
+    fn buildCommonJsOutputPath(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
+        const stat = try std.Io.Dir.cwd().statFile(self.io, module_id, .{});
+        if (stat.kind != .file) {
+            return error.ModuleNotFound;
+        }
+
+        const basename = std.fs.path.basename(module_id);
+        const stem = std.fs.path.stem(basename);
+
+        var sanitized: std.ArrayList(u8) = .empty;
+        defer sanitized.deinit(self.allocator);
+
+        for (stem) |char| {
+            if (std.ascii.isAlphanumeric(char) or char == '.' or char == '-' or char == '_') {
+                try sanitized.append(self.allocator, char);
+            } else {
+                try sanitized.append(self.allocator, '_');
+            }
+        }
+
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(module_id);
+        hasher.update("cjs-bundle-v2");
+        hasher.update(std.mem.asBytes(&stat.size));
+        hasher.update(std.mem.asBytes(&stat.mtime.nanoseconds));
+        const digest = hasher.final();
+
+        return std.fmt.allocPrint(
+            self.allocator,
+            "./.zig-dom-cache/transformed/cjs/{x}-{s}.js",
+            .{ digest, sanitized.items },
+        );
+    }
+
+    fn syncMockModulesFromRuntime(self: *ModuleLoaderState, runtime: *Runtime) !void {
+        self.clearMockModules();
+
+        const manifest_json = runtime.getGlobalStringDup("__zigMockModuleManifestJson") catch {
+            return;
+        };
+        defer self.allocator.free(manifest_json);
+
+        if (manifest_json.len == 0) {
+            return;
+        }
+
+        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, manifest_json, .{});
+        defer parsed.deinit();
+
+        if (parsed.value != .array) {
+            return;
+        }
+
+        for (parsed.value.array.items) |entry| {
+            if (entry != .object) {
+                continue;
+            }
+
+            const specifier_value = entry.object.get("specifier") orelse continue;
+            const source_value = entry.object.get("source") orelse continue;
+            if (specifier_value != .string or source_value != .string) {
+                continue;
+            }
+
+            const key = try self.allocator.dupe(u8, specifier_value.string);
+            errdefer self.allocator.free(key);
+
+            const value = try self.allocator.dupe(u8, source_value.string);
+            errdefer self.allocator.free(value);
+
+            if (try self.mock_module_sources.fetchPut(key, value)) |previous| {
+                self.allocator.free(previous.key);
+                self.allocator.free(previous.value);
+            }
+        }
+    }
+
+    fn loadModuleSourceFromOnLoad(
+        self: *ModuleLoaderState,
+        module_id: []const u8,
+        default_loader: []const u8,
+    ) !?[]u8 {
+        if (!std.fs.path.isAbsolute(module_id)) {
+            return null;
+        }
+
+        const runtime = self.runtime orelse return null;
+        var hook_result = (try self.invokeOnLoad(runtime, module_id)) orelse return null;
+        defer hook_result.deinit(self.allocator);
+
+        const effective_loader = hook_result.loader orelse default_loader;
+        if (std.mem.eql(u8, effective_loader, "js")) {
+            return try self.allocator.dupe(u8, hook_result.contents);
+        }
+
+        if (
+            std.mem.eql(u8, effective_loader, "ts") or
+            std.mem.eql(u8, effective_loader, "tsx") or
+            std.mem.eql(u8, effective_loader, "jsx")
+        ) {
+            const transformed = try self.transformOnLoadContents(module_id, effective_loader, hook_result.contents);
+            return transformed;
+        }
+
+        return error.UnsupportedTransformLoader;
+    }
+
+    const OnLoadResult = struct {
+        contents: []u8,
+        loader: ?[]u8,
+
+        fn deinit(self: *OnLoadResult, allocator: Allocator) void {
+            allocator.free(self.contents);
+            if (self.loader) |loader| {
+                allocator.free(loader);
+            }
+        }
+    };
+
+    fn invokeOnLoad(self: *ModuleLoaderState, runtime: *Runtime, module_id: []const u8) !?OnLoadResult {
+        const module_id_literal = try escapeJsSingleQuotedString(self.allocator, module_id);
+        defer self.allocator.free(module_id_literal);
+
+        const request_prefix =
+            \\globalThis.__zigOnLoadDone = false;
+            \\globalThis.__zigOnLoadError = "";
+            \\globalThis.__zigOnLoadResult = "";
+            \\Promise.resolve()
+            \\  .then(() => {
+            \\    const apply = globalThis.__zigRunnerApplyOnLoad;
+            \\    if (typeof apply !== "function") {
+            \\      return null;
+            \\    }
+            \\    return apply('
+        ;
+        const request_suffix =
+            \\');
+            \\  })
+            \\  .then((value) => {
+            \\    if (!value || typeof value !== "object" || !Object.prototype.hasOwnProperty.call(value, "contents")) {
+            \\      globalThis.__zigOnLoadResult = "";
+            \\    } else {
+            \\      const loader = value.loader == null ? null : String(value.loader);
+            \\      const contents = String(value.contents);
+            \\      globalThis.__zigOnLoadResult = JSON.stringify({ loader, contents });
+            \\    }
+            \\    globalThis.__zigOnLoadDone = true;
+            \\  })
+            \\  .catch((error) => {
+            \\    const details = error && error.stack ? String(error.stack) : String(error);
+            \\    globalThis.__zigOnLoadError = details;
+            \\    globalThis.__zigOnLoadDone = true;
+            \\  });
+        ;
+
+        const request_source = try std.mem.concat(self.allocator, u8, &.{ request_prefix, module_id_literal, request_suffix });
+        defer self.allocator.free(request_source);
+
+        try runtime.evalScript("<zig-onload-hook>", request_source);
+
+        const timeout_ms: i64 = 10_000;
+        const started = std.Io.Clock.Timestamp.now(self.io, .awake);
+        while (!(runtime.getGlobalBool("__zigOnLoadDone") catch false)) {
+            const elapsed = started.untilNow(self.io).raw.toMilliseconds();
+            if (elapsed > timeout_ms) {
+                return error.ModuleLoaderHookTimedOut;
+            }
+
+            if (runtime.isJobPending()) {
+                _ = try runtime.executePendingJob();
+                continue;
+            }
+
+            return error.ModuleLoaderHookFailed;
+        }
+
+        const onload_error = runtime.getGlobalStringDup("__zigOnLoadError") catch try self.allocator.dupe(u8, "");
+        defer self.allocator.free(onload_error);
+        if (onload_error.len > 0) {
+            return error.ModuleLoaderHookFailed;
+        }
+
+        const onload_result_json = runtime.getGlobalStringDup("__zigOnLoadResult") catch try self.allocator.dupe(u8, "");
+        defer self.allocator.free(onload_result_json);
+        if (onload_result_json.len == 0) {
+            return null;
+        }
+
+        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, onload_result_json, .{});
+        defer parsed.deinit();
+        if (parsed.value != .object) {
+            return null;
+        }
+
+        const contents_value = parsed.value.object.get("contents") orelse return null;
+        if (contents_value != .string) {
+            return null;
+        }
+
+        const contents = try self.allocator.dupe(u8, contents_value.string);
+        errdefer self.allocator.free(contents);
+
+        const loader = blk: {
+            const loader_value = parsed.value.object.get("loader") orelse break :blk null;
+            if (loader_value != .string) {
+                break :blk null;
+            }
+
+            if (loader_value.string.len == 0) {
+                break :blk null;
+            }
+
+            break :blk try self.allocator.dupe(u8, loader_value.string);
+        };
+        errdefer if (loader) |owned| self.allocator.free(owned);
+
+        return .{
+            .contents = contents,
+            .loader = loader,
+        };
+    }
+
+    fn transformOnLoadContents(
+        self: *ModuleLoaderState,
+        module_id: []const u8,
+        loader: []const u8,
+        contents: []const u8,
+    ) ![]u8 {
+        const extension = if (std.mem.eql(u8, loader, "ts"))
+            ".ts"
+        else if (std.mem.eql(u8, loader, "tsx"))
+            ".tsx"
+        else if (std.mem.eql(u8, loader, "jsx"))
+            ".jsx"
+        else
+            return error.UnsupportedTransformLoader;
+
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(module_id);
+        hasher.update(loader);
+        hasher.update(contents);
+        const digest = hasher.final();
+
+        const input_path = try std.fmt.allocPrint(
+            self.allocator,
+            ".zig-dom-cache/transformed/onload/{x}-input{s}",
+            .{ digest, extension },
+        );
+        defer self.allocator.free(input_path);
+
+        const output_path = try std.fmt.allocPrint(
+            self.allocator,
+            ".zig-dom-cache/transformed/onload/{x}-output.js",
+            .{digest},
+        );
+        defer self.allocator.free(output_path);
+
+        {
+            var atomic_input = try std.Io.Dir.cwd().createFileAtomic(self.io, input_path, .{
+                .make_path = true,
+                .replace = true,
+            });
+            defer atomic_input.deinit(self.io);
+            try atomic_input.file.writeStreamingAll(self.io, contents);
+            try atomic_input.replace(self.io);
+        }
+
+        const exit_code = try self.runSingleTransform(input_path, loader, output_path);
+        if (exit_code != 0) {
+            return error.TransformCommandFailed;
+        }
+
+        return std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            output_path,
+            self.allocator,
+            .limited(max_module_source_bytes),
+        );
+    }
+
+    fn runSingleTransform(self: *ModuleLoaderState, input_path: []const u8, loader: []const u8, output_path: []const u8) !u8 {
+        var args: std.ArrayList([]const u8) = .empty;
+        defer args.deinit(self.allocator);
+
+        try args.appendSlice(self.allocator, &.{
+            "bun",
+            "run",
+            "scripts/transform-tests.ts",
+            "--cache-dir",
+            ".zig-dom-cache/transformed",
+            "--file",
+            input_path,
+            "--loader",
+            loader,
+            "--out",
+            output_path,
+        });
+
+        var child = std.process.spawn(self.io, .{
+            .argv = args.items,
+            .stdin = .inherit,
+            .stdout = .inherit,
+            .stderr = .inherit,
+        }) catch |err| switch (err) {
+            error.FileNotFound => {
+                std.log.err("Required command not found: {s}", .{args.items[0]});
+                return 127;
+            },
+            else => return err,
+        };
+
+        const term = try child.wait(self.io);
+        return switch (term) {
+            .exited => |code| code,
+            .signal => {
+                std.log.err("Transform helper terminated by signal.", .{});
+                return 1;
+            },
+            .stopped => {
+                std.log.err("Transform helper stopped unexpectedly.", .{});
+                return 1;
+            },
+            .unknown => {
+                std.log.err("Transform helper ended unexpectedly.", .{});
+                return 1;
+            },
+        };
+    }
+
+    fn clearMockModules(self: *ModuleLoaderState) void {
+        var iterator = self.mock_module_sources.iterator();
+        while (iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+
+        self.mock_module_sources.clearRetainingCapacity();
+    }
+
+
+fn escapeJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
+    var builder: std.ArrayList(u8) = .empty;
+    errdefer builder.deinit(allocator);
+
+    for (text) |ch| {
+        switch (ch) {
+            '\\' => try builder.appendSlice(allocator, "\\\\"),
+            '\'' => try builder.appendSlice(allocator, "\\'"),
+            '\n' => try builder.appendSlice(allocator, "\\n"),
+            '\r' => try builder.appendSlice(allocator, "\\r"),
+            '\t' => try builder.appendSlice(allocator, "\\t"),
+            else => {
+                if (ch < 0x20) {
+                    const hex = "0123456789ABCDEF";
+                    try builder.appendSlice(allocator, "\\x");
+                    try builder.append(allocator, hex[(ch >> 4) & 0x0F]);
+                    try builder.append(allocator, hex[ch & 0x0F]);
+                } else {
+                    try builder.append(allocator, ch);
+                }
+            },
+        }
+    }
+
+    return builder.toOwnedSlice(allocator);
+}
     fn resolveRelativePath(self: *ModuleLoaderState, module_base_name: []const u8, specifier: []const u8) ![]u8 {
         if (!std.fs.path.isAbsolute(module_base_name)) {
             return error.ModuleNotFound;
@@ -960,6 +1593,26 @@ const ModuleLoaderState = struct {
     fn pathIsDirectory(self: *ModuleLoaderState, path: []const u8) bool {
         const stat = std.Io.Dir.cwd().statFile(self.io, path, .{}) catch return false;
         return stat.kind == .directory;
+    }
+
+    fn pathLooksCommonJs(self: *ModuleLoaderState, path: []const u8) !bool {
+        if (std.mem.endsWith(u8, path, ".cjs")) {
+            return true;
+        }
+
+        if (!std.mem.endsWith(u8, path, ".js")) {
+            return false;
+        }
+
+        const sample = std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            path,
+            self.allocator,
+            .limited(16 * 1024),
+        ) catch return false;
+        defer self.allocator.free(sample);
+
+        return isCommonJsSource(path, sample);
     }
 };
 
@@ -1668,6 +2321,7 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
 
     var module_loader_state = ModuleLoaderState.init(allocator, io);
     defer module_loader_state.deinit();
+    module_loader_state.runtime = &vm;
 
     vm.setModuleLoaderFunc(ModuleLoaderState, &module_loader_state, moduleNormalize, moduleLoad);
 
@@ -1676,10 +2330,6 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             return collectionFailureFromError(allocator, path, "collection failed", err);
         };
     }
-
-    module_loader_state.preloadEntryGraph(entry_module_id) catch |err| {
-        return collectionFailureFromError(allocator, path, "collection failed", err);
-    };
 
     for (setup_module_ids.items) |setup_module_id| {
         const setup_source = module_loader_state.loadModuleSource(setup_module_id) catch |err| {
@@ -1696,6 +2346,14 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             };
         }
     }
+
+    module_loader_state.syncMockModulesFromRuntime(&vm) catch |err| {
+        return collectionFailureFromError(allocator, path, "collection failed", err);
+    };
+
+    module_loader_state.preloadEntryGraph(entry_module_id) catch |err| {
+        return collectionFailureFromError(allocator, path, "collection failed", err);
+    };
 
     const entry_source = module_loader_state.loadModuleSource(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
@@ -1936,9 +2594,81 @@ fn allocJsCString(ctx: *ModuleContext, text: []const u8) ?[*:0]u8 {
     return @ptrCast(bytes);
 }
 
-fn shimModuleSource(module_name: []const u8) ?[]const u8 {
+fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, module_name, bun_specifier)) {
+        return bun_shim_source;
+    }
+
     if (std.mem.eql(u8, module_name, bun_test_specifier)) {
         return bun_test_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_url_specifier) or std.mem.eql(u8, module_name, node_url_colon_specifier)) {
+        return node_url_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_fs_specifier) or std.mem.eql(u8, module_name, node_fs_colon_specifier)) {
+        return node_fs_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_path_specifier) or std.mem.eql(u8, module_name, node_path_colon_specifier)) {
+        return node_path_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_util_specifier) or std.mem.eql(u8, module_name, node_util_colon_specifier)) {
+        return node_util_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_buffer_specifier) or std.mem.eql(u8, module_name, node_buffer_colon_specifier)) {
+        return node_buffer_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_crypto_specifier) or std.mem.eql(u8, module_name, node_crypto_colon_specifier)) {
+        return node_crypto_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_http_specifier) or std.mem.eql(u8, module_name, node_http_colon_specifier)) {
+        return node_http_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_https_specifier) or std.mem.eql(u8, module_name, node_https_colon_specifier)) {
+        return node_https_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_net_specifier) or std.mem.eql(u8, module_name, node_net_colon_specifier)) {
+        return node_net_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_zlib_specifier) or std.mem.eql(u8, module_name, node_zlib_colon_specifier)) {
+        return node_zlib_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_child_process_specifier) or std.mem.eql(u8, module_name, node_child_process_colon_specifier)) {
+        return node_child_process_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_stream_specifier) or std.mem.eql(u8, module_name, node_stream_colon_specifier)) {
+        return node_stream_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_stream_web_specifier) or std.mem.eql(u8, module_name, node_stream_web_colon_specifier)) {
+        return node_stream_web_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_vm_specifier) or std.mem.eql(u8, module_name, node_vm_colon_specifier)) {
+        return node_vm_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_perf_hooks_colon_specifier)) {
+        return node_perf_hooks_shim_source;
+    }
+
+    return null;
+}
+
+fn fallbackShimModuleSource(module_name: []const u8) ?[]const u8 {
+    if (builtInModuleSource(module_name)) |builtin| {
+        return builtin;
     }
 
     if (std.mem.eql(u8, module_name, react_specifier)) {
@@ -1951,14 +2681,6 @@ fn shimModuleSource(module_name: []const u8) ?[]const u8 {
 
     if (std.mem.eql(u8, module_name, testing_library_specifier)) {
         return testing_library_shim_source;
-    }
-
-    if (std.mem.eql(u8, module_name, vanilla_extract_css_specifier)) {
-        return vanilla_extract_css_shim_source;
-    }
-
-    if (std.mem.eql(u8, module_name, classnames_specifier)) {
-        return classnames_shim_source;
     }
 
     if (std.mem.eql(u8, module_name, graphemesplit_specifier)) {
@@ -1985,8 +2707,36 @@ fn shimModuleSource(module_name: []const u8) ?[]const u8 {
     return null;
 }
 
+fn isMockModuleId(module_id: []const u8) bool {
+    return std.mem.startsWith(u8, module_id, "__zig_mock__/");
+}
+
 fn isRelativeSpecifier(specifier: []const u8) bool {
     return std.mem.startsWith(u8, specifier, "./") or std.mem.startsWith(u8, specifier, "../");
+}
+
+fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
+    if (std.mem.endsWith(u8, module_id, ".cjs")) {
+        return true;
+    }
+
+    if (!std.mem.endsWith(u8, module_id, ".js")) {
+        return false;
+    }
+
+    const has_cjs_markers =
+        std.mem.indexOf(u8, source, "module.exports") != null or
+        std.mem.indexOf(u8, source, "exports.") != null or
+        std.mem.indexOf(u8, source, "require(") != null;
+    if (!has_cjs_markers) {
+        return false;
+    }
+
+    if (std.mem.indexOf(u8, source, "import ") != null or std.mem.indexOf(u8, source, "export ") != null) {
+        return false;
+    }
+
+    return true;
 }
 
 fn canonicalizePath(allocator: Allocator, io: std.Io, path: []const u8) ![]u8 {
@@ -2089,11 +2839,11 @@ test "isRelativeSpecifier detects relative paths" {
     try std.testing.expect(!isRelativeSpecifier("foo"));
 }
 
-test "shimModuleSource resolves known shims" {
-    try std.testing.expect(shimModuleSource("bun:test") != null);
-    try std.testing.expect(shimModuleSource("react") != null);
-    try std.testing.expect(shimModuleSource("react-dom/client") != null);
-    try std.testing.expect(shimModuleSource("@testing-library/react") != null);
-    try std.testing.expect(shimModuleSource("@vanilla-extract/css") != null);
-    try std.testing.expect(shimModuleSource("not-a-shim") == null);
+test "shim sources resolve built-ins and fallback shims" {
+    try std.testing.expect(builtInModuleSource("bun") != null);
+    try std.testing.expect(builtInModuleSource("bun:test") != null);
+    try std.testing.expect(fallbackShimModuleSource("react") != null);
+    try std.testing.expect(fallbackShimModuleSource("react-dom/client") != null);
+    try std.testing.expect(fallbackShimModuleSource("@testing-library/react") != null);
+    try std.testing.expect(fallbackShimModuleSource("not-a-shim") == null);
 }

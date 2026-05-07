@@ -199,6 +199,31 @@
     return false;
   }
 
+  const expectExtensions = Object.create(null);
+
+  function runExtendedMatcher(name, matcher, received, args) {
+    const context = {
+      equals: deepEqual,
+      isNot: false,
+      promise: ""
+    };
+
+    const outcome = matcher.call(context, received, ...args);
+    if (!outcome || typeof outcome !== "object" || typeof outcome.pass !== "boolean") {
+      throw new Error(`Extended matcher ${name} must return { pass, message }`);
+    }
+
+    if (outcome.pass) {
+      return;
+    }
+
+    if (typeof outcome.message === "function") {
+      throw new Error(String(outcome.message()));
+    }
+
+    throw new Error(`Extended matcher ${name} failed`);
+  }
+
   function expect(received) {
     const matchers = {
       toBe(expected) {
@@ -252,8 +277,333 @@
       }
     };
 
+    for (const [name, matcher] of Object.entries(expectExtensions)) {
+      matchers[name] = (...args) => {
+        runExtendedMatcher(name, matcher, received, args);
+      };
+    }
+
     return matchers;
   }
+
+  expect.extend = function extend(matchers) {
+    if (!matchers || typeof matchers !== "object") {
+      throw new Error("expect.extend() requires a matcher object");
+    }
+
+    for (const [name, matcher] of Object.entries(matchers)) {
+      if (typeof matcher === "function") {
+        expectExtensions[name] = matcher;
+      }
+    }
+  };
+
+  const moduleMockExports = new Map();
+  const moduleMockSources = new Map();
+
+  function isIdentifierName(name) {
+    return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name);
+  }
+
+  function updateMockManifest() {
+    globalThis.__zigMockModuleManifestJson = JSON.stringify(
+      Array.from(moduleMockSources.entries(), ([specifier, source]) => ({ specifier, source }))
+    );
+  }
+
+  function buildMockModuleSource(specifier, exportsValue) {
+    const namedKeys = [];
+    if (exportsValue && (typeof exportsValue === "object" || typeof exportsValue === "function")) {
+      for (const key of Object.keys(exportsValue)) {
+        if (key !== "default" && isIdentifierName(key)) {
+          namedKeys.push(key);
+        }
+      }
+    }
+
+    const lines = [
+      `const value = globalThis.__zigRunnerMockExports.get(${JSON.stringify(specifier)});`,
+      "const moduleExports = value && (typeof value === 'object' || typeof value === 'function') ? value : { default: value };"
+    ];
+
+    for (const key of namedKeys) {
+      lines.push(`export const ${key} = moduleExports[${JSON.stringify(key)}];`);
+    }
+
+    lines.push("export default Object.prototype.hasOwnProperty.call(moduleExports, 'default') ? moduleExports.default : moduleExports;");
+    return `${lines.join("\n")}\n`;
+  }
+
+  function createMockFunction(initialImplementation, options = {}) {
+    const state = {
+      calls: [],
+      implementation: typeof initialImplementation === "function" ? initialImplementation : undefined,
+      originalImplementation: typeof options.originalImplementation === "function" ? options.originalImplementation : undefined,
+      restore: typeof options.restore === "function" ? options.restore : null,
+      hasReturnValue: false,
+      returnValue: undefined,
+      hasResolvedValue: false,
+      resolvedValue: undefined,
+      hasRejectedValue: false,
+      rejectedValue: undefined
+    };
+
+    function mocked(...args) {
+      state.calls.push(args);
+
+      if (state.implementation) {
+        return state.implementation.apply(this, args);
+      }
+
+      if (state.hasReturnValue) {
+        return state.returnValue;
+      }
+
+      if (state.hasResolvedValue) {
+        return Promise.resolve(state.resolvedValue);
+      }
+
+      if (state.hasRejectedValue) {
+        return Promise.reject(state.rejectedValue);
+      }
+
+      return undefined;
+    }
+
+    mocked.mock = {
+      calls: state.calls
+    };
+
+    mocked.mockImplementation = (nextImplementation) => {
+      if (typeof nextImplementation !== "function") {
+        throw new Error("mockImplementation() requires a function");
+      }
+      state.implementation = nextImplementation;
+      state.hasReturnValue = false;
+      state.hasResolvedValue = false;
+      state.hasRejectedValue = false;
+      return mocked;
+    };
+
+    mocked.mockReturnValue = (value) => {
+      state.implementation = undefined;
+      state.hasReturnValue = true;
+      state.returnValue = value;
+      state.hasResolvedValue = false;
+      state.hasRejectedValue = false;
+      return mocked;
+    };
+
+    mocked.mockResolvedValue = (value) => {
+      state.implementation = undefined;
+      state.hasResolvedValue = true;
+      state.resolvedValue = value;
+      state.hasReturnValue = false;
+      state.hasRejectedValue = false;
+      return mocked;
+    };
+
+    mocked.mockRejectedValue = (error) => {
+      state.implementation = undefined;
+      state.hasRejectedValue = true;
+      state.rejectedValue = error;
+      state.hasReturnValue = false;
+      state.hasResolvedValue = false;
+      return mocked;
+    };
+
+    mocked.mockClear = () => {
+      state.calls.length = 0;
+      return mocked;
+    };
+
+    mocked.mockReset = () => {
+      state.calls.length = 0;
+      state.implementation = state.originalImplementation;
+      state.hasReturnValue = false;
+      state.returnValue = undefined;
+      state.hasResolvedValue = false;
+      state.resolvedValue = undefined;
+      state.hasRejectedValue = false;
+      state.rejectedValue = undefined;
+      return mocked;
+    };
+
+    mocked.mockRestore = () => {
+      if (state.restore) {
+        state.restore();
+      }
+      return mocked.mockReset();
+    };
+
+    return mocked;
+  }
+
+  function mock(fn) {
+    return createMockFunction(fn, { originalImplementation: typeof fn === "function" ? fn : undefined });
+  }
+
+  mock.module = async function mockModule(specifier, factory) {
+    if (typeof specifier !== "string" || specifier.length === 0) {
+      throw new Error("mock.module() requires a non-empty module specifier");
+    }
+
+    let produced;
+    if (typeof factory === "function") {
+      produced = factory();
+    } else {
+      produced = factory;
+    }
+
+    const exportsValue = await Promise.resolve(produced);
+    const source = buildMockModuleSource(specifier, exportsValue);
+    moduleMockExports.set(specifier, exportsValue);
+    moduleMockSources.set(specifier, source);
+    updateMockManifest();
+    return exportsValue;
+  };
+
+  function spyOn(target, property) {
+    if (!target || (typeof target !== "object" && typeof target !== "function")) {
+      throw new Error("spyOn() requires an object target");
+    }
+
+    const propertyName = String(property);
+    let owner = target;
+    let descriptor;
+    while (owner && !descriptor) {
+      descriptor = Object.getOwnPropertyDescriptor(owner, propertyName);
+      if (!descriptor) {
+        owner = Object.getPrototypeOf(owner);
+      }
+    }
+
+    if (!descriptor || !owner) {
+      throw new Error(`spyOn() could not find property ${propertyName}`);
+    }
+
+    const restoreDescriptor = () => {
+      Object.defineProperty(owner, propertyName, descriptor);
+    };
+
+    if (typeof descriptor.value === "function") {
+      const original = descriptor.value;
+      const originalImpl = function originalImpl(...args) {
+        return original.apply(this, args);
+      };
+
+      const wrapped = createMockFunction(originalImpl, {
+        originalImplementation: originalImpl,
+        restore: restoreDescriptor
+      });
+
+      Object.defineProperty(owner, propertyName, {
+        ...descriptor,
+        value: wrapped
+      });
+
+      return wrapped;
+    }
+
+    if (typeof descriptor.get === "function") {
+      const originalGet = descriptor.get;
+      const getterImpl = function getterImpl() {
+        return originalGet.call(this);
+      };
+
+      const wrapped = createMockFunction(getterImpl, {
+        originalImplementation: getterImpl,
+        restore: restoreDescriptor
+      });
+
+      Object.defineProperty(owner, propertyName, {
+        ...descriptor,
+        get() {
+          return wrapped.call(this);
+        }
+      });
+
+      return wrapped;
+    }
+
+    throw new Error(`spyOn() only supports function values and getters: ${propertyName}`);
+  }
+
+  const onLoadHooks = [];
+
+  function plugin(definition) {
+    if (!definition || typeof definition !== "object") {
+      throw new Error("plugin() requires a plugin definition object");
+    }
+
+    const build = {
+      onLoad(options, callback) {
+        if (!options || !(options.filter instanceof RegExp)) {
+          throw new Error("build.onLoad() requires an options object with a RegExp filter");
+        }
+
+        if (typeof callback !== "function") {
+          throw new Error("build.onLoad() callback must be a function");
+        }
+
+        onLoadHooks.push({
+          filter: options.filter,
+          callback
+        });
+      }
+    };
+
+    if (typeof definition.setup === "function") {
+      definition.setup(build);
+    }
+
+    return definition;
+  }
+
+  async function applyOnLoad(path) {
+    for (const hook of onLoadHooks) {
+      hook.filter.lastIndex = 0;
+      if (!hook.filter.test(path)) {
+        continue;
+      }
+
+      const result = await Promise.resolve(hook.callback({ path }));
+      if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "contents")) {
+        return result;
+      }
+    }
+
+    return null;
+  }
+
+  function bunShellTag() {
+    throw new Error("bun.$ shell execution is not implemented in this runner");
+  }
+
+  function bunFile(pathLike) {
+    const normalizedPath = String(pathLike ?? "");
+    return {
+      async text() {
+        throw new Error(`bun.file(${normalizedPath}).text() is not implemented in this runner`);
+      },
+      async json() {
+        const text = await this.text();
+        return JSON.parse(text);
+      }
+    };
+  }
+
+  const bunApi = Object.freeze({
+    plugin,
+    $: bunShellTag,
+    file: bunFile
+  });
+
+  globalThis.__zigRunnerMockExports = moduleMockExports;
+  globalThis.__zigRunnerApplyOnLoad = applyOnLoad;
+  globalThis.__zigBunApi = bunApi;
+  globalThis.Bun = bunApi;
+  updateMockManifest();
 
   let reactIdCounter = 0;
 
@@ -789,6 +1139,67 @@
     globalThis.navigator.userAgent = "zig-dom";
   }
 
+  if (!globalThis.process || typeof globalThis.process !== "object") {
+    globalThis.process = {
+      env: {
+        ZIG_DOM_SKIP_TESTING_LIBRARY: "1"
+      },
+      argv: [],
+      platform: "darwin",
+      arch: "arm64",
+      cwd() {
+        return "/";
+      },
+      nextTick(callback, ...args) {
+        globalThis.queueMicrotask(() => {
+          if (typeof callback === "function") {
+            callback(...args);
+          }
+        });
+      }
+    };
+  } else {
+    if (!globalThis.process.env || typeof globalThis.process.env !== "object") {
+      globalThis.process.env = {};
+    }
+
+    if (globalThis.process.env.ZIG_DOM_SKIP_TESTING_LIBRARY == null) {
+      globalThis.process.env.ZIG_DOM_SKIP_TESTING_LIBRARY = "1";
+    }
+
+    if (!Array.isArray(globalThis.process.argv)) {
+      globalThis.process.argv = [];
+    }
+
+    if (typeof globalThis.process.platform !== "string") {
+      globalThis.process.platform = "darwin";
+    }
+
+    if (typeof globalThis.process.arch !== "string") {
+      globalThis.process.arch = "arm64";
+    }
+
+    if (typeof globalThis.process.cwd !== "function") {
+      globalThis.process.cwd = function cwd() {
+        return "/";
+      };
+    }
+
+    if (typeof globalThis.process.nextTick !== "function") {
+      globalThis.process.nextTick = function nextTick(callback, ...args) {
+        globalThis.queueMicrotask(() => {
+          if (typeof callback === "function") {
+            callback(...args);
+          }
+        });
+      };
+    }
+  }
+
+  if (typeof globalThis.global === "undefined") {
+    globalThis.global = globalThis;
+  }
+
   if (globalThis.window && typeof globalThis.window === "object") {
     if (!globalThis.window.location) {
       globalThis.window.location = globalThis.location;
@@ -816,6 +1227,281 @@
       });
     };
   }
+
+  if (typeof globalThis.TextEncoder !== "function") {
+    globalThis.TextEncoder = class TextEncoder {
+      encode(input = "") {
+        const text = String(input);
+        const encoded = unescape(encodeURIComponent(text));
+        const bytes = new Uint8Array(encoded.length);
+        for (let index = 0; index < encoded.length; index += 1) {
+          bytes[index] = encoded.charCodeAt(index);
+        }
+        return bytes;
+      }
+    };
+  }
+
+  if (typeof globalThis.TextDecoder !== "function") {
+    globalThis.TextDecoder = class TextDecoder {
+      decode(input) {
+        if (!input) {
+          return "";
+        }
+
+        const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+        let encoded = "";
+        for (let index = 0; index < bytes.length; index += 1) {
+          encoded += String.fromCharCode(bytes[index]);
+        }
+        try {
+          return decodeURIComponent(escape(encoded));
+        } catch {
+          return encoded;
+        }
+      }
+    };
+  }
+
+  if (typeof globalThis.Buffer !== "function") {
+    function decodeBase64(input) {
+      const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      const cleaned = String(input || "").replace(/=+$/, "").replace(/\s+/g, "");
+      const output = [];
+      let bits = 0;
+      let value = 0;
+
+      for (let index = 0; index < cleaned.length; index += 1) {
+        const code = alphabet.indexOf(cleaned[index]);
+        if (code < 0) {
+          continue;
+        }
+        value = (value << 6) | code;
+        bits += 6;
+        if (bits >= 8) {
+          bits -= 8;
+          output.push((value >> bits) & 0xff);
+        }
+      }
+
+      return new Uint8Array(output);
+    }
+
+    class BufferImpl extends Uint8Array {
+      static from(input, encoding) {
+        if (typeof input === "string") {
+          if (encoding === "base64") {
+            return new BufferImpl(decodeBase64(input));
+          }
+          return new BufferImpl(new globalThis.TextEncoder().encode(input));
+        }
+
+        if (input instanceof ArrayBuffer) {
+          return new BufferImpl(new Uint8Array(input));
+        }
+
+        if (ArrayBuffer.isView(input) || Array.isArray(input)) {
+          return new BufferImpl(input);
+        }
+
+        return new BufferImpl(0);
+      }
+
+      static alloc(size, fill = 0) {
+        const next = new BufferImpl(Number(size) || 0);
+        next.fill(fill);
+        return next;
+      }
+
+      static allocUnsafe(size) {
+        return new BufferImpl(Number(size) || 0);
+      }
+
+      static isBuffer(value) {
+        return value instanceof Uint8Array;
+      }
+
+      static get [Symbol.species]() {
+        return BufferImpl;
+      }
+
+      toString(encoding) {
+        if (encoding === "base64") {
+          const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+          let output = "";
+          for (let index = 0; index < this.length; index += 3) {
+            const b0 = this[index] ?? 0;
+            const b1 = this[index + 1] ?? 0;
+            const b2 = this[index + 2] ?? 0;
+            const chunk = (b0 << 16) | (b1 << 8) | b2;
+            output += alphabet[(chunk >> 18) & 63];
+            output += alphabet[(chunk >> 12) & 63];
+            output += index + 1 < this.length ? alphabet[(chunk >> 6) & 63] : "=";
+            output += index + 2 < this.length ? alphabet[chunk & 63] : "=";
+          }
+          return output;
+        }
+
+        return new globalThis.TextDecoder().decode(this);
+      }
+    }
+
+    globalThis.Buffer = BufferImpl;
+  }
+
+  function createEventEmitterClass() {
+    return class EventEmitter {
+      constructor() {
+        this._listeners = new Map();
+      }
+
+      on(eventName, listener) {
+        const key = String(eventName);
+        const list = this._listeners.get(key) || [];
+        list.push(listener);
+        this._listeners.set(key, list);
+        return this;
+      }
+
+      once(eventName, listener) {
+        const wrapped = (...args) => {
+          this.removeListener(eventName, wrapped);
+          listener(...args);
+        };
+        return this.on(eventName, wrapped);
+      }
+
+      emit(eventName, ...args) {
+        const key = String(eventName);
+        const list = this._listeners.get(key);
+        if (!list || list.length === 0) {
+          return false;
+        }
+        for (const listener of [...list]) {
+          listener(...args);
+        }
+        return true;
+      }
+
+      removeListener(eventName, listener) {
+        const key = String(eventName);
+        const list = this._listeners.get(key);
+        if (!list) {
+          return this;
+        }
+        this._listeners.set(
+          key,
+          list.filter((entry) => entry !== listener)
+        );
+        return this;
+      }
+
+      listenerCount(eventName) {
+        const key = String(eventName);
+        const list = this._listeners.get(key);
+        return list ? list.length : 0;
+      }
+    };
+  }
+
+  const EventEmitter = createEventEmitterClass();
+  EventEmitter.EventEmitter = EventEmitter;
+
+  function makeUnsupportedBuiltin(name) {
+    return () => {
+      throw new Error(`Builtin module ${name} is not implemented in this runner`);
+    };
+  }
+
+  const importMetaRequireBuiltins = {
+    events: EventEmitter,
+    fs: {
+      readFileSync: makeUnsupportedBuiltin("fs.readFileSync"),
+      writeFileSync: makeUnsupportedBuiltin("fs.writeFileSync"),
+      existsSync: () => false
+    },
+    path: {
+      join: (...parts) => parts.filter(Boolean).join("/"),
+      resolve: (...parts) => parts.filter(Boolean).join("/"),
+      dirname: (value) => {
+        const input = String(value || "");
+        const index = input.lastIndexOf("/");
+        return index <= 0 ? "." : input.slice(0, index);
+      }
+    },
+    util: {
+      TextEncoder: globalThis.TextEncoder,
+      TextDecoder: globalThis.TextDecoder,
+      inspect(value) {
+        try {
+          return JSON.stringify(value);
+        } catch {
+          return String(value);
+        }
+      }
+    },
+    buffer: {
+      Buffer: globalThis.Buffer,
+      Blob: globalThis.Blob
+    },
+    stream: {
+      Duplex: class Duplex extends EventEmitter {},
+      Readable: class Readable extends EventEmitter {},
+      Writable: class Writable extends EventEmitter {},
+      Transform: class Transform extends EventEmitter {}
+    },
+    url: {
+      URL: globalThis.URL,
+      URLSearchParams: globalThis.URLSearchParams
+    },
+    http: {
+      request: makeUnsupportedBuiltin("http.request"),
+      get: makeUnsupportedBuiltin("http.get")
+    },
+    https: {
+      request: makeUnsupportedBuiltin("https.request"),
+      get: makeUnsupportedBuiltin("https.get")
+    },
+    net: {
+      isIP: () => 0,
+      createConnection: makeUnsupportedBuiltin("net.createConnection")
+    },
+    tls: {
+      connect: makeUnsupportedBuiltin("tls.connect")
+    },
+    crypto: {
+      randomBytes(size) {
+        const bytes = new Uint8Array(Number(size) || 0);
+        return globalThis.Buffer.from(bytes);
+      },
+      createHash() {
+        return {
+          update() {
+            return this;
+          },
+          digest() {
+            return globalThis.Buffer.from("");
+          }
+        };
+      }
+    },
+    zlib: {
+      createDeflateRaw: makeUnsupportedBuiltin("zlib.createDeflateRaw"),
+      createInflateRaw: makeUnsupportedBuiltin("zlib.createInflateRaw")
+    }
+  };
+
+  function importMetaRequire(specifier) {
+    const key = String(specifier || "");
+    const normalized = key.startsWith("node:") ? key.slice(5) : key;
+    const builtin = importMetaRequireBuiltins[normalized];
+    if (builtin) {
+      return builtin;
+    }
+    throw new Error(`import.meta.require() unsupported module: ${key}`);
+  }
+
+  globalThis.__zigImportMetaRequire = importMetaRequire;
 
   if (typeof globalThis.setTimeout !== "function") {
     let timeoutIdCounter = 1;
@@ -849,6 +1535,55 @@
     };
   }
 
+  if (typeof globalThis.setInterval !== "function") {
+    globalThis.setInterval = function setInterval(callback, delay, ...args) {
+      const schedule = () => {
+        const timeoutId = globalThis.setTimeout(() => {
+          if (typeof callback === "function") {
+            callback(...args);
+          }
+          schedule();
+        }, delay);
+        return timeoutId;
+      };
+
+      return schedule();
+    };
+  }
+
+  if (typeof globalThis.clearInterval !== "function") {
+    globalThis.clearInterval = function clearInterval(id) {
+      globalThis.clearTimeout(id);
+    };
+  }
+
+  if (typeof globalThis.setImmediate !== "function") {
+    let immediateIdCounter = 1;
+    const cancelledImmediates = new Set();
+
+    globalThis.setImmediate = function setImmediate(callback, ...args) {
+      const id = immediateIdCounter;
+      immediateIdCounter += 1;
+
+      Promise.resolve().then(() => {
+        if (cancelledImmediates.has(id)) {
+          cancelledImmediates.delete(id);
+          return;
+        }
+
+        if (typeof callback === "function") {
+          callback(...args);
+        }
+      });
+
+      return id;
+    };
+
+    globalThis.clearImmediate = function clearImmediate(id) {
+      cancelledImmediates.add(Number(id));
+    };
+  }
+
   if (globalThis.window && typeof globalThis.window === "object") {
     if (!globalThis.window.queueMicrotask) {
       globalThis.window.queueMicrotask = globalThis.queueMicrotask;
@@ -858,6 +1593,21 @@
     }
     if (!globalThis.window.clearTimeout) {
       globalThis.window.clearTimeout = globalThis.clearTimeout;
+    }
+    if (!globalThis.window.setInterval) {
+      globalThis.window.setInterval = globalThis.setInterval;
+    }
+    if (!globalThis.window.clearInterval) {
+      globalThis.window.clearInterval = globalThis.clearInterval;
+    }
+    if (!globalThis.window.setImmediate) {
+      globalThis.window.setImmediate = globalThis.setImmediate;
+    }
+    if (!globalThis.window.clearImmediate) {
+      globalThis.window.clearImmediate = globalThis.clearImmediate;
+    }
+    if (!globalThis.window.Buffer) {
+      globalThis.window.Buffer = globalThis.Buffer;
     }
   }
 
@@ -1253,6 +2003,8 @@
     it: test,
     describe,
     expect,
+    mock,
+    spyOn,
     beforeAll,
     beforeEach,
     afterEach,
@@ -1275,6 +2027,8 @@
   globalThis.test = bunTestApi.test;
   globalThis.it = bunTestApi.it;
   globalThis.describe = bunTestApi.describe;
+  globalThis.mock = bunTestApi.mock;
+  globalThis.spyOn = bunTestApi.spyOn;
   globalThis.beforeAll = bunTestApi.beforeAll;
   globalThis.beforeEach = bunTestApi.beforeEach;
   globalThis.afterEach = bunTestApi.afterEach;

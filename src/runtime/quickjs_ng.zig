@@ -111,6 +111,8 @@ pub const Runtime = struct {
                         var rejection_text: []const u8 = "<null rejection>";
                         var rejection_text_owned: ?[]u8 = null;
                         defer if (rejection_text_owned) |owned| self.allocator.free(owned);
+                        const rejection_stack = self.extractOptionalStringProperty(rejection, "stack") catch null;
+                        defer if (rejection_stack) |stack| self.allocator.free(stack);
 
                         const text_value = rejection.toStringValue(self.ctx);
                         defer text_value.deinit(self.ctx);
@@ -124,11 +126,18 @@ pub const Runtime = struct {
                             rejection_text = owned;
                         }
 
-                        const message_buf = std.fmt.allocPrint(
-                            self.allocator,
-                            "module evaluation rejected: {s} ({s})",
-                            .{ filename, rejection_text },
-                        ) catch return error.OutOfMemory;
+                        const message_buf = if (rejection_stack) |stack|
+                            std.fmt.allocPrint(
+                                self.allocator,
+                                "module evaluation rejected: {s} ({s})\n{s}",
+                                .{ filename, rejection_text, stack },
+                            ) catch return error.OutOfMemory
+                        else
+                            std.fmt.allocPrint(
+                                self.allocator,
+                                "module evaluation rejected: {s} ({s})",
+                                .{ filename, rejection_text },
+                            ) catch return error.OutOfMemory;
                         defer self.allocator.free(message_buf);
                         const message = self.allocator.dupeZ(u8, message_buf) catch return error.OutOfMemory;
                         defer self.allocator.free(message);
