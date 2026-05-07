@@ -198,7 +198,7 @@
   }
 
   function expect(received) {
-    return {
+    const matchers = {
       toBe(expected) {
         if (!Object.is(received, expected)) {
           throw new Error(`Expected ${String(received)} to be ${String(expected)}`);
@@ -224,8 +224,33 @@
         if (!didThrow) {
           throw new Error("Expected function to throw");
         }
+      },
+      toBeInTheDocument() {
+        if (!received || typeof received !== "object") {
+          throw new Error("toBeInTheDocument expects a DOM node");
+        }
+
+        if (!document || typeof document.contains !== "function" || !document.contains(received)) {
+          throw new Error("Expected node to be in the document");
+        }
+      },
+      toHaveAttribute(name, value) {
+        if (!received || typeof received.getAttribute !== "function") {
+          throw new Error("toHaveAttribute expects an Element");
+        }
+
+        const actual = received.getAttribute(String(name));
+        if (actual == null) {
+          throw new Error(`Expected attribute ${String(name)} to exist`);
+        }
+
+        if (arguments.length > 1 && String(actual) !== String(value)) {
+          throw new Error(`Expected attribute ${String(name)} to be ${String(value)} but received ${String(actual)}`);
+        }
       }
     };
+
+    return matchers;
   }
 
   const React = {
@@ -416,11 +441,92 @@
     return null;
   }
 
+  function implicitRoleFor(element) {
+    if (!element || typeof element.tagName !== "string") {
+      return null;
+    }
+
+    const tag = element.tagName.toLowerCase();
+    if (tag === "a" && element.hasAttribute("href")) {
+      return "link";
+    }
+    if (tag === "button") {
+      return "button";
+    }
+    if (tag === "img") {
+      return "img";
+    }
+    if (tag === "input") {
+      const type = (element.getAttribute("type") || "text").toLowerCase();
+      if (type === "checkbox") {
+        return "checkbox";
+      }
+      return "textbox";
+    }
+    return null;
+  }
+
+  function matchesName(node, expectedName) {
+    if (expectedName == null) {
+      return true;
+    }
+
+    const actual = String(node.getAttribute("aria-label") || node.textContent || "").trim();
+    if (expectedName instanceof RegExp) {
+      return expectedName.test(actual);
+    }
+    return actual === String(expectedName);
+  }
+
+  function findByRole(root, role, options = {}) {
+    if (!root || !role) {
+      return null;
+    }
+
+    const expectedRole = String(role);
+    const stack = [];
+    if (root.children && typeof root.children.length === "number") {
+      for (let index = 0; index < root.children.length; index += 1) {
+        stack.push(root.children[index]);
+      }
+    }
+
+    while (stack.length > 0) {
+      const node = stack.shift();
+      if (!node || node.nodeType !== 1) {
+        continue;
+      }
+
+      const explicitRole = node.getAttribute("role");
+      const implicitRole = implicitRoleFor(node);
+      const nodeRole = explicitRole || implicitRole;
+      if (nodeRole === expectedRole && matchesName(node, options.name)) {
+        return node;
+      }
+
+      if (node.children && typeof node.children.length === "number") {
+        for (let index = 0; index < node.children.length; index += 1) {
+          stack.push(node.children[index]);
+        }
+      }
+    }
+
+    return null;
+  }
+
   function createTestingLibraryHelpers() {
     function getByTextFrom(root, text) {
       const node = findByText(root, text);
       if (!node) {
         throw new Error(`Unable to find text: ${String(text)}`);
+      }
+      return node;
+    }
+
+    function getByRoleFrom(root, role, options) {
+      const node = findByRole(root, role, options || {});
+      if (!node) {
+        throw new Error(`Unable to find role: ${String(role)}`);
       }
       return node;
     }
@@ -447,6 +553,9 @@
         },
         getByText(text) {
           return getByTextFrom(container, text);
+        },
+        getByRole(role, options) {
+          return getByRoleFrom(container, role, options);
         }
       };
     }
@@ -454,6 +563,9 @@
     const screen = {
       getByText(text) {
         return getByTextFrom(document.body, text);
+      },
+      getByRole(role, options) {
+        return getByRoleFrom(document.body, role, options);
       }
     };
 
@@ -467,6 +579,31 @@
   }
 
   const testingLibrary = createTestingLibraryHelpers();
+
+  if (typeof globalThis.URL !== "function") {
+    globalThis.URL = class URL {
+      constructor(input) {
+        const href = String(input || "");
+        const match = href.match(/^([a-zA-Z][a-zA-Z0-9+.-]*:)?\/\/([^\/?#]+)([^?#]*)(\?[^#]*)?(#.*)?$/);
+        if (!match) {
+          throw new TypeError("Invalid URL");
+        }
+
+        this.href = href;
+        this.protocol = match[1] || "";
+        this.host = match[2] || "";
+        this.hostname = this.host.split(":")[0] || "";
+        this.pathname = match[3] || "/";
+        this.search = match[4] || "";
+        this.hash = match[5] || "";
+        this.origin = this.protocol && this.host ? `${this.protocol}//${this.host}` : "";
+      }
+
+      toString() {
+        return this.href;
+      }
+    };
+  }
 
   function gatherScopeChain(scope) {
     const chain = [];

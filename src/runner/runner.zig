@@ -6,9 +6,22 @@ const reporter = @import("reporter.zig");
 const transform = @import("transform.zig");
 
 const Allocator = std.mem.Allocator;
+const default_test_patterns = [_][]const u8{"tests"};
 
 pub const RunnerError = error{
     MissingValueAfterOut,
+    MissingValueAfterSetup,
+};
+
+const ParsedTestArgs = struct {
+    dry_run: bool,
+    patterns: []const []const u8,
+    setup_files: []const []const u8,
+
+    fn deinit(self: ParsedTestArgs, allocator: Allocator) void {
+        allocator.free(self.patterns);
+        allocator.free(self.setup_files);
+    }
 };
 
 pub fn run(allocator: Allocator, io: std.Io, command: cli.ParsedCommand) !u8 {
@@ -33,16 +46,19 @@ pub fn run(allocator: Allocator, io: std.Io, command: cli.ParsedCommand) !u8 {
 }
 
 fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u8 {
-    const discovered = try discovery.discoverTests(allocator, io, command.patterns);
+    const parsed = try parseTestArgs(allocator, command.args);
+    defer parsed.deinit(allocator);
+
+    const discovered = try discovery.discoverTests(allocator, io, parsed.patterns);
     defer discovered.deinit(allocator);
 
     if (discovered.paths.len == 0) {
-        reporter.printNoTests(command.patterns);
+        reporter.printNoTests(parsed.patterns);
         return 1;
     }
 
     reporter.printDiscovered(discovered.paths.len);
-    if (command.dry_run) {
+    if (parsed.dry_run) {
         reporter.printDryRun(discovered.paths);
         return 0;
     }
@@ -54,7 +70,7 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
         reporter.printTransformed(prepared.transformed_count);
     }
 
-    var summary = try execution.runFiles(allocator, io, prepared.paths);
+    var summary = try execution.runFiles(allocator, io, prepared.paths, parsed.setup_files);
     defer summary.deinit(allocator);
 
     for (summary.files) |file_result| {
@@ -85,6 +101,54 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
     );
 
     return if (summary.hasFailures()) 1 else 0;
+}
+
+fn parseTestArgs(allocator: Allocator, raw_args: []const []const u8) !ParsedTestArgs {
+    var patterns: std.ArrayList([]const u8) = .empty;
+    errdefer patterns.deinit(allocator);
+
+    var setup_files: std.ArrayList([]const u8) = .empty;
+    errdefer setup_files.deinit(allocator);
+
+    var dry_run = false;
+    var index: usize = 0;
+    while (index < raw_args.len) {
+        const current = raw_args[index];
+
+        if (std.mem.eql(u8, current, "--dry-run")) {
+            dry_run = true;
+            index += 1;
+            continue;
+        }
+
+        if (std.mem.eql(u8, current, "--setup")) {
+            if (index + 1 >= raw_args.len) {
+                return error.MissingValueAfterSetup;
+            }
+
+            try setup_files.append(allocator, raw_args[index + 1]);
+            index += 2;
+            continue;
+        }
+
+        try patterns.append(allocator, current);
+        index += 1;
+    }
+
+    if (patterns.items.len == 0) {
+        try patterns.appendSlice(allocator, default_test_patterns[0..]);
+    }
+
+    const owned_patterns = try patterns.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_patterns);
+
+    const owned_setup_files = try setup_files.toOwnedSlice(allocator);
+
+    return .{
+        .dry_run = dry_run,
+        .patterns = owned_patterns,
+        .setup_files = owned_setup_files,
+    };
 }
 
 fn runSimpleScript(allocator: Allocator, io: std.Io, script_path: []const u8, extra_args: []const []const u8) !u8 {

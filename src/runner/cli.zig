@@ -4,11 +4,8 @@ pub const ParseError = error{
     UnknownCommand,
 };
 
-const default_test_patterns = [_][]const u8{"tests"};
-
 pub const TestCommand = struct {
-    patterns: []const []const u8,
-    dry_run: bool,
+    args: []const []const u8,
 };
 
 pub const ArgsCommand = struct {
@@ -35,18 +32,7 @@ pub fn parse(args: []const []const u8) ParseError!ParsedCommand {
     }
 
     if (std.mem.eql(u8, name, "test")) {
-        var dry_run = false;
-        var first_pattern: usize = 1;
-        while (first_pattern < args.len) : (first_pattern += 1) {
-            if (std.mem.eql(u8, args[first_pattern], "--dry-run")) {
-                dry_run = true;
-                continue;
-            }
-            break;
-        }
-
-        const patterns = if (first_pattern < args.len) args[first_pattern..] else default_test_patterns[0..];
-        return .{ .test_cmd = .{ .patterns = patterns, .dry_run = dry_run } };
+        return .{ .test_cmd = .{ .args = args[1..] } };
     }
 
     if (std.mem.eql(u8, name, "wpt")) {
@@ -69,8 +55,8 @@ pub fn printHelp() void {
         \\zig-dom CLI (M1 skeleton)
         \\
         \\Usage:
-        \\  zig build run -- help
-        \\  zig build run -- test [--dry-run] [patterns...]
+            \\  zig build run -- help
+            \\  zig build run -- test [--setup <file>]... [--dry-run] [patterns...]
         \\  zig build run -- wpt [args...]
         \\  zig build run -- wpt-sync
         \\  zig build run -- wpt-manifest [args...]
@@ -101,9 +87,23 @@ test "parse test command with defaults" {
 
     switch (command) {
         .test_cmd => |test_command| {
-            try std.testing.expect(test_command.patterns.len == 1);
-            try std.testing.expectEqualStrings("tests", test_command.patterns[0]);
-            try std.testing.expect(!test_command.dry_run);
+            try std.testing.expect(test_command.args.len == 0);
+        },
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "parse test command keeps raw args" {
+    const command = try parse(&.{ "test", "--setup", "setup.ts", "--dry-run", "tests/runner" });
+    try std.testing.expect(std.meta.activeTag(command) == .test_cmd);
+
+    switch (command) {
+        .test_cmd => |test_command| {
+            try std.testing.expect(test_command.args.len == 4);
+            try std.testing.expectEqualStrings("--setup", test_command.args[0]);
+            try std.testing.expectEqualStrings("setup.ts", test_command.args[1]);
+            try std.testing.expectEqualStrings("--dry-run", test_command.args[2]);
+            try std.testing.expectEqualStrings("tests/runner", test_command.args[3]);
         },
         else => return error.TestUnexpectedResult,
     }

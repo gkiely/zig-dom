@@ -29,6 +29,7 @@ const bun_test_specifier = "bun:test";
 const react_specifier = "react";
 const react_dom_client_specifier = "react-dom/client";
 const testing_library_specifier = "@testing-library/react";
+const vanilla_extract_css_specifier = "@vanilla-extract/css";
 
 const bun_test_shim_source =
     \\export const test = globalThis.test;
@@ -62,6 +63,15 @@ const testing_library_shim_source =
     \\export const fireEvent = globalThis.fireEvent;
     \\const api = { render, screen, fireEvent };
     \\export default api;
+;
+
+const vanilla_extract_css_shim_source =
+    \\let __zigStyleCounter = 0;
+    \\export function style(_rules) {
+    \\  __zigStyleCounter += 1;
+    \\  return "ve-" + String(__zigStyleCounter);
+    \\}
+    \\export default { style };
 ;
 
 const max_module_source_bytes = 4 * 1024 * 1024;
@@ -151,6 +161,18 @@ const ModuleLoaderState = struct {
             return self.allocator.dupe(u8, module_name);
         }
 
+        if (std.mem.startsWith(u8, module_name, "~/")) {
+            return self.resolveProjectAlias(module_base_name, "src", module_name[2..]);
+        }
+
+        if (std.mem.startsWith(u8, module_name, "@/shared/")) {
+            return self.resolveProjectAlias(module_base_name, "shared", module_name[9..]);
+        }
+
+        if (std.mem.startsWith(u8, module_name, "@/")) {
+            return self.resolveProjectAlias(module_base_name, "", module_name[2..]);
+        }
+
         if (std.fs.path.isAbsolute(module_name)) {
             return self.resolveAbsolutePath(module_name);
         }
@@ -215,10 +237,15 @@ const ModuleLoaderState = struct {
         defer seen.deinit();
 
         const entry = try self.allocator.dupe(u8, entry_module_id);
-        errdefer self.allocator.free(entry);
-
-        try queue.append(self.allocator, entry);
-        try seen.put(entry, {});
+        queue.append(self.allocator, entry) catch |err| {
+            self.allocator.free(entry);
+            return err;
+        };
+        seen.put(entry, {}) catch |err| {
+            _ = queue.pop();
+            self.allocator.free(entry);
+            return err;
+        };
 
         var index: usize = 0;
         while (index < queue.items.len) : (index += 1) {
@@ -241,7 +268,11 @@ const ModuleLoaderState = struct {
             }
 
             for (specifiers) |specifier| {
-                const resolved = try self.normalizeSpecifier(module_id, specifier);
+                const resolved = self.normalizeSpecifier(module_id, specifier) catch |err| switch (err) {
+                    // External package specifiers may be type-only imports erased by transform.
+                    error.UnsupportedExternalModule => continue,
+                    else => return err,
+                };
                 if (shimModuleSource(resolved) != null) {
                     self.allocator.free(resolved);
                     continue;
@@ -325,6 +356,15 @@ const ModuleLoaderState = struct {
             return candidate;
         }
 
+        if (std.mem.eql(u8, std.fs.path.extension(candidate), ".css")) {
+            const css_ts_candidate = try std.fmt.allocPrint(self.allocator, "{s}.ts", .{candidate});
+            if (self.pathIsSupportedFile(css_ts_candidate)) {
+                self.allocator.free(candidate);
+                return css_ts_candidate;
+            }
+            self.allocator.free(css_ts_candidate);
+        }
+
         if (std.fs.path.extension(candidate).len > 0) {
             return error.ModuleNotFound;
         }
@@ -357,6 +397,50 @@ const ModuleLoaderState = struct {
         }
 
         return null;
+    }
+
+    fn resolveProjectAlias(
+        self: *ModuleLoaderState,
+        module_base_name: []const u8,
+        project_subdir: []const u8,
+        specifier_suffix: []const u8,
+    ) ![]u8 {
+        if (!std.fs.path.isAbsolute(module_base_name)) {
+            return error.ModuleNotFound;
+        }
+
+        var current_dir = try self.allocator.dupe(u8, std.fs.path.dirname(module_base_name) orelse return error.ModuleNotFound);
+        defer self.allocator.free(current_dir);
+
+        while (true) {
+            if (self.directoryContainsFile(current_dir, "tsconfig.json") or self.directoryContainsFile(current_dir, "package.json")) {
+                const candidate = if (project_subdir.len > 0)
+                    try std.fs.path.resolve(self.allocator, &.{ current_dir, project_subdir, specifier_suffix })
+                else
+                    try std.fs.path.resolve(self.allocator, &.{ current_dir, specifier_suffix });
+                errdefer self.allocator.free(candidate);
+                return self.resolvePathWithProbing(candidate);
+            }
+
+            const parent = std.fs.path.dirname(current_dir) orelse break;
+            if (parent.len == current_dir.len) {
+                break;
+            }
+
+            const next_dir = try self.allocator.dupe(u8, parent);
+            self.allocator.free(current_dir);
+            current_dir = next_dir;
+        }
+
+        return error.ModuleNotFound;
+    }
+
+    fn directoryContainsFile(self: *ModuleLoaderState, dir_path: []const u8, basename: []const u8) bool {
+        const candidate = std.fs.path.resolve(self.allocator, &.{ dir_path, basename }) catch return false;
+        defer self.allocator.free(candidate);
+
+        const stat = std.Io.Dir.cwd().statFile(self.io, candidate, .{}) catch return false;
+        return stat.kind == .file;
     }
 
     fn pathIsSupportedFile(self: *ModuleLoaderState, path: []const u8) bool {
@@ -678,7 +762,7 @@ fn isIdentifierChar(ch: u8) bool {
     return std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '$';
 }
 
-pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8) !Summary {
+pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8, setup_paths: []const []const u8) !Summary {
     var results: std.ArrayList(FileResult) = .empty;
     errdefer {
         for (results.items) |*item| {
@@ -697,7 +781,7 @@ pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8) !Summary 
     };
 
     for (paths) |path| {
-        var file_result = try runSingleFile(allocator, io, path);
+        var file_result = try runSingleFile(allocator, io, path, setup_paths);
         errdefer file_result.deinit(allocator);
 
         totals.total_passed += file_result.passed;
@@ -713,11 +797,29 @@ pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8) !Summary 
     return totals;
 }
 
-fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8) !FileResult {
+fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths: []const []const u8) !FileResult {
     const entry_module_id = canonicalizePath(allocator, io, path) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
     defer allocator.free(entry_module_id);
+
+    var setup_module_ids: std.ArrayList([]u8) = .empty;
+    defer {
+        for (setup_module_ids.items) |setup_module_id| {
+            allocator.free(setup_module_id);
+        }
+        setup_module_ids.deinit(allocator);
+    }
+
+    for (setup_paths) |setup_path| {
+        const setup_module_id = canonicalizePath(allocator, io, setup_path) catch |err| {
+            return collectionFailureFromError(allocator, path, "collection failed", err);
+        };
+        setup_module_ids.append(allocator, setup_module_id) catch |err| {
+            allocator.free(setup_module_id);
+            return err;
+        };
+    }
 
     var vm = try Runtime.init(allocator);
     defer vm.deinit();
@@ -729,11 +831,27 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8) !FileResult
     var module_loader_state = ModuleLoaderState.init(allocator, io);
     defer module_loader_state.deinit();
 
+    vm.setModuleLoaderFunc(ModuleLoaderState, &module_loader_state, moduleNormalize, moduleLoad);
+
+    for (setup_module_ids.items) |setup_module_id| {
+        module_loader_state.preloadEntryGraph(setup_module_id) catch |err| {
+            return collectionFailureFromError(allocator, path, "collection failed", err);
+        };
+    }
+
     module_loader_state.preloadEntryGraph(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
 
-    vm.setModuleLoaderFunc(ModuleLoaderState, &module_loader_state, moduleNormalize, moduleLoad);
+    for (setup_module_ids.items) |setup_module_id| {
+        const setup_source = module_loader_state.loadModuleSource(setup_module_id) catch |err| {
+            return collectionFailureFromError(allocator, path, "collection failed", err);
+        };
+
+        vm.evalModule(setup_module_id, setup_source) catch |err| {
+            return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
+        };
+    }
 
     const entry_source = module_loader_state.loadModuleSource(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
@@ -919,6 +1037,10 @@ fn shimModuleSource(module_name: []const u8) ?[]const u8 {
         return testing_library_shim_source;
     }
 
+    if (std.mem.eql(u8, module_name, vanilla_extract_css_specifier)) {
+        return vanilla_extract_css_shim_source;
+    }
+
     return null;
 }
 
@@ -1031,5 +1153,6 @@ test "shimModuleSource resolves known shims" {
     try std.testing.expect(shimModuleSource("react") != null);
     try std.testing.expect(shimModuleSource("react-dom/client") != null);
     try std.testing.expect(shimModuleSource("@testing-library/react") != null);
+    try std.testing.expect(shimModuleSource("@vanilla-extract/css") != null);
     try std.testing.expect(shimModuleSource("not-a-shim") == null);
 }

@@ -13,6 +13,22 @@ zig build run -- wpt --manifest wpt/manifest/dom-core.json
 
 The first version should run `.js`, `.ts`, `.jsx`, and `.tsx` tests plus a useful subset of DOM and WPT `testharness.js` tests. React Testing Library, coverage, snapshots, and full Jest compatibility are later milestones.
 
+## Compatibility Todo (2026-05-06)
+
+- Passing files:
+  - `../youneedawiki/plugins/replaceLogs.test.ts`
+  - `../youneedawiki/src/elements/PoweredBy/PoweredBy.test.tsx`
+- Current first blocker:
+  - `../youneedawiki/src/elements/Buttons/ViewInDrive.test.tsx` fails during collection with `module resolution failed`.
+- Missing API / capability currently blocking next gate:
+  - Bare external package resolution/shimming for ESM imports from `node_modules` (example: `@r2wc/react-to-web-component`, then likely additional package imports in the same dependency chain).
+- Local fixture added for related runner support:
+  - Setup/preload fixtures proving setup execution order and setup module loading path:
+    - `tests/runner/setup-preload.test.ts`
+    - `tests/runner/fixtures/setup/install-globals.ts`
+    - `tests/runner/fixtures/setup/extend-expect.ts`
+    - `tests/runner/fixtures/setup/shared.ts`
+
 ## Current Repo Facts
 
 - The current package is a Bun-only JS wrapper over a Zig native library.
