@@ -50,6 +50,16 @@ const OnLoadHook = struct {
     }
 };
 
+pub const OnLoadResult = struct {
+    contents: []u8,
+    loader: ?[]u8,
+
+    pub fn deinit(self: *OnLoadResult, allocator: Allocator) void {
+        allocator.free(self.contents);
+        if (self.loader) |loader| allocator.free(loader);
+    }
+};
+
 pub const HostMocks = struct {
     allocator: Allocator,
     rt: *quickjs.Runtime,
@@ -85,6 +95,73 @@ pub const HostMocks = struct {
         }
         self.mock_states.deinit(self.allocator);
         self.allocator.destroy(self);
+    }
+
+    pub fn hasOnLoadHooks(self: *HostMocks) bool {
+        return self.on_load_hooks.items.len > 0;
+    }
+
+    pub fn applyOnLoad(self: *HostMocks, path: []const u8) HostMocksError!?OnLoadResult {
+        if (self.on_load_hooks.items.len == 0) return null;
+
+        const ctx = self.ctx;
+        const path_value = quickjs.Value.initStringLen(ctx, path);
+        if (path_value.isException()) return error.JSError;
+        defer path_value.deinit(ctx);
+
+        for (self.on_load_hooks.items) |hook| {
+            const test_fn = hook.filter.getPropertyStr(ctx, "test");
+            defer test_fn.deinit(ctx);
+            if (!test_fn.isFunction(ctx)) continue;
+
+            var test_args = [_]quickjs.Value{path_value.dup(ctx)};
+            defer test_args[0].deinit(ctx);
+            const matched = test_fn.call(ctx, hook.filter, &test_args);
+            defer matched.deinit(ctx);
+            if (matched.isException()) return error.JSError;
+            if (!(matched.toBool(ctx) catch return error.JSError)) continue;
+
+            const request = quickjs.Value.initObject(ctx);
+            if (request.isException()) return error.JSError;
+            defer request.deinit(ctx);
+            request.setPropertyStr(ctx, "path", path_value.dup(ctx)) catch return error.JSError;
+
+            var call_args = [_]quickjs.Value{request.dup(ctx)};
+            defer call_args[0].deinit(ctx);
+            var result = hook.callback.call(ctx, quickjs.Value.undefined, &call_args);
+            defer result.deinit(ctx);
+            if (result.isException()) return error.JSError;
+            if (result.isPromise()) {
+                const awaited = awaitPromise(ctx, self.rt, result) catch return error.JSError;
+                result.deinit(ctx);
+                result = awaited;
+            }
+
+            const contents_value = result.getPropertyStr(ctx, "contents");
+            defer contents_value.deinit(ctx);
+            if (contents_value.isException()) return error.JSError;
+            if (contents_value.isUndefined() or contents_value.isNull()) continue;
+
+            const contents_text = contents_value.toCStringLen(ctx) orelse return error.JSError;
+            defer ctx.freeCString(contents_text.ptr);
+            const contents = self.allocator.dupe(u8, contents_text.ptr[0..contents_text.len]) catch return error.OutOfMemory;
+            errdefer self.allocator.free(contents);
+
+            const loader_value = result.getPropertyStr(ctx, "loader");
+            defer loader_value.deinit(ctx);
+            if (loader_value.isException()) return error.JSError;
+            const loader = if (!loader_value.isUndefined() and !loader_value.isNull()) blk: {
+                const loader_text = loader_value.toCStringLen(ctx) orelse return error.JSError;
+                defer ctx.freeCString(loader_text.ptr);
+                if (loader_text.len == 0) break :blk null;
+                break :blk self.allocator.dupe(u8, loader_text.ptr[0..loader_text.len]) catch return error.OutOfMemory;
+            } else null;
+            errdefer if (loader) |owned| self.allocator.free(owned);
+
+            return .{ .contents = contents, .loader = loader };
+        }
+
+        return null;
     }
 
     pub fn destroyAfterRuntimeFree(self: *HostMocks) void {

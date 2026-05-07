@@ -12,6 +12,7 @@ var host_io: ?std.Io = null;
 
 pub const Context = quickjs.Context;
 pub const ModuleDef = quickjs.ModuleDef;
+pub const OnLoadResult = host_mocks.OnLoadResult;
 
 pub const RuntimeError = error{
     OutOfMemory,
@@ -242,6 +243,15 @@ pub const Runtime = struct {
     pub fn executePendingJob(self: *Runtime) RuntimeError!bool {
         const maybe_ctx = self.rt.executePendingJob() catch return error.JobExecutionFailed;
         return maybe_ctx != null;
+    }
+
+    pub fn loadFromOnLoad(self: *Runtime, path: []const u8) RuntimeError!?OnLoadResult {
+        const mocks = self.host_mocks_state orelse return null;
+        if (!mocks.hasOnLoadHooks()) return null;
+        return mocks.applyOnLoad(path) catch |err| switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+            error.JSError => error.EvaluationFailed,
+        };
     }
 
     pub fn getGlobalBool(self: *Runtime, name: []const u8) RuntimeError!bool {

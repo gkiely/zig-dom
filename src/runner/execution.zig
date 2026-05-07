@@ -408,7 +408,6 @@ const ModuleLoaderState = struct {
     io: std.Io,
     runtime: ?*Runtime,
     loaded_modules: std.StringHashMap(*ModuleDef),
-    transformed_sources: std.StringHashMap([]u8),
     mock_module_sources: std.StringHashMap([]u8),
     path_alias_root: ?[]u8,
     path_aliases: std.ArrayList(PathAlias),
@@ -419,7 +418,6 @@ const ModuleLoaderState = struct {
             .io = io,
             .runtime = null,
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
-            .transformed_sources = std.StringHashMap([]u8).init(allocator),
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
             .path_alias_root = null,
             .path_aliases = .empty,
@@ -428,13 +426,6 @@ const ModuleLoaderState = struct {
 
     fn deinit(self: *ModuleLoaderState) void {
         self.clearPathAliases();
-
-        var output_iterator = self.transformed_sources.iterator();
-        while (output_iterator.next()) |entry| {
-            self.allocator.free(entry.key_ptr.*);
-            self.allocator.free(entry.value_ptr.*);
-        }
-        self.transformed_sources.deinit();
 
         var mock_iterator = self.mock_module_sources.iterator();
         while (mock_iterator.next()) |entry| {
@@ -532,19 +523,10 @@ const ModuleLoaderState = struct {
             return try source.toOwnedSlice(self.allocator);
         }
 
-        if (self.transformed_sources.get(module_id)) |transformed| {
-            return self.allocator.dupe(u8, transformed);
-        }
-
         if (std.c.getenv("ZIG_DOM_TRANSFORM_DEBUG") != null) {
             std.debug.print("[zig-dom transform] {s} {s}\n", .{ default_loader, module_id });
         }
-        const transformed = try yuku_transform.transformFile(self.allocator, self.io, module_id, default_loader);
-        errdefer self.allocator.free(transformed);
-        const key = try self.allocator.dupe(u8, module_id);
-        errdefer self.allocator.free(key);
-        try self.transformed_sources.put(key, transformed);
-        return self.allocator.dupe(u8, transformed);
+        return yuku_transform.transformFile(self.allocator, self.io, module_id, default_loader);
     }
 
     fn loadCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
@@ -795,7 +777,7 @@ const ModuleLoaderState = struct {
         }
 
         const runtime = self.runtime orelse return null;
-        var hook_result = (try self.invokeOnLoad(runtime, module_id)) orelse return null;
+        var hook_result = (try runtime.loadFromOnLoad(module_id)) orelse return null;
         defer hook_result.deinit(self.allocator);
 
         const effective_loader = hook_result.loader orelse default_loader;
@@ -816,121 +798,6 @@ const ModuleLoaderState = struct {
         }
 
         return error.UnsupportedTransformLoader;
-    }
-
-    const OnLoadResult = struct {
-        contents: []u8,
-        loader: ?[]u8,
-
-        fn deinit(self: *OnLoadResult, allocator: Allocator) void {
-            allocator.free(self.contents);
-            if (self.loader) |loader| {
-                allocator.free(loader);
-            }
-        }
-    };
-
-    fn invokeOnLoad(self: *ModuleLoaderState, runtime: *Runtime, module_id: []const u8) !?OnLoadResult {
-        const module_id_literal = try escapeJsSingleQuotedString(self.allocator, module_id);
-        defer self.allocator.free(module_id_literal);
-
-        const request_prefix =
-            \\globalThis.__zigOnLoadDone = false;
-            \\globalThis.__zigOnLoadError = "";
-            \\globalThis.__zigOnLoadResult = "";
-            \\Promise.resolve()
-            \\  .then(() => {
-            \\    const apply = globalThis.__zigRunnerApplyOnLoad;
-            \\    if (typeof apply !== "function") {
-            \\      return null;
-            \\    }
-            \\    return apply('
-        ;
-        const request_suffix =
-            \\');
-            \\  })
-            \\  .then((value) => {
-            \\    if (!value || typeof value !== "object" || !Object.prototype.hasOwnProperty.call(value, "contents")) {
-            \\      globalThis.__zigOnLoadResult = "";
-            \\    } else {
-            \\      const loader = value.loader == null ? null : String(value.loader);
-            \\      const contents = String(value.contents);
-            \\      globalThis.__zigOnLoadResult = JSON.stringify({ loader, contents });
-            \\    }
-            \\    globalThis.__zigOnLoadDone = true;
-            \\  })
-            \\  .catch((error) => {
-            \\    const details = error && error.stack ? String(error.stack) : String(error);
-            \\    globalThis.__zigOnLoadError = details;
-            \\    globalThis.__zigOnLoadDone = true;
-            \\  });
-        ;
-
-        const request_source = try std.mem.concat(self.allocator, u8, &.{ request_prefix, module_id_literal, request_suffix });
-        defer self.allocator.free(request_source);
-
-        try runtime.evalScript("<zig-onload-hook>", request_source);
-
-        const timeout_ms: i64 = 10_000;
-        const started = std.Io.Clock.Timestamp.now(self.io, .awake);
-        while (!(runtime.getGlobalBool("__zigOnLoadDone") catch false)) {
-            const elapsed = started.untilNow(self.io).raw.toMilliseconds();
-            if (elapsed > timeout_ms) {
-                return error.ModuleLoaderHookTimedOut;
-            }
-
-            if (runtime.isJobPending()) {
-                _ = try runtime.executePendingJob();
-                continue;
-            }
-
-            return error.ModuleLoaderHookFailed;
-        }
-
-        const onload_error = runtime.getGlobalStringDup("__zigOnLoadError") catch try self.allocator.dupe(u8, "");
-        defer self.allocator.free(onload_error);
-        if (onload_error.len > 0) {
-            return error.ModuleLoaderHookFailed;
-        }
-
-        const onload_result_json = runtime.getGlobalStringDup("__zigOnLoadResult") catch try self.allocator.dupe(u8, "");
-        defer self.allocator.free(onload_result_json);
-        if (onload_result_json.len == 0) {
-            return null;
-        }
-
-        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, onload_result_json, .{});
-        defer parsed.deinit();
-        if (parsed.value != .object) {
-            return null;
-        }
-
-        const contents_value = parsed.value.object.get("contents") orelse return null;
-        if (contents_value != .string) {
-            return null;
-        }
-
-        const contents = try self.allocator.dupe(u8, contents_value.string);
-        errdefer self.allocator.free(contents);
-
-        const loader = blk: {
-            const loader_value = parsed.value.object.get("loader") orelse break :blk null;
-            if (loader_value != .string) {
-                break :blk null;
-            }
-
-            if (loader_value.string.len == 0) {
-                break :blk null;
-            }
-
-            break :blk try self.allocator.dupe(u8, loader_value.string);
-        };
-        errdefer if (loader) |owned| self.allocator.free(owned);
-
-        return .{
-            .contents = contents,
-            .loader = loader,
-        };
     }
 
     fn transformOnLoadContents(

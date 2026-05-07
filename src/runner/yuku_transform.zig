@@ -36,7 +36,7 @@ pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u
         .preserve;
 
     var result = parser.codegen.strip(allocator, &tree, .{
-        .format = .pretty,
+        .format = .compact,
         .quotes = .double,
         .final_newline = true,
         .jsx_runtime = jsx_runtime,

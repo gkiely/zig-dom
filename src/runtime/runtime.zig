@@ -23,6 +23,7 @@ pub const Exception = struct {
 
 pub const ModuleContext = quickjs_ng.Context;
 pub const ModuleDef = quickjs_ng.ModuleDef;
+pub const OnLoadResult = quickjs_ng.OnLoadResult;
 
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
@@ -63,6 +64,10 @@ pub const Runtime = struct {
 
     pub fn executePendingJob(self: *Runtime) RuntimeError!bool {
         return self.adapter.executePendingJob();
+    }
+
+    pub fn loadFromOnLoad(self: *Runtime, path: []const u8) RuntimeError!?OnLoadResult {
+        return self.adapter.loadFromOnLoad(path);
     }
 
     pub fn getGlobalBool(self: *Runtime, name: []const u8) RuntimeError!bool {
