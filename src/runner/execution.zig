@@ -32,6 +32,28 @@ const collection_flush_source =
     \\});
 ;
 
+const setup_dom_probe_begin_source =
+    \\globalThis.__zigSetupDocumentNodeNameHidden = false;
+    \\try {
+    \\  if (globalThis.document && globalThis.document.nodeName) {
+    \\    Object.defineProperty(globalThis.document, "nodeName", {
+    \\      value: undefined,
+    \\      configurable: true
+    \\    });
+    \\    globalThis.__zigSetupDocumentNodeNameHidden = true;
+    \\  }
+    \\} catch {}
+;
+
+const setup_dom_probe_end_source =
+    \\try {
+    \\  if (globalThis.__zigSetupDocumentNodeNameHidden && globalThis.document) {
+    \\    delete globalThis.document.nodeName;
+    \\  }
+    \\} catch {}
+    \\globalThis.__zigSetupDocumentNodeNameHidden = false;
+;
+
 const bun_specifier = "bun";
 const bun_test_specifier = "bun:test";
 const node_url_specifier = "url";
@@ -68,10 +90,10 @@ const zig_dom_index_specifier = "zig-dom/index";
 const zig_dom_global_registrator_specifier = "zig-dom/global-registrator";
 const zig_dom_global_registrar_specifier = "zig-dom/global-registrar";
 const react_specifier = "react";
+const react_dom_specifier = "react-dom";
 const react_dom_client_specifier = "react-dom/client";
+const react_dom_test_utils_specifier = "react-dom/test-utils";
 const testing_library_specifier = "@testing-library/react";
-const mui_icons_material_specifier = "@mui/icons-material";
-const mui_create_svg_icon_specifier = "@mui/material/utils/createSvgIcon";
 const graphemesplit_specifier = "graphemesplit";
 const use_sync_external_store_specifier = "use-sync-external-store";
 const use_sync_external_store_with_selector_specifier = "use-sync-external-store/with-selector";
@@ -137,15 +159,23 @@ const node_fs_shim_source =
     \\function unsupported(name) {
     \\  throw new Error(`node:fs.${name} is not implemented in this runner`);
     \\}
+    \\function resolvePath(path) {
+    \\  const raw = String(path);
+    \\  if (raw.startsWith("/")) return raw;
+    \\  const cwd = globalThis.process && typeof globalThis.process.cwd === "function" ? globalThis.process.cwd() : "";
+    \\  return cwd ? `${cwd.replace(/\/+$/, "")}/${raw}` : raw;
+    \\}
     \\export function readFileSync(path, encoding = "utf8") {
     \\  if (encoding !== "utf8" && encoding !== "utf-8") {
     \\    unsupported("readFileSync encoding " + encoding);
     \\  }
-    \\  return globalThis.__zigReadFileSync(String(path), encoding);
+    \\  return globalThis.__zigReadFileSync(resolvePath(path), encoding);
     \\}
     \\export function writeFileSync() { unsupported("writeFileSync"); }
+    \\export function mkdirSync() { unsupported("mkdirSync"); }
+    \\export function readdirSync() { unsupported("readdirSync"); }
     \\export function existsSync() { return false; }
-    \\export default { readFileSync, writeFileSync, existsSync };
+    \\export default { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync };
 ;
 
 const node_http_shim_source =
@@ -353,81 +383,36 @@ const react_dom_client_shim_source =
     \\export default Client;
 ;
 
+const react_dom_shim_source =
+    \\const Client = globalThis.ReactDOMClient;
+    \\export function createPortal(children) { return children; }
+    \\export function flushSync(callback) { return typeof callback === "function" ? callback() : undefined; }
+    \\export function unmountComponentAtNode(container) {
+    \\  if (container && typeof container.replaceChildren === "function") container.replaceChildren();
+    \\  else if (container) container.innerHTML = "";
+    \\  return true;
+    \\}
+    \\export function render(element, container) {
+    \\  const root = Client.createRoot(container);
+    \\  root.render(element);
+    \\  return root;
+    \\}
+    \\export default { createPortal, flushSync, unmountComponentAtNode, render };
+;
+
+const react_dom_test_utils_shim_source =
+    \\export function act(callback) {
+    \\  return typeof callback === "function" ? callback() : undefined;
+    \\}
+    \\export default { act };
+;
+
 const testing_library_shim_source =
     \\export const render = globalThis.render;
     \\export const screen = globalThis.screen;
     \\export const fireEvent = globalThis.fireEvent;
     \\const api = { render, screen, fireEvent };
     \\export default api;
-;
-
-const mui_icons_material_shim_source =
-    \\const React = globalThis.React;
-    \\function icon(displayName) {
-    \\  return function Icon(props = {}) {
-    \\    const { titleAccess, htmlColor, children, ...rest } = props;
-    \\    return React.createElement("svg", rest, [
-    \\      React.createElement("title", { key: "title" }, titleAccess || displayName),
-    \\      children
-    \\    ]);
-    \\  };
-    \\}
-    \\export const Add = icon("Add");
-    \\export const AddLinkOutlined = icon("AddLinkOutlined");
-    \\export const AddToDrive = icon("AddToDrive");
-    \\export const ArrowDropDown = icon("ArrowDropDown");
-    \\export const AutoAwesome = icon("AutoAwesome");
-    \\export const Autorenew = icon("Autorenew");
-    \\export const Check = icon("Check");
-    \\export const CheckCircleOutline = icon("CheckCircleOutline");
-    \\export const Checklist = icon("Checklist");
-    \\export const ChevronRight = icon("ChevronRight");
-    \\export const Close = icon("Close");
-    \\export const CloudDoneOutlined = icon("CloudDoneOutlined");
-    \\export const ContentCopy = icon("ContentCopy");
-    \\export const CreateNewFolderOutlined = icon("CreateNewFolderOutlined");
-    \\export const DoneAll = icon("DoneAll");
-    \\export const DoNotDisturb = icon("DoNotDisturb");
-    \\export const Edit = icon("Edit");
-    \\export const ErrorOutline = icon("ErrorOutline");
-    \\export const ExpandMore = icon("ExpandMore");
-    \\export const Folder = icon("Folder");
-    \\export const Home = icon("Home");
-    \\export const InfoOutlined = icon("InfoOutlined");
-    \\export const LinkOutlined = icon("LinkOutlined");
-    \\export const Logout = icon("Logout");
-    \\export const MailOutline = icon("MailOutline");
-    \\export const ManageAccounts = icon("ManageAccounts");
-    \\export const Menu = icon("Menu");
-    \\export const MoreHoriz = icon("MoreHoriz");
-    \\export const MoreVert = icon("MoreVert");
-    \\export const OpenInNew = icon("OpenInNew");
-    \\export const Person = icon("Person");
-    \\export const PersonAddAltOutlined = icon("PersonAddAltOutlined");
-    \\export const RestartAlt = icon("RestartAlt");
-    \\export const Schedule = icon("Schedule");
-    \\export const Search = icon("Search");
-    \\export const SearchOff = icon("SearchOff");
-    \\export const SettingsOutlined = icon("SettingsOutlined");
-    \\export const SupportAgent = icon("SupportAgent");
-    \\export const TaskAlt = icon("TaskAlt");
-    \\export const Timeline = icon("Timeline");
-    \\export const UnfoldMore = icon("UnfoldMore");
-    \\export const VisibilityOutlined = icon("VisibilityOutlined");
-;
-
-const mui_create_svg_icon_shim_source =
-    \\const React = globalThis.React;
-    \\export default function createSvgIcon(node, displayName) {
-    \\  return function SvgIcon(props = {}) {
-    \\    const { titleAccess, htmlColor, children, ...rest } = props;
-    \\    return React.createElement("svg", rest, [
-    \\      React.createElement("title", { key: "title" }, titleAccess || displayName),
-    \\      node,
-    \\      children
-    \\    ]);
-    \\  };
-    \\}
 ;
 
 const graphemesplit_shim_source =
@@ -588,10 +573,6 @@ const ModuleLoaderState = struct {
 
         if (self.mock_module_sources.contains(module_name)) {
             return std.fmt.allocPrint(self.allocator, "__zig_mock__/{s}", .{module_name});
-        }
-
-        if (preferFallbackShimBeforeNodeResolution(module_name)) {
-            return self.allocator.dupe(u8, module_name);
         }
 
         if (try self.resolvePathAlias(module_base_name, module_name)) |resolved| {
@@ -950,6 +931,9 @@ const ModuleLoaderState = struct {
 
         const effective_loader = hook_result.loader orelse default_loader;
         if (std.mem.eql(u8, effective_loader, "js")) {
+            if (looksLikeJsxSource(hook_result.contents)) {
+                return try self.transformOnLoadContents(module_id, "jsx", hook_result.contents);
+            }
             return try self.allocator.dupe(u8, hook_result.contents);
         }
 
@@ -1423,13 +1407,13 @@ fn escapeJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
             }
         }
 
-        if (jsonObjectString(root.object, "module")) |entry| {
+        if (jsonObjectString(root.object, "main")) |entry| {
             if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
                 return resolved;
             }
         }
 
-        if (jsonObjectString(root.object, "main")) |entry| {
+        if (jsonObjectString(root.object, "module")) |entry| {
             if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
                 return resolved;
             }
@@ -2437,6 +2421,14 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
 
     vm.setModuleLoaderFunc(ModuleLoaderState, &module_loader_state, moduleNormalize, moduleLoad);
 
+    const process_root = if (setup_module_ids.items.len > 0)
+        (std.fs.path.dirname(setup_module_ids.items[0]) orelse std.fs.path.dirname(entry_module_id) orelse ".")
+    else
+        (std.fs.path.dirname(entry_module_id) orelse ".");
+    evalRunnerProcessGlobals(allocator, &vm, process_root, entry_module_id) catch |err| {
+        return failureFromRuntimeException(allocator, path, "failed to initialize process globals", err, &vm);
+    };
+
     for (setup_module_ids.items) |setup_module_id| {
         module_loader_state.preloadEntryGraph(setup_module_id) catch |err| {
             return collectionFailureFromError(allocator, path, "collection failed", err);
@@ -2448,8 +2440,16 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             return collectionFailureFromError(allocator, path, "collection failed", err);
         };
 
+        vm.evalScript("<zig-setup-dom-probe-begin>", setup_dom_probe_begin_source) catch |err| {
+            return failureFromRuntimeException(allocator, path, "failed to prepare setup environment", err, &vm);
+        };
+
         vm.evalModule(setup_module_id, setup_source) catch |err| {
+            vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch {};
             return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
+        };
+        vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch |err| {
+            return failureFromRuntimeException(allocator, path, "failed to restore setup environment", err, &vm);
         };
 
         while (vm.isJobPending()) {
@@ -2622,6 +2622,45 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             break :blk null;
         },
     };
+}
+
+fn evalRunnerProcessGlobals(allocator: Allocator, vm: *Runtime, root: []const u8, entry_path: []const u8) !void {
+    const escaped_root = try escapeProcessJsSingleQuotedString(allocator, root);
+    defer allocator.free(escaped_root);
+    const escaped_entry = try escapeProcessJsSingleQuotedString(allocator, entry_path);
+    defer allocator.free(escaped_entry);
+
+    const source = try std.mem.concat(allocator, u8, &.{
+        "globalThis.process = globalThis.process || {};",
+        "globalThis.process.env = globalThis.process.env || {};",
+        "globalThis.process.cwd = function cwd() { return '",
+        escaped_root,
+        "'; };",
+        "globalThis.process.argv = ['zig-dom', 'test', '",
+        escaped_entry,
+        "'];",
+    });
+    defer allocator.free(source);
+
+    try vm.evalScript("<zig-process-globals>", source);
+}
+
+fn escapeProcessJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
+    var builder: std.ArrayList(u8) = .empty;
+    errdefer builder.deinit(allocator);
+
+    for (text) |ch| {
+        switch (ch) {
+            '\\' => try builder.appendSlice(allocator, "\\\\"),
+            '\'' => try builder.appendSlice(allocator, "\\'"),
+            '\n' => try builder.appendSlice(allocator, "\\n"),
+            '\r' => try builder.appendSlice(allocator, "\\r"),
+            '\t' => try builder.appendSlice(allocator, "\\t"),
+            else => try builder.append(allocator, ch),
+        }
+    }
+
+    return builder.toOwnedSlice(allocator);
 }
 
 fn moduleNormalize(
@@ -2803,20 +2842,20 @@ fn fallbackShimModuleSource(module_name: []const u8) ?[]const u8 {
         return react_shim_source;
     }
 
+    if (std.mem.eql(u8, module_name, react_dom_specifier)) {
+        return react_dom_shim_source;
+    }
+
     if (std.mem.eql(u8, module_name, react_dom_client_specifier)) {
         return react_dom_client_shim_source;
     }
 
+    if (std.mem.eql(u8, module_name, react_dom_test_utils_specifier)) {
+        return react_dom_test_utils_shim_source;
+    }
+
     if (std.mem.eql(u8, module_name, testing_library_specifier)) {
         return testing_library_shim_source;
-    }
-
-    if (std.mem.eql(u8, module_name, mui_icons_material_specifier)) {
-        return mui_icons_material_shim_source;
-    }
-
-    if (std.mem.eql(u8, module_name, mui_create_svg_icon_specifier)) {
-        return mui_create_svg_icon_shim_source;
     }
 
     if (std.mem.eql(u8, module_name, graphemesplit_specifier)) {
@@ -2843,11 +2882,6 @@ fn fallbackShimModuleSource(module_name: []const u8) ?[]const u8 {
     return null;
 }
 
-fn preferFallbackShimBeforeNodeResolution(module_name: []const u8) bool {
-    return std.mem.eql(u8, module_name, mui_icons_material_specifier) or
-        std.mem.eql(u8, module_name, mui_create_svg_icon_specifier);
-}
-
 fn isMockModuleId(module_id: []const u8) bool {
     return std.mem.startsWith(u8, module_id, "__zig_mock__/");
 }
@@ -2865,7 +2899,11 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
         return false;
     }
 
-    if (std.mem.indexOf(u8, source, "module.exports") != null or std.mem.indexOf(u8, source, "exports.") != null) {
+    if (
+        std.mem.indexOf(u8, source, "module.exports") != null or
+        std.mem.indexOf(u8, source, "exports.") != null or
+        std.mem.indexOf(u8, source, "Object.defineProperty(exports") != null
+    ) {
         return true;
     }
 
@@ -2874,6 +2912,11 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
     }
 
     return std.mem.indexOf(u8, source, "import ") == null and std.mem.indexOf(u8, source, "export ") == null;
+}
+
+fn looksLikeJsxSource(source: []const u8) bool {
+    return std.mem.indexOf(u8, source, "<") != null and
+        (std.mem.indexOf(u8, source, "/>") != null or std.mem.indexOf(u8, source, "</") != null);
 }
 
 fn canonicalizePath(allocator: Allocator, io: std.Io, path: []const u8) ![]u8 {

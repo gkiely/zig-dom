@@ -525,7 +525,14 @@
     }
 
     if (!descriptor || !owner) {
-      throw new Error(`spyOn() could not find property ${propertyName}`);
+      owner = target;
+      descriptor = {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function noopSpyTarget() {}
+      };
+      Object.defineProperty(owner, propertyName, descriptor);
     }
 
     const restoreDescriptor = () => {
