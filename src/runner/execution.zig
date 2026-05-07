@@ -348,6 +348,20 @@ const TransformBatchEntry = struct {
     output_path: []const u8,
 };
 
+const CommonJsImport = struct {
+    specifier: []u8,
+    resolved: []u8,
+    local: []u8,
+    json_source: ?[]u8 = null,
+
+    fn deinit(self: *CommonJsImport, allocator: Allocator) void {
+        allocator.free(self.specifier);
+        allocator.free(self.resolved);
+        allocator.free(self.local);
+        if (self.json_source) |json| allocator.free(json);
+    }
+};
+
 pub const FileResult = struct {
     path: []u8,
     passed: usize,
@@ -498,14 +512,9 @@ const ModuleLoaderState = struct {
 
         var transform_targets: std.ArrayList([]const u8) = .empty;
         defer transform_targets.deinit(self.allocator);
-        var commonjs_targets: std.ArrayList([]const u8) = .empty;
-        defer commonjs_targets.deinit(self.allocator);
-
         for (graph) |module_id| {
             if (transform.needsTransform(module_id)) {
                 try transform_targets.append(self.allocator, module_id);
-            } else if (std.mem.eql(u8, transform.loaderForPath(module_id) orelse "", "js") and (try self.pathLooksCommonJs(module_id))) {
-                try commonjs_targets.append(self.allocator, module_id);
             }
         }
 
@@ -542,10 +551,6 @@ const ModuleLoaderState = struct {
             } else {
                 self.allocator.free(output_path);
             }
-        }
-
-        if (commonjs_targets.items.len > 0) {
-            try self.appendCommonJsModuleTransforms(commonjs_targets.items, &pending);
         }
 
         for (self.pending_onload_transforms.items) |entry| {
@@ -713,17 +718,33 @@ const ModuleLoaderState = struct {
         for (cjs_specifiers) |specifier| {
             if (isRelativeSpecifier(specifier)) {
                 const resolved_relative = self.normalizeSpecifier(module_id, specifier) catch continue;
-                defer self.allocator.free(resolved_relative);
 
-                if (scanned_cjs.contains(resolved_relative)) {
+                if (builtInModuleSource(resolved_relative) != null or isMockModuleId(resolved_relative)) {
+                    self.allocator.free(resolved_relative);
                     continue;
                 }
 
-                const relative_source = self.loadModuleSourceForGraph(resolved_relative) catch continue;
+                const scan_module_id = if (scanned_cjs.contains(resolved_relative))
+                    null
+                else
+                    try self.allocator.dupe(u8, resolved_relative);
+                defer if (scan_module_id) |owned| self.allocator.free(owned);
+
+                if (!seen.contains(resolved_relative)) {
+                    try seen.put(resolved_relative, {});
+                    try queue.append(self.allocator, resolved_relative);
+                } else {
+                    self.allocator.free(resolved_relative);
+                }
+
+                const scan_id = scan_module_id orelse {
+                    continue;
+                };
+                const relative_source = self.loadModuleSourceForGraph(scan_id) catch continue;
                 defer self.allocator.free(relative_source);
 
-                if (isCommonJsSource(resolved_relative, relative_source)) {
-                    try self.enqueueCommonJsBareDependencies(resolved_relative, relative_source, seen, queue, scanned_cjs);
+                if (isCommonJsSource(scan_id, relative_source)) {
+                    try self.enqueueCommonJsBareDependencies(scan_id, relative_source, seen, queue, scanned_cjs);
                 }
                 continue;
             }
@@ -824,6 +845,24 @@ const ModuleLoaderState = struct {
             return self.module_sources.get(module_id).?;
         }
 
+        if (std.mem.eql(u8, default_loader, "json")) {
+            const json = try std.Io.Dir.cwd().readFileAlloc(
+                self.io,
+                module_id,
+                self.allocator,
+                .limited(max_module_source_bytes),
+            );
+            defer self.allocator.free(json);
+
+            var source: std.ArrayList(u8) = .empty;
+            errdefer source.deinit(self.allocator);
+            try source.appendSlice(self.allocator, "export default ");
+            try source.appendSlice(self.allocator, json);
+            try source.appendSlice(self.allocator, ";\n");
+            try self.cacheModuleSource(module_id, try source.toOwnedSlice(self.allocator));
+            return self.module_sources.get(module_id).?;
+        }
+
         const output_path = self.transformed_outputs.get(module_id) orelse return error.ModuleNotPrepared;
         const transformed = try std.Io.Dir.cwd().readFileAlloc(
             self.io,
@@ -844,37 +883,15 @@ const ModuleLoaderState = struct {
     }
 
     fn loadCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
-        var output_path_owned: ?[]u8 = self.transformed_outputs.get(module_id);
-        if (output_path_owned == null) {
-            const output_path = try self.buildCommonJsOutputPath(module_id);
-            errdefer self.allocator.free(output_path);
-
-            const key = try self.allocator.dupe(u8, module_id);
-            errdefer self.allocator.free(key);
-
-            try self.transformed_outputs.put(key, output_path);
-            output_path_owned = output_path;
-        }
-
-        const output_path = output_path_owned.?;
-        const stat = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
-            error.FileNotFound => null,
-            else => return err,
-        };
-
-        if (stat == null or stat.?.kind != .file) {
-            const exit_code = try self.runSingleTransform(module_id, "cjs", output_path);
-            if (exit_code != 0) {
-                return error.TransformCommandFailed;
-            }
-        }
-
-        return std.Io.Dir.cwd().readFileAlloc(
+        const source = try std.Io.Dir.cwd().readFileAlloc(
             self.io,
-            output_path,
+            module_id,
             self.allocator,
             .limited(max_module_source_bytes),
         );
+        defer self.allocator.free(source);
+
+        return self.buildNativeCommonJsModuleSource(module_id, source);
     }
 
     fn prepareCommonJsModuleTransforms(self: *ModuleLoaderState, module_paths: []const []const u8) !void {
@@ -951,6 +968,189 @@ const ModuleLoaderState = struct {
             "./.zig-dom-cache/transformed/cjs/{x}-{s}.js",
             .{ digest, sanitized.items },
         );
+    }
+
+    fn buildNativeCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
+        const specifiers = try collectCommonJsSpecifiers(self.allocator, source);
+        defer {
+            for (specifiers) |specifier| self.allocator.free(specifier);
+            self.allocator.free(specifiers);
+        }
+
+        var imports: std.ArrayList(CommonJsImport) = .empty;
+        defer {
+            for (imports.items) |*item| item.deinit(self.allocator);
+            imports.deinit(self.allocator);
+        }
+
+        for (specifiers, 0..) |specifier, index| {
+            const resolved = self.normalizeSpecifier(module_id, specifier) catch continue;
+            errdefer self.allocator.free(resolved);
+
+            const local = if (std.mem.endsWith(u8, resolved, ".json"))
+                try self.allocator.dupe(u8, "")
+            else
+                try std.fmt.allocPrint(self.allocator, "__zig_cjs_dep_{d}", .{index});
+            errdefer self.allocator.free(local);
+
+            const json_source = if (std.mem.endsWith(u8, resolved, ".json"))
+                try std.Io.Dir.cwd().readFileAlloc(self.io, resolved, self.allocator, .limited(max_module_source_bytes))
+            else
+                null;
+            errdefer if (json_source) |json| self.allocator.free(json);
+
+            try imports.append(self.allocator, .{
+                .specifier = try self.allocator.dupe(u8, specifier),
+                .resolved = resolved,
+                .local = local,
+                .json_source = json_source,
+            });
+        }
+
+        const export_names = try self.collectCommonJsExportNamesDeep(module_id, source);
+        defer {
+            for (export_names) |name| self.allocator.free(name);
+            self.allocator.free(export_names);
+        }
+
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(self.allocator);
+
+        for (imports.items) |item| {
+            if (item.json_source != null) continue;
+            const resolved_literal = try escapeJsSingleQuotedString(self.allocator, item.resolved);
+            defer self.allocator.free(resolved_literal);
+            try appendFmt(self.allocator, &out, "import * as {s} from '{s}';\n", .{ item.local, resolved_literal });
+        }
+
+        const module_literal = try escapeJsSingleQuotedString(self.allocator, module_id);
+        defer self.allocator.free(module_literal);
+        const dirname = std.fs.path.dirname(module_id) orelse ".";
+        const dirname_literal = try escapeJsSingleQuotedString(self.allocator, dirname);
+        defer self.allocator.free(dirname_literal);
+
+        try out.appendSlice(self.allocator,
+            \\const __zigCjsRegistry = globalThis.__zigCjsRegistry || (globalThis.__zigCjsRegistry = new Map());
+            \\function __zigCjsNamespaceToRequireValue(ns) {
+            \\  try {
+            \\    if (Object.prototype.hasOwnProperty.call(ns, "__zigCommonJSExports")) return ns.__zigCommonJSExports;
+            \\    if (Object.prototype.hasOwnProperty.call(ns, "default")) return ns.default;
+            \\    return ns;
+            \\  } catch {
+            \\    return {};
+            \\  }
+            \\}
+            \\const __zigCjsDeps = {
+            \\
+        );
+
+        for (imports.items) |item| {
+            const specifier_literal = try escapeJsSingleQuotedString(self.allocator, item.specifier);
+            defer self.allocator.free(specifier_literal);
+            if (item.json_source) |json| {
+                try appendFmt(self.allocator, &out, "  '{s}': () => (", .{specifier_literal});
+                try out.appendSlice(self.allocator, json);
+                try out.appendSlice(self.allocator, "),\n");
+            } else {
+                try appendFmt(self.allocator, &out, "  '{s}': () => __zigCjsNamespaceToRequireValue({s}),\n", .{ specifier_literal, item.local });
+            }
+        }
+
+        try out.appendSlice(self.allocator,
+            \\};
+            \\function __zigLoadCommonJS(id, dirname, deps, factory) {
+            \\  if (__zigCjsRegistry.has(id)) return __zigCjsRegistry.get(id).exports;
+            \\  const module = { exports: {} };
+            \\  __zigCjsRegistry.set(id, module);
+            \\  const require = (specifier) => {
+            \\    const load = deps[String(specifier)];
+            \\    if (!load) throw new Error(`Cannot find module '${specifier}' from ${id}`);
+            \\    return load();
+            \\  };
+            \\  require.resolve = (specifier) => String(specifier);
+            \\  factory.call(module.exports, module, module.exports, require, id, dirname, globalThis);
+            \\  return module.exports;
+            \\}
+            \\
+        );
+        try appendFmt(self.allocator, &out, "const __zigCommonJSExports = __zigLoadCommonJS('{s}', '{s}', __zigCjsDeps, function(module, exports, require, __filename, __dirname, global) {{\n", .{ module_literal, dirname_literal });
+        try out.appendSlice(self.allocator, source);
+        try out.appendSlice(self.allocator,
+            \\
+            \\});
+            \\export { __zigCommonJSExports };
+            \\export default __zigCommonJSExports;
+            \\
+        );
+
+        for (export_names) |name| {
+            try appendFmt(self.allocator, &out, "export const {s} = __zigCommonJSExports == null ? undefined : __zigCommonJSExports.{s};\n", .{ name, name });
+        }
+
+        return out.toOwnedSlice(self.allocator);
+    }
+
+    fn collectCommonJsExportNamesDeep(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]const []u8 {
+        var names: std.ArrayList([]u8) = .empty;
+        errdefer {
+            for (names.items) |name| self.allocator.free(name);
+            names.deinit(self.allocator);
+        }
+
+        var dedup = std.StringHashMap(void).init(self.allocator);
+        defer dedup.deinit();
+        var scanned = std.StringHashMap(void).init(self.allocator);
+        defer {
+            var iterator = scanned.iterator();
+            while (iterator.next()) |entry| self.allocator.free(entry.key_ptr.*);
+            scanned.deinit();
+        }
+
+        try self.collectCommonJsExportNamesInto(module_id, source, &names, &dedup, &scanned);
+        return names.toOwnedSlice(self.allocator);
+    }
+
+    fn collectCommonJsExportNamesInto(
+        self: *ModuleLoaderState,
+        module_id: []const u8,
+        source: []const u8,
+        names: *std.ArrayList([]u8),
+        dedup: *std.StringHashMap(void),
+        scanned: *std.StringHashMap(void),
+    ) !void {
+        if (scanned.contains(module_id)) return;
+
+        const scanned_key = try self.allocator.dupe(u8, module_id);
+        errdefer self.allocator.free(scanned_key);
+        try scanned.put(scanned_key, {});
+
+        try collectCommonJsExportNamesFromSource(self.allocator, source, names, dedup);
+
+        const specifiers = try collectCommonJsSpecifiers(self.allocator, source);
+        defer {
+            for (specifiers) |specifier| self.allocator.free(specifier);
+            self.allocator.free(specifiers);
+        }
+
+        for (specifiers) |specifier| {
+            if (!isRelativeSpecifier(specifier)) continue;
+
+            const resolved = self.normalizeSpecifier(module_id, specifier) catch continue;
+            defer self.allocator.free(resolved);
+            if (scanned.contains(resolved)) continue;
+
+            const child_source = std.Io.Dir.cwd().readFileAlloc(
+                self.io,
+                resolved,
+                self.allocator,
+                .limited(max_module_source_bytes),
+            ) catch continue;
+            defer self.allocator.free(child_source);
+
+            if (isCommonJsSource(resolved, child_source)) {
+                try self.collectCommonJsExportNamesInto(resolved, child_source, names, dedup, scanned);
+            }
+        }
     }
 
     fn syncMockModulesFromRuntime(self: *ModuleLoaderState, runtime: *Runtime) !void {
@@ -2327,6 +2527,59 @@ fn collectCommonJsSpecifiers(allocator: Allocator, source: []const u8) ![]const 
     return specifiers.toOwnedSlice(allocator);
 }
 
+fn collectCommonJsExportNamesFromSource(
+    allocator: Allocator,
+    source: []const u8,
+    names: *std.ArrayList([]u8),
+    dedup: *std.StringHashMap(void),
+) !void {
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        if (source[cursor] == '/' and cursor + 1 < source.len and source[cursor + 1] == '/') {
+            cursor = skipLineComment(source, cursor);
+            continue;
+        }
+        if (source[cursor] == '/' and cursor + 1 < source.len and source[cursor + 1] == '*') {
+            cursor = skipBlockComment(source, cursor);
+            continue;
+        }
+        if (source[cursor] == '\'' or source[cursor] == '"' or source[cursor] == '`') {
+            cursor = skipQuotedLiteral(source, cursor);
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, source[cursor..], "exports.")) {
+            const start = cursor + "exports.".len;
+            var end = start;
+            while (end < source.len and isIdentifierChar(source[end])) : (end += 1) {}
+            if (end > start) {
+                const name = source[start..end];
+                if (!std.mem.eql(u8, name, "default") and !std.mem.eql(u8, name, "__esModule")) {
+                    try appendSpecifier(allocator, names, dedup, name);
+                }
+                cursor = end;
+                continue;
+            }
+        }
+
+        if (std.mem.startsWith(u8, source[cursor..], "module.exports.")) {
+            const start = cursor + "module.exports.".len;
+            var end = start;
+            while (end < source.len and isIdentifierChar(source[end])) : (end += 1) {}
+            if (end > start) {
+                const name = source[start..end];
+                if (!std.mem.eql(u8, name, "default") and !std.mem.eql(u8, name, "__esModule")) {
+                    try appendSpecifier(allocator, names, dedup, name);
+                }
+                cursor = end;
+                continue;
+            }
+        }
+
+        cursor += 1;
+    }
+}
+
 fn parseImportSpecifier(
     allocator: Allocator,
     source: []const u8,
@@ -2581,6 +2834,12 @@ fn hasWordAt(source: []const u8, index: usize, word: []const u8) bool {
 
 fn isIdentifierChar(ch: u8) bool {
     return std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '$';
+}
+
+fn appendFmt(allocator: Allocator, out: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) !void {
+    const text = try std.fmt.allocPrint(allocator, fmt, args);
+    defer allocator.free(text);
+    try out.appendSlice(allocator, text);
 }
 
 pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8, setup_paths: []const []const u8) !Summary {
@@ -3090,7 +3349,8 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
     if (
         std.mem.indexOf(u8, source, "module.exports") != null or
         std.mem.indexOf(u8, source, "exports.") != null or
-        std.mem.indexOf(u8, source, "Object.defineProperty(exports") != null
+        std.mem.indexOf(u8, source, "Object.defineProperty(exports") != null or
+        std.mem.indexOf(u8, source, "Object.defineProperty(module") != null
     ) {
         return true;
     }

@@ -122,12 +122,16 @@ pub fn loaderForPath(path: []const u8) ?[]const u8 {
         return "js";
     }
 
+    if (std.mem.endsWith(u8, path, ".json")) {
+        return "json";
+    }
+
     return null;
 }
 
 pub fn needsTransform(path: []const u8) bool {
     const loader = loaderForPath(path) orelse return false;
-    return !std.mem.eql(u8, loader, "js");
+    return !std.mem.eql(u8, loader, "js") and !std.mem.eql(u8, loader, "json");
 }
 
 pub fn prepareModuleTransforms(
