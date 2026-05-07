@@ -9,6 +9,17 @@ pub fn build(b: *std.Build) void {
     });
     const quickjs_module = quickjs_dep.module("quickjs");
     const quickjs_lib = quickjs_dep.artifact("quickjs-ng");
+    const yuku_util_module = b.createModule(.{
+        .root_source_file = b.path("vendor/yuku/src/util/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const yuku_parser_module = b.createModule(.{
+        .root_source_file = b.path("vendor/yuku/src/parser/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    yuku_parser_module.addImport("util", yuku_util_module);
 
     const module = b.createModule(.{
         .root_source_file = b.path("src/zig_dom.zig"),
@@ -32,6 +43,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     exe_module.addImport("quickjs", quickjs_module);
+    exe_module.addImport("yuku_parser", yuku_parser_module);
 
     const exe = b.addExecutable(.{
         .name = "zig-dom",
@@ -56,6 +68,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     main_tests_module.addImport("quickjs", quickjs_module);
+    main_tests_module.addImport("yuku_parser", yuku_parser_module);
 
     const main_tests = b.addTest(.{
         .root_module = main_tests_module,

@@ -1,4 +1,5 @@
 const std = @import("std");
+const yuku_transform = @import("yuku_transform.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -171,7 +172,7 @@ pub fn prepareModuleTransforms(
     }
 
     if (pending.items.len > 0) {
-        const exit_code = try runTransformProcess(allocator, io, pending.items);
+        const exit_code = try runNativeTransforms(allocator, io, pending.items);
         if (exit_code != 0) {
             return error.TransformCommandFailed;
         }
@@ -196,53 +197,16 @@ fn transformOptionsSignature(loader: []const u8) []const u8 {
     return "esm-preserve-v2";
 }
 
-fn runTransformProcess(allocator: Allocator, io: std.Io, entries: []const TransformEntry) !u8 {
-    var args: std.ArrayList([]const u8) = .empty;
-    defer args.deinit(allocator);
-
-    try args.appendSlice(allocator, &.{
-        "bun",
-        "run",
-        "scripts/transform-tests.ts",
-        "--cache-dir",
-        ".zig-dom-cache/transformed",
-    });
-
+fn runNativeTransforms(allocator: Allocator, io: std.Io, entries: []const TransformEntry) !u8 {
     for (entries) |entry| {
-        try args.appendSlice(allocator, &.{ "--file", entry.input_path });
-        try args.appendSlice(allocator, &.{ "--loader", entry.loader });
-        try args.appendSlice(allocator, &.{ "--out", entry.output_path });
+        try yuku_transform.transformFile(allocator, io, .{
+            .input_path = entry.input_path,
+            .loader = entry.loader,
+            .output_path = entry.output_path,
+        });
     }
 
-    var child = std.process.spawn(io, .{
-        .argv = args.items,
-        .stdin = .inherit,
-        .stdout = .inherit,
-        .stderr = .inherit,
-    }) catch |err| switch (err) {
-        error.FileNotFound => {
-            std.log.err("Required command not found: {s}", .{args.items[0]});
-            return 127;
-        },
-        else => return err,
-    };
-
-    const term = try child.wait(io);
-    return switch (term) {
-        .exited => |code| code,
-        .signal => {
-            std.log.err("Transform helper terminated by signal.", .{});
-            return 1;
-        },
-        .stopped => {
-            std.log.err("Transform helper stopped unexpectedly.", .{});
-            return 1;
-        },
-        .unknown => {
-            std.log.err("Transform helper ended unexpectedly.", .{});
-            return 1;
-        },
-    };
+    return 0;
 }
 
 test "loaderForPath matches transform extensions" {

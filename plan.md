@@ -166,21 +166,20 @@ Support these test file extensions from the start:
 - `.test.jsx`, `.spec.jsx`, `_test_*.jsx`, `_spec_*.jsx`
 - `.test.tsx`, `.spec.tsx`, `_test_*.tsx`, `_spec_*.tsx`
 
-Use Bun only as a transform tool, not as the runtime:
+Use Yuku as the native Zig transform tool:
 
 - At the start of a test run, discover all test files.
 - Split files into plain JavaScript and transform-needed files.
 - For normal runs, upfront batch transform all `.ts`, `.tsx`, and `.jsx` files before collection or execution.
 - If any transform fails, fail the run before executing tests.
-- Prefer one Bun helper process per test run over one Bun process per file.
-- The helper should use `Bun.Transpiler.transformSync()` for per-file transforms first.
-- Cache transformed output by source path, loader, Bun version, transform options, and content hash or mtime+size.
+- Do transforms in-process through Yuku parser/codegen, without spawning Bun.
+- Cache transformed output by source path, loader, transform options, and content hash or mtime+size.
 - Execute only the resulting JavaScript in QuickJS-ng.
 
 Initial transform scope:
 
 - Strip TypeScript syntax.
-- Convert JSX/TSX to plain JavaScript using the repo `tsconfig`/JSX settings where possible.
+- Convert JSX/TSX to classic `React.createElement` output.
 - Preserve filenames in runtime error reporting.
 - Write transformed artifacts to a cache directory such as `.zig-dom-cache/transformed/`, or keep them in memory if the runner has a clean internal source-map story.
 

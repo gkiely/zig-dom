@@ -1,6 +1,7 @@
 const std = @import("std");
 const runtime_pkg = @import("../runtime/runtime.zig");
 const transform = @import("transform.zig");
+const yuku_transform = @import("yuku_transform.zig");
 const quickjs = @import("quickjs");
 
 const Allocator = std.mem.Allocator;
@@ -413,7 +414,6 @@ const ModuleLoaderState = struct {
     io: std.Io,
     runtime: ?*Runtime,
     loaded_modules: std.StringHashMap(*ModuleDef),
-    module_sources: std.StringHashMap([]u8),
     transformed_outputs: std.StringHashMap([]u8),
     pending_onload_transforms: std.ArrayList(TransformBatchEntry),
     mock_module_sources: std.StringHashMap([]u8),
@@ -426,7 +426,6 @@ const ModuleLoaderState = struct {
             .io = io,
             .runtime = null,
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
-            .module_sources = std.StringHashMap([]u8).init(allocator),
             .transformed_outputs = std.StringHashMap([]u8).init(allocator),
             .pending_onload_transforms = .empty,
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
@@ -437,13 +436,6 @@ const ModuleLoaderState = struct {
 
     fn deinit(self: *ModuleLoaderState) void {
         self.clearPathAliases();
-
-        var source_iterator = self.module_sources.iterator();
-        while (source_iterator.next()) |entry| {
-            self.allocator.free(entry.key_ptr.*);
-            self.allocator.free(entry.value_ptr.*);
-        }
-        self.module_sources.deinit();
 
         var output_iterator = self.transformed_outputs.iterator();
         while (output_iterator.next()) |entry| {
@@ -518,10 +510,14 @@ const ModuleLoaderState = struct {
             }
         }
 
+        try self.prepareTransformTargets(transform_targets.items, true);
+    }
+
+    fn prepareTransformTargets(self: *ModuleLoaderState, module_paths: []const []const u8, include_pending_onload: bool) !void {
         var pending: std.ArrayList(TransformBatchEntry) = .empty;
         defer pending.deinit(self.allocator);
 
-        for (transform_targets.items) |module_id| {
+        for (module_paths) |module_id| {
             const loader = transform.loaderForPath(module_id) orelse return error.TransformCommandFailed;
             const output_path = try transform.buildModuleOutputPath(self.allocator, self.io, module_id);
             errdefer self.allocator.free(output_path);
@@ -553,10 +549,12 @@ const ModuleLoaderState = struct {
             }
         }
 
-        for (self.pending_onload_transforms.items) |entry| {
-            try pending.append(self.allocator, entry);
+        if (include_pending_onload) {
+            for (self.pending_onload_transforms.items) |entry| {
+                try pending.append(self.allocator, entry);
+            }
+            self.pending_onload_transforms.clearRetainingCapacity();
         }
-        self.pending_onload_transforms.clearRetainingCapacity();
 
         defer {
             for (pending.items) |entry| {
@@ -574,40 +572,6 @@ const ModuleLoaderState = struct {
             const exit_code = try self.runTransformBatch(pending.items);
             if (exit_code != 0) {
                 return error.TransformCommandFailed;
-            }
-        }
-    }
-
-    fn appendCommonJsModuleTransforms(
-        self: *ModuleLoaderState,
-        module_paths: []const []const u8,
-        pending: *std.ArrayList(TransformBatchEntry),
-    ) !void {
-        for (module_paths) |module_id| {
-            var output_path_owned: ?[]u8 = self.transformed_outputs.get(module_id);
-            if (output_path_owned == null) {
-                const output_path = try self.buildCommonJsOutputPath(module_id);
-                errdefer self.allocator.free(output_path);
-
-                const key = try self.allocator.dupe(u8, module_id);
-                errdefer self.allocator.free(key);
-
-                try self.transformed_outputs.put(key, output_path);
-                output_path_owned = output_path;
-            }
-
-            const output_path = output_path_owned.?;
-            const stat = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
-                error.FileNotFound => null,
-                else => return err,
-            };
-
-            if (stat == null or stat.?.kind != .file) {
-                try pending.append(self.allocator, .{
-                    .input_path = module_id,
-                    .loader = "cjs",
-                    .output_path = output_path,
-                });
             }
         }
     }
@@ -804,26 +768,21 @@ const ModuleLoaderState = struct {
         );
     }
 
-    fn loadModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]const u8 {
+    fn loadModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
         if (builtInModuleSource(module_id)) |shim_source| {
-            return shim_source;
+            return self.allocator.dupe(u8, shim_source);
         }
 
         if (isMockModuleId(module_id)) {
             const specifier = module_id["__zig_mock__/".len..];
             const source = self.mock_module_sources.get(specifier) orelse return error.ModuleNotFound;
-            return source;
-        }
-
-        if (self.module_sources.get(module_id)) |cached| {
-            return cached;
+            return self.allocator.dupe(u8, source);
         }
 
         const default_loader = transform.loaderForPath(module_id) orelse return error.UnsupportedModuleExtension;
 
         if (try self.loadModuleSourceFromOnLoad(module_id, default_loader)) |hook_source| {
-            try self.cacheModuleSource(module_id, hook_source);
-            return self.module_sources.get(module_id).?;
+            return hook_source;
         }
 
         if (std.mem.eql(u8, default_loader, "js")) {
@@ -836,13 +795,10 @@ const ModuleLoaderState = struct {
 
             if (isCommonJsSource(module_id, source)) {
                 self.allocator.free(source);
-                const transformed = try self.loadCommonJsModuleSource(module_id);
-                try self.cacheModuleSource(module_id, transformed);
-                return self.module_sources.get(module_id).?;
+                return try self.loadCommonJsModuleSource(module_id);
             }
 
-            try self.cacheModuleSource(module_id, source);
-            return self.module_sources.get(module_id).?;
+            return source;
         }
 
         if (std.mem.eql(u8, default_loader, "json")) {
@@ -859,8 +815,7 @@ const ModuleLoaderState = struct {
             try source.appendSlice(self.allocator, "export default ");
             try source.appendSlice(self.allocator, json);
             try source.appendSlice(self.allocator, ";\n");
-            try self.cacheModuleSource(module_id, try source.toOwnedSlice(self.allocator));
-            return self.module_sources.get(module_id).?;
+            return try source.toOwnedSlice(self.allocator);
         }
 
         const output_path = self.transformed_outputs.get(module_id) orelse return error.ModuleNotPrepared;
@@ -871,15 +826,7 @@ const ModuleLoaderState = struct {
             .limited(max_module_source_bytes),
         );
 
-        try self.cacheModuleSource(module_id, transformed);
-        return self.module_sources.get(module_id).?;
-    }
-
-    fn cacheModuleSource(self: *ModuleLoaderState, module_id: []const u8, source: []u8) !void {
-        const key = try self.allocator.dupe(u8, module_id);
-        errdefer self.allocator.free(key);
-
-        try self.module_sources.put(key, source);
+        return transformed;
     }
 
     fn loadCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
@@ -892,82 +839,6 @@ const ModuleLoaderState = struct {
         defer self.allocator.free(source);
 
         return self.buildNativeCommonJsModuleSource(module_id, source);
-    }
-
-    fn prepareCommonJsModuleTransforms(self: *ModuleLoaderState, module_paths: []const []const u8) !void {
-        var pending: std.ArrayList(TransformBatchEntry) = .empty;
-        defer pending.deinit(self.allocator);
-
-        for (module_paths) |module_id| {
-            var output_path_owned: ?[]u8 = self.transformed_outputs.get(module_id);
-            if (output_path_owned == null) {
-                const output_path = try self.buildCommonJsOutputPath(module_id);
-                errdefer self.allocator.free(output_path);
-
-                const key = try self.allocator.dupe(u8, module_id);
-                errdefer self.allocator.free(key);
-
-                try self.transformed_outputs.put(key, output_path);
-                output_path_owned = output_path;
-            }
-
-            const output_path = output_path_owned.?;
-            const stat = std.Io.Dir.cwd().statFile(self.io, output_path, .{}) catch |err| switch (err) {
-                error.FileNotFound => null,
-                else => return err,
-            };
-
-            if (stat == null or stat.?.kind != .file) {
-                try pending.append(self.allocator, .{
-                    .input_path = module_id,
-                    .loader = "cjs",
-                    .output_path = output_path,
-                });
-            }
-        }
-
-        if (pending.items.len == 0) {
-            return;
-        }
-
-        const exit_code = try self.runTransformBatch(pending.items);
-        if (exit_code != 0) {
-            return error.TransformCommandFailed;
-        }
-    }
-
-    fn buildCommonJsOutputPath(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
-        const stat = try std.Io.Dir.cwd().statFile(self.io, module_id, .{});
-        if (stat.kind != .file) {
-            return error.ModuleNotFound;
-        }
-
-        const basename = std.fs.path.basename(module_id);
-        const stem = std.fs.path.stem(basename);
-
-        var sanitized: std.ArrayList(u8) = .empty;
-        defer sanitized.deinit(self.allocator);
-
-        for (stem) |char| {
-            if (std.ascii.isAlphanumeric(char) or char == '.' or char == '-' or char == '_') {
-                try sanitized.append(self.allocator, char);
-            } else {
-                try sanitized.append(self.allocator, '_');
-            }
-        }
-
-        var hasher = std.hash.Wyhash.init(0);
-        hasher.update(module_id);
-        hasher.update("cjs-default-interop-v4");
-        hasher.update(std.mem.asBytes(&stat.size));
-        hasher.update(std.mem.asBytes(&stat.mtime.nanoseconds));
-        const digest = hasher.final();
-
-        return std.fmt.allocPrint(
-            self.allocator,
-            "./.zig-dom-cache/transformed/cjs/{x}-{s}.js",
-            .{ digest, sanitized.items },
-        );
     }
 
     fn buildNativeCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
@@ -1505,52 +1376,22 @@ const ModuleLoaderState = struct {
     }
 
     fn runTransformBatch(self: *ModuleLoaderState, entries: []const TransformBatchEntry) !u8 {
-        var args: std.ArrayList([]const u8) = .empty;
-        defer args.deinit(self.allocator);
-
-        try args.appendSlice(self.allocator, &.{
-            "bun",
-            "run",
-            "scripts/transform-tests.ts",
-            "--cache-dir",
-            ".zig-dom-cache/transformed",
-        });
-
+        const debug_transform = std.c.getenv("ZIG_DOM_TRANSFORM_DEBUG") != null;
         for (entries) |entry| {
-            try args.appendSlice(self.allocator, &.{ "--file", entry.input_path });
-            try args.appendSlice(self.allocator, &.{ "--loader", entry.loader });
-            try args.appendSlice(self.allocator, &.{ "--out", entry.output_path });
+            if (debug_transform) {
+                std.debug.print("[zig-dom transform] {s} {s} -> {s}\n", .{ entry.loader, entry.input_path, entry.output_path });
+            }
+            yuku_transform.transformFile(self.allocator, self.io, .{
+                .input_path = entry.input_path,
+                .loader = entry.loader,
+                .output_path = entry.output_path,
+            }) catch return 1;
         }
 
-        var child = std.process.spawn(self.io, .{
-            .argv = args.items,
-            .stdin = .inherit,
-            .stdout = .inherit,
-            .stderr = .inherit,
-        }) catch |err| switch (err) {
-            error.FileNotFound => {
-                std.log.err("Required command not found: {s}", .{args.items[0]});
-                return 127;
-            },
-            else => return err,
-        };
-
-        const term = try child.wait(self.io);
-        return switch (term) {
-            .exited => |code| code,
-            .signal => {
-                std.log.err("Transform helper terminated by signal.", .{});
-                return 1;
-            },
-            .stopped => {
-                std.log.err("Transform helper stopped unexpectedly.", .{});
-                return 1;
-            },
-            .unknown => {
-                std.log.err("Transform helper ended unexpectedly.", .{});
-                return 1;
-            },
-        };
+        if (debug_transform) {
+            std.debug.print("Transformed {d} file(s).\n", .{entries.len});
+        }
+        return 0;
     }
 
     fn clearMockModules(self: *ModuleLoaderState) void {
@@ -2597,6 +2438,10 @@ fn parseImportSpecifier(
         return cursor + 1;
     }
 
+    if (hasWordAt(source, cursor, "type")) {
+        return skipStatement(source, cursor + "type".len);
+    }
+
     if (parseQuotedSpecifier(source, cursor)) |literal| {
         try appendSpecifier(allocator, specifiers, dedup, literal.specifier);
         return literal.next_index;
@@ -2658,6 +2503,10 @@ fn parseExportSpecifier(
     dedup: *std.StringHashMap(void),
 ) !usize {
     var cursor = start_index + "export".len;
+    skipTrivia(source, &cursor);
+    if (hasWordAt(source, cursor, "type")) {
+        return skipStatement(source, cursor + "type".len);
+    }
 
     while (cursor < source.len) {
         const current = source[cursor];
@@ -2689,6 +2538,37 @@ fn parseExportSpecifier(
                 try appendSpecifier(allocator, specifiers, dedup, literal.specifier);
                 return literal.next_index;
             }
+        }
+
+        cursor += 1;
+    }
+
+    return cursor;
+}
+
+fn skipStatement(source: []const u8, start_index: usize) usize {
+    var cursor = start_index;
+    while (cursor < source.len) {
+        const current = source[cursor];
+
+        if (current == ';') {
+            return cursor + 1;
+        }
+
+        if (current == '/') {
+            if (cursor + 1 < source.len and source[cursor + 1] == '/') {
+                cursor = skipLineComment(source, cursor);
+                continue;
+            }
+            if (cursor + 1 < source.len and source[cursor + 1] == '*') {
+                cursor = skipBlockComment(source, cursor);
+                continue;
+            }
+        }
+
+        if (current == '\'' or current == '"' or current == '`') {
+            cursor = skipQuotedLiteral(source, cursor);
+            continue;
         }
 
         cursor += 1;
@@ -2935,6 +2815,7 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         const setup_source = module_loader_state.loadModuleSource(setup_module_id) catch |err| {
             return collectionFailureFromError(allocator, path, "collection failed", err);
         };
+        defer allocator.free(setup_source);
 
         vm.evalScript("<zig-setup-dom-probe-begin>", setup_dom_probe_begin_source) catch |err| {
             return failureFromRuntimeException(allocator, path, "failed to prepare setup environment", err, &vm);
@@ -2966,6 +2847,7 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
     const entry_source = module_loader_state.loadModuleSource(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
+    defer allocator.free(entry_source);
 
     vm.evalModule(entry_module_id, entry_source) catch |err| {
         return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
@@ -3205,6 +3087,7 @@ fn moduleLoad(
         );
         return null;
     };
+    defer state.allocator.free(source);
 
     const source_z = state.allocator.dupeZ(u8, source) catch {
         _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
@@ -3489,4 +3372,23 @@ test "shim sources resolve built-ins and fallback shims" {
     try std.testing.expect(builtInModuleSource("zig-dom") != null);
     try std.testing.expect(builtInModuleSource("react") == null);
     try std.testing.expect(builtInModuleSource("@testing-library/react") == null);
+}
+
+test "collectEsmSpecifiers skips type-only imports and exports" {
+    const source =
+        \\import type { DriveFile } from "./DriveTypes";
+        \\import value from "./value";
+        \\export type { SharedType } from "./shared-types";
+        \\export { runtimeValue } from "./runtime";
+    ;
+
+    const specifiers = try collectEsmSpecifiers(std.testing.allocator, source);
+    defer {
+        for (specifiers) |specifier| std.testing.allocator.free(specifier);
+        std.testing.allocator.free(specifiers);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), specifiers.len);
+    try std.testing.expectEqualStrings("./value", specifiers[0]);
+    try std.testing.expectEqualStrings("./runtime", specifiers[1]);
 }
