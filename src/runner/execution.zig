@@ -1395,7 +1395,20 @@ const ModuleLoaderState = struct {
             return transformed;
         }
 
+        if (std.mem.eql(u8, effective_loader, "json")) {
+            return try self.wrapJsonModuleSource(hook_result.contents);
+        }
+
         return error.UnsupportedTransformLoader;
+    }
+
+    fn wrapJsonModuleSource(self: *ModuleLoaderState, json: []const u8) ![]u8 {
+        var source: std.ArrayList(u8) = .empty;
+        errdefer source.deinit(self.allocator);
+        try source.appendSlice(self.allocator, "export default ");
+        try source.appendSlice(self.allocator, json);
+        try source.appendSlice(self.allocator, ";\n");
+        return try source.toOwnedSlice(self.allocator);
     }
 
     fn transformOnLoadContents(

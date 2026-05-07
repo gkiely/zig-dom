@@ -18,3 +18,20 @@ test("plugin onLoad can replace module source before transform", async () => {
   expect(hooked.hookValue).toBe(77);
   expect(hooked.hookPath.endsWith("onload-target.tsx")).toBe(true);
 });
+
+plugin({
+  name: "replace-onload-json",
+  setup(build) {
+    build.onLoad({ filter: /onload-data\.json$/ }, () => {
+      return {
+        loader: "json",
+        contents: JSON.stringify({ value: "hooked-json" })
+      };
+    });
+  }
+});
+
+test("plugin onLoad can replace json module source", async () => {
+  const hooked = await import("./fixtures/plugin/onload-data.json");
+  expect(hooked.default.value).toBe("hooked-json");
+});
