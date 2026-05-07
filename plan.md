@@ -45,7 +45,7 @@ WPT manifests already present:
 
 ## Non-Negotiable Perf Guard
 
-Run this at the end of every chunk of work:
+Run this at the end of every milestone and any substantial sub-chunk:
 
 ```sh
 zig build -Doptimize=ReleaseFast --summary none
@@ -76,7 +76,7 @@ Use ReleaseFast only for the perf guard or performance comparisons.
 
 Anything in test execution over 30s should be treated as a likely hang, async timeout, or Zig/runtime error. Build time can exceed 30s.
 
-## Work Chunk 1: Lock In Current Perf Behavior
+## Milestone 1: Lock In Current Perf Behavior
 
 Tasks:
 
@@ -89,7 +89,7 @@ Validation:
 - Run the full perf guard above.
 - Run local runner/DOM regression commands.
 
-## Work Chunk 2: Broaden YouNeedAWiki Components
+## Milestone 2: Broaden YouNeedAWiki Components
 
 Work down `../youneedawiki` component tests by priority.
 
@@ -128,7 +128,7 @@ zig-out/bin/zig-dom test --root ../youneedawiki <fixed-test-file>
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Work Chunk 3: Platform Globals
+## Milestone 3: Platform Globals
 
 Fill browser/node compatibility gaps generically as they are exposed by `../youneedawiki`.
 
@@ -153,7 +153,7 @@ zig-out/bin/zig-dom test tests/runner/native-dom-window-globals.test.js tests/ru
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Work Chunk 4: DOM Loading Configuration
+## Milestone 4: DOM Loading Configuration
 
 The runner should not always pay DOM startup cost for plain non-DOM tests.
 
@@ -190,7 +190,7 @@ zig-out/bin/zig-dom test --dom always tests/runner/native-dom-smoke.test.js
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Work Chunk 5: Fast WPT Iteration
+## Milestone 5: Fast WPT Iteration
 
 Before expanding WPT coverage, make WPT debugging fast enough for normal development.
 
@@ -224,7 +224,7 @@ zig-out/bin/zig-dom wpt --manifest wpt/manifest/events.json --filter events-basi
 zig-out/bin/zig-dom wpt --manifest wpt/manifest/fast-smoke.json --expected wpt/expected/fast-smoke.json
 ```
 
-These flags/manifests are not all implemented yet. Implement them in this chunk before relying on them in later WPT work.
+These flags/manifests are not all implemented yet. Implement them in this milestone before relying on them in later WPT work.
 
 Acceptance:
 
@@ -242,7 +242,7 @@ zig-out/bin/zig-dom wpt --manifest wpt/manifest/fast-smoke.json --expected wpt/e
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Work Chunk 6: Expand WPT DOM Core
+## Milestone 6: Expand WPT DOM Core
 
 Start with the smallest manifests and keep expected failures explicit.
 
@@ -273,7 +273,7 @@ Rules:
 
 Run the mandatory `Edit.test.tsx` ReleaseFast perf guard after each WPT slice.
 
-## Work Chunk 7: Events And Forms Depth
+## Milestone 7: Events And Forms Depth
 
 Expand coverage for:
 
@@ -294,7 +294,7 @@ zig-out/bin/zig-dom wpt --manifest wpt/manifest/forms.json --expected wpt/expect
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Work Chunk 8: Selectors, Parsing, Serialization
+## Milestone 8: Selectors, Parsing, Serialization
 
 Expand support for:
 
@@ -314,7 +314,7 @@ zig-out/bin/zig-dom wpt --manifest wpt/manifest/parser-fragments.json --expected
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Work Chunk 9: WPT Upstream Smoke
+## Milestone 9: WPT Upstream Smoke
 
 Once local WPT slices improve, run broader upstream smoke:
 
@@ -330,7 +330,7 @@ zig-out/bin/zig-dom wpt --manifest wpt/manifest/upstream-dom.json --expected wpt
 
 Do not try to make all upstream WPT green in one pass. Pick a cluster, fix it, add local regression tests, update expected failures only when justified, then run the perf guard.
 
-## Work Chunk 10: Remove Legacy JS Package Layer
+## Milestone 10: Remove Legacy JS Package Layer
 
 The runner and native DOM should be the source of truth. The old Bun FFI package layer should be removed or reduced to thin compatibility exports after downstream and WPT coverage is strong enough.
 
@@ -368,6 +368,6 @@ Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 - More `../youneedawiki` component tests pass without downstream edits.
 - WPT manifests have narrower or better-understood expected-failure files.
 - Local runner/DOM suites stay green.
-- `Edit.test.tsx` ReleaseFast perf guard remains stable after every chunk.
+- `Edit.test.tsx` ReleaseFast perf guard remains stable after every milestone and substantial sub-chunk.
 - No new package-specific module hacks are added.
 - Legacy Bun FFI wrapper code is either deleted or clearly isolated from the native runner path.
