@@ -343,11 +343,14 @@ const max_module_source_bytes = 4 * 1024 * 1024;
 const max_tsconfig_bytes = 2 * 1024 * 1024;
 const max_package_json_bytes = 512 * 1024;
 
+var active_cjs_loader_state: ?*ModuleLoaderState = null;
+
 const CommonJsImport = struct {
     specifier: []u8,
     resolved: []u8,
     local: []u8,
     json_source: ?[]u8 = null,
+    lazy: bool = false,
 
     fn deinit(self: *CommonJsImport, allocator: Allocator) void {
         allocator.free(self.specifier);
@@ -661,13 +664,14 @@ const ModuleLoaderState = struct {
             const resolved = self.normalizeSpecifier(module_id, specifier) catch continue;
             errdefer self.allocator.free(resolved);
 
-            const local = if (std.mem.endsWith(u8, resolved, ".json"))
+            const lazy = try self.shouldLazyLoadCommonJsDependency(resolved);
+            const local = if (lazy or std.mem.endsWith(u8, resolved, ".json"))
                 try self.allocator.dupe(u8, "")
             else
                 try std.fmt.allocPrint(self.allocator, "__zig_cjs_dep_{d}", .{index});
             errdefer self.allocator.free(local);
 
-            const json_source = if (std.mem.endsWith(u8, resolved, ".json"))
+            const json_source = if (!lazy and std.mem.endsWith(u8, resolved, ".json"))
                 try std.Io.Dir.cwd().readFileAlloc(self.io, resolved, self.allocator, .limited(max_module_source_bytes))
             else
                 null;
@@ -678,6 +682,7 @@ const ModuleLoaderState = struct {
                 .resolved = resolved,
                 .local = local,
                 .json_source = json_source,
+                .lazy = lazy,
             });
         }
 
@@ -691,7 +696,7 @@ const ModuleLoaderState = struct {
         errdefer out.deinit(self.allocator);
 
         for (imports.items) |item| {
-            if (item.json_source != null) continue;
+            if (item.lazy or item.json_source != null) continue;
             const resolved_literal = try escapeJsSingleQuotedString(self.allocator, item.resolved);
             defer self.allocator.free(resolved_literal);
             try appendFmt(self.allocator, &out, "import * as {s} from '{s}';\n", .{ item.local, resolved_literal });
@@ -721,10 +726,14 @@ const ModuleLoaderState = struct {
         for (imports.items) |item| {
             const specifier_literal = try escapeJsSingleQuotedString(self.allocator, item.specifier);
             defer self.allocator.free(specifier_literal);
+            const resolved_literal = try escapeJsSingleQuotedString(self.allocator, item.resolved);
+            defer self.allocator.free(resolved_literal);
             if (item.json_source) |json| {
                 try appendFmt(self.allocator, &out, "  '{s}': () => (", .{specifier_literal});
                 try out.appendSlice(self.allocator, json);
                 try out.appendSlice(self.allocator, "),\n");
+            } else if (item.lazy) {
+                try appendFmt(self.allocator, &out, "  '{s}': () => globalThis.__zigNativeRequire('{s}', '{s}', '{s}'),\n", .{ specifier_literal, module_literal, specifier_literal, resolved_literal });
             } else {
                 try appendFmt(self.allocator, &out, "  '{s}': () => __zigCjsNamespaceToRequireValue({s}),\n", .{ specifier_literal, item.local });
             }
@@ -762,6 +771,308 @@ const ModuleLoaderState = struct {
         }
 
         return out.toOwnedSlice(self.allocator);
+    }
+
+    fn shouldLazyLoadCommonJsDependency(self: *ModuleLoaderState, resolved: []const u8) !bool {
+        if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) return false;
+        if (std.mem.endsWith(u8, resolved, ".json")) return true;
+
+        const loader = transform.loaderForPath(resolved) orelse return false;
+        if (!std.mem.eql(u8, loader, "js")) return false;
+
+        const source = std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            resolved,
+            self.allocator,
+            .limited(max_module_source_bytes),
+        ) catch return false;
+        defer self.allocator.free(source);
+
+        if (!isCommonJsSource(resolved, source)) return false;
+        return try self.commonJsSourceRequiresOnlyLazyCompatible(resolved, source);
+    }
+
+    fn commonJsSourceRequiresOnlyLazyCompatible(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) !bool {
+        const specifiers = try collectCommonJsSpecifiers(self.allocator, source);
+        defer {
+            for (specifiers) |specifier| self.allocator.free(specifier);
+            self.allocator.free(specifiers);
+        }
+
+        for (specifiers) |specifier| {
+            const resolved = self.normalizeRequireSpecifier(module_id, specifier) catch return false;
+            defer self.allocator.free(resolved);
+
+            if (std.mem.endsWith(u8, resolved, ".json")) continue;
+            if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) return false;
+
+            const loader = transform.loaderForPath(resolved) orelse return false;
+            if (!std.mem.eql(u8, loader, "js")) return false;
+
+            const child_source = std.Io.Dir.cwd().readFileAlloc(
+                self.io,
+                resolved,
+                self.allocator,
+                .limited(max_module_source_bytes),
+            ) catch return false;
+            defer self.allocator.free(child_source);
+
+            if (!isCommonJsSource(resolved, child_source)) return false;
+        }
+
+        return true;
+    }
+
+    fn buildLazyCommonJsScriptSource(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
+        const folded_source = try foldNodeEnvConditionals(self.allocator, source);
+        defer self.allocator.free(folded_source);
+
+        const module_literal = try escapeJsSingleQuotedString(self.allocator, module_id);
+        defer self.allocator.free(module_literal);
+        const dirname = std.fs.path.dirname(module_id) orelse ".";
+        const dirname_literal = try escapeJsSingleQuotedString(self.allocator, dirname);
+        defer self.allocator.free(dirname_literal);
+
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(self.allocator);
+        try out.appendSlice(self.allocator,
+            \\(() => {
+            \\const __zigCjsRegistry = globalThis.__zigCjsRegistry || (globalThis.__zigCjsRegistry = new Map());
+            \\function __zigLoadCommonJS(id, dirname, factory) {
+            \\  if (__zigCjsRegistry.has(id)) return __zigCjsRegistry.get(id).exports;
+            \\  const module = { exports: {} };
+            \\  __zigCjsRegistry.set(id, module);
+            \\  const require = (specifier) => globalThis.__zigNativeRequire(id, String(specifier), "");
+            \\  require.resolve = (specifier) => String(specifier);
+            \\  factory.call(module.exports, module, module.exports, require, id, dirname, globalThis);
+            \\  return module.exports;
+            \\}
+            \\
+        );
+        try appendFmt(self.allocator, &out, "return __zigLoadCommonJS('{s}', '{s}', function(module, exports, require, __filename, __dirname, global) {{\n", .{ module_literal, dirname_literal });
+        try out.appendSlice(self.allocator, folded_source);
+        try out.appendSlice(self.allocator,
+            \\
+            \\});
+            \\})()
+            \\
+        );
+        return out.toOwnedSlice(self.allocator);
+    }
+
+    fn loadCommonJsValue(self: *ModuleLoaderState, ctx: *ModuleContext, parent_id: []const u8, specifier: []const u8, resolved_hint: []const u8) !quickjs.Value {
+        const resolved = if (resolved_hint.len > 0)
+            try self.allocator.dupe(u8, resolved_hint)
+        else
+            try self.normalizeRequireSpecifier(parent_id, specifier);
+        defer self.allocator.free(resolved);
+
+        if (try self.getCachedCommonJsValue(ctx, resolved)) |cached| {
+            return cached;
+        }
+
+        const source = if (std.mem.endsWith(u8, resolved, ".json")) blk: {
+            const json = try std.Io.Dir.cwd().readFileAlloc(self.io, resolved, self.allocator, .limited(max_module_source_bytes));
+            defer self.allocator.free(json);
+            break :blk try std.fmt.allocPrint(self.allocator, "({s})", .{json});
+        } else blk: {
+            const raw = try std.Io.Dir.cwd().readFileAlloc(self.io, resolved, self.allocator, .limited(max_module_source_bytes));
+            defer self.allocator.free(raw);
+            if (!isCommonJsSource(resolved, raw)) return error.UnsupportedExternalModule;
+            break :blk try self.buildLazyCommonJsScriptSource(resolved, raw);
+        };
+        defer self.allocator.free(source);
+
+        const source_z = try self.allocator.dupeZ(u8, source);
+        defer self.allocator.free(source_z);
+        const filename_z = try self.allocator.dupeZ(u8, resolved);
+        defer self.allocator.free(filename_z);
+
+        const compile_start = if (self.profile_enabled) self.profileNow() else 0;
+        const value = ctx.eval(source_z[0..source.len], filename_z, .{});
+        if (self.profile_enabled) {
+            self.profile_compile_ns += self.profileNow() - compile_start;
+            self.profile_module_count += 1;
+        }
+        if (value.isException()) return error.EvaluationFailed;
+        return value;
+    }
+
+    fn getCachedCommonJsValue(self: *ModuleLoaderState, ctx: *ModuleContext, module_id: []const u8) !?quickjs.Value {
+        const module_literal = try escapeJsSingleQuotedString(self.allocator, module_id);
+        defer self.allocator.free(module_literal);
+        const source = try std.fmt.allocPrint(
+            self.allocator,
+            "(globalThis.__zigCjsRegistry && globalThis.__zigCjsRegistry.has('{s}')) ? globalThis.__zigCjsRegistry.get('{s}').exports : undefined",
+            .{ module_literal, module_literal },
+        );
+        defer self.allocator.free(source);
+        const source_z = try self.allocator.dupeZ(u8, source);
+        defer self.allocator.free(source_z);
+
+        const value = ctx.eval(source_z[0..source.len], "<zig-cjs-cache-get>", .{});
+        if (value.isException()) return error.EvaluationFailed;
+        if (value.isUndefined()) {
+            value.deinit(ctx);
+            return null;
+        }
+        return value;
+    }
+
+    fn normalizeRequireSpecifier(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) ![]u8 {
+        if (builtInModuleSource(module_name) != null) {
+            return self.allocator.dupe(u8, module_name);
+        }
+
+        if (self.mock_module_sources.contains(module_name)) {
+            return std.fmt.allocPrint(self.allocator, "__zig_mock__/{s}", .{module_name});
+        }
+
+        if (std.fs.path.isAbsolute(module_name)) {
+            return self.resolveRequireAbsolutePath(module_name);
+        }
+
+        if (isRelativeSpecifier(module_name)) {
+            return self.resolveRequireRelativePath(module_base_name, module_name);
+        }
+
+        if (try self.resolveNodeModuleRequire(module_base_name, module_name)) |resolved| {
+            return resolved;
+        }
+
+        return self.normalizeSpecifier(module_base_name, module_name);
+    }
+
+    fn resolveRequireRelativePath(self: *ModuleLoaderState, module_base_name: []const u8, specifier: []const u8) ![]u8 {
+        if (!std.fs.path.isAbsolute(module_base_name)) return error.ModuleNotFound;
+        const base_dir = std.fs.path.dirname(module_base_name) orelse return error.ModuleNotFound;
+        const candidate = try std.fs.path.resolve(self.allocator, &.{ base_dir, specifier });
+        errdefer self.allocator.free(candidate);
+        return self.resolveRequirePathWithProbing(candidate);
+    }
+
+    fn resolveRequireAbsolutePath(self: *ModuleLoaderState, specifier: []const u8) ![]u8 {
+        const candidate = try std.fs.path.resolve(self.allocator, &.{specifier});
+        errdefer self.allocator.free(candidate);
+        return self.resolveRequirePathWithProbing(candidate);
+    }
+
+    fn resolveRequirePathWithProbing(self: *ModuleLoaderState, candidate: []u8) ![]u8 {
+        if (self.pathIsSupportedFile(candidate)) return candidate;
+
+        const extensions = [_][]const u8{ ".js", ".cjs", ".json", ".mjs", ".ts", ".tsx", ".jsx" };
+        for (extensions) |extension| {
+            const path = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ candidate, extension });
+            if (self.pathIsSupportedFile(path)) {
+                self.allocator.free(candidate);
+                return path;
+            }
+            self.allocator.free(path);
+        }
+        for (extensions) |extension| {
+            const path = try std.fmt.allocPrint(self.allocator, "{s}/index{s}", .{ candidate, extension });
+            if (self.pathIsSupportedFile(path)) {
+                self.allocator.free(candidate);
+                return path;
+            }
+            self.allocator.free(path);
+        }
+
+        return error.ModuleNotFound;
+    }
+
+    fn resolveNodeModuleRequire(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) !?[]u8 {
+        const parsed = parseBarePackageSpecifier(module_name) orelse return null;
+        if (!std.fs.path.isAbsolute(module_base_name)) return null;
+
+        var current_dir = try self.allocator.dupe(u8, std.fs.path.dirname(module_base_name) orelse return null);
+        defer self.allocator.free(current_dir);
+
+        while (true) {
+            const package_dir = try std.fs.path.resolve(self.allocator, &.{ current_dir, "node_modules", parsed.package_name });
+            defer self.allocator.free(package_dir);
+
+            if (self.pathIsDirectory(package_dir)) {
+                if (try self.resolveNodeModuleRequireFromDirectory(package_dir, parsed.subpath)) |resolved| {
+                    return resolved;
+                }
+            }
+
+            const parent = std.fs.path.dirname(current_dir) orelse break;
+            if (parent.len == current_dir.len) break;
+
+            const next_dir = try self.allocator.dupe(u8, parent);
+            self.allocator.free(current_dir);
+            current_dir = next_dir;
+        }
+
+        return null;
+    }
+
+    fn resolveNodeModuleRequireFromDirectory(self: *ModuleLoaderState, package_dir: []const u8, subpath: []const u8) !?[]u8 {
+        if (subpath.len > 0) {
+            if (try self.resolveNodeModuleSubpathFromExportsWithMode(package_dir, subpath, .require)) |resolved| {
+                return resolved;
+            }
+
+            const subpath_candidate = try std.fs.path.resolve(self.allocator, &.{ package_dir, subpath });
+            errdefer self.allocator.free(subpath_candidate);
+
+            if (self.pathIsDirectory(subpath_candidate)) {
+                if (try self.resolveNodeModulePackageRoot(subpath_candidate)) |resolved_dir_entry| {
+                    self.allocator.free(subpath_candidate);
+                    return resolved_dir_entry;
+                }
+            }
+
+            return self.resolvePathWithProbing(subpath_candidate) catch |err| switch (err) {
+                error.ModuleNotFound => {
+                    self.allocator.free(subpath_candidate);
+                    return null;
+                },
+                else => return err,
+            };
+        }
+
+        return self.resolveNodeModulePackageRootWithMode(package_dir, .require);
+    }
+
+    fn resolveNodeModulePackageRootWithMode(self: *ModuleLoaderState, package_dir: []const u8, mode: PackageExportMode) !?[]u8 {
+        const package_json_path = try std.fs.path.resolve(self.allocator, &.{ package_dir, "package.json" });
+        defer self.allocator.free(package_json_path);
+
+        const package_json_stat = std.Io.Dir.cwd().statFile(self.io, package_json_path, .{}) catch return null;
+        if (package_json_stat.kind != .file) return null;
+
+        const package_json_source = try std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            package_json_path,
+            self.allocator,
+            .limited(max_package_json_bytes),
+        );
+        defer self.allocator.free(package_json_source);
+
+        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, package_json_source, .{});
+        defer parsed.deinit();
+
+        const root = parsed.value;
+        if (root == .object) {
+            if (root.object.get("exports")) |exports_value| {
+                if (jsonExtractPackageTarget(exports_value, mode)) |entry| {
+                    if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
+                        return resolved;
+                    }
+                }
+            }
+
+            if (jsonObjectString(root.object, "main")) |entry| {
+                if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
+                    return resolved;
+                }
+            }
+        }
+
+        return null;
     }
 
     fn recordCommonJsRequirePropertyRequests(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) !void {
@@ -1289,6 +1600,10 @@ fn escapeJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
     }
 
     fn resolveNodeModuleSubpathFromExports(self: *ModuleLoaderState, package_dir: []const u8, subpath: []const u8) !?[]u8 {
+        return self.resolveNodeModuleSubpathFromExportsWithMode(package_dir, subpath, .import);
+    }
+
+    fn resolveNodeModuleSubpathFromExportsWithMode(self: *ModuleLoaderState, package_dir: []const u8, subpath: []const u8, mode: PackageExportMode) !?[]u8 {
         const package_json_path = try std.fs.path.resolve(self.allocator, &.{ package_dir, "package.json" });
         defer self.allocator.free(package_json_path);
 
@@ -1309,7 +1624,7 @@ fn escapeJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
         defer parsed.deinit();
 
         const root = parsed.value;
-        const target = jsonResolvePackageSubpathImport(self.allocator, root, subpath) orelse return null;
+        const target = jsonResolvePackageSubpath(self.allocator, root, subpath, mode) orelse return null;
         defer self.allocator.free(target);
 
         return self.resolveNodeModulePackageEntryPath(package_dir, target);
@@ -1735,7 +2050,13 @@ fn jsonResolvePackageRootImport(root: std.json.Value) ?[]const u8 {
     return jsonExtractImportTarget(exports_value);
 }
 
+const PackageExportMode = enum { import, require };
+
 fn jsonResolvePackageSubpathImport(allocator: Allocator, root: std.json.Value, subpath: []const u8) ?[]u8 {
+    return jsonResolvePackageSubpath(allocator, root, subpath, .import);
+}
+
+fn jsonResolvePackageSubpath(allocator: Allocator, root: std.json.Value, subpath: []const u8, mode: PackageExportMode) ?[]u8 {
     if (root != .object) {
         return null;
     }
@@ -1750,7 +2071,7 @@ fn jsonResolvePackageSubpathImport(allocator: Allocator, root: std.json.Value, s
     defer allocator.free(exact_key);
 
     if (exports_object.get(exact_key)) |exact_export| {
-        if (jsonExtractImportTarget(exact_export)) |target| {
+        if (jsonExtractPackageTarget(exact_export, mode)) |target| {
             return allocator.dupe(u8, target) catch return null;
         }
     }
@@ -1780,7 +2101,7 @@ fn jsonResolvePackageSubpathImport(allocator: Allocator, root: std.json.Value, s
         }
 
         const wildcard_value = subpath[key_pattern_prefix.len .. subpath.len - key_pattern_suffix.len];
-        const target = jsonExtractImportTarget(entry.value_ptr.*) orelse continue;
+        const target = jsonExtractPackageTarget(entry.value_ptr.*, mode) orelse continue;
         if (std.mem.indexOfScalar(u8, target, '*')) |target_wildcard_index| {
             var builder: std.ArrayList(u8) = .empty;
             defer builder.deinit(allocator);
@@ -1795,6 +2116,13 @@ fn jsonResolvePackageSubpathImport(allocator: Allocator, root: std.json.Value, s
     }
 
     return null;
+}
+
+fn jsonExtractPackageTarget(value: std.json.Value, mode: PackageExportMode) ?[]const u8 {
+    return switch (mode) {
+        .import => jsonExtractImportTarget(value),
+        .require => jsonExtractRequireTarget(value),
+    };
 }
 
 fn jsonExtractImportTarget(value: std.json.Value) ?[]const u8 {
@@ -1832,6 +2160,37 @@ fn jsonExtractImportTarget(value: std.json.Value) ?[]const u8 {
                 if (jsonExtractImportTarget(item)) |target| {
                     break :blk target;
                 }
+            }
+            break :blk null;
+        },
+        else => null,
+    };
+}
+
+fn jsonExtractRequireTarget(value: std.json.Value) ?[]const u8 {
+    return switch (value) {
+        .string => |text| text,
+        .object => |object| blk: {
+            if (object.get(".")) |root_export| {
+                if (jsonExtractRequireTarget(root_export)) |target| break :blk target;
+            }
+            if (object.get("node")) |node_export| {
+                if (jsonExtractRequireTarget(node_export)) |target| break :blk target;
+            }
+            if (object.get("require")) |require_export| {
+                if (jsonExtractRequireTarget(require_export)) |target| break :blk target;
+            }
+            if (object.get("default")) |default_export| {
+                if (jsonExtractRequireTarget(default_export)) |target| break :blk target;
+            }
+            if (object.get("import")) |import_export| {
+                if (jsonExtractRequireTarget(import_export)) |target| break :blk target;
+            }
+            break :blk null;
+        },
+        .array => |array| blk: {
+            for (array.items) |item| {
+                if (jsonExtractRequireTarget(item)) |target| break :blk target;
             }
             break :blk null;
         },
@@ -2377,6 +2736,16 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
     var module_loader_state = ModuleLoaderState.init(allocator, io);
     defer module_loader_state.deinit();
     module_loader_state.runtime = &vm;
+    active_cjs_loader_state = &module_loader_state;
+    defer active_cjs_loader_state = null;
+
+    installNativeRequire(&vm) catch |err| {
+        return failureFromRuntimeException(allocator, path, "failed to initialize native CommonJS loader", err, &vm);
+    };
+    defer vm.evalScript(
+        "<zig-cjs-cleanup>",
+        "try { if (globalThis.__zigCjsRegistry) globalThis.__zigCjsRegistry.clear(); delete globalThis.__zigCjsRegistry; delete globalThis.__zigNativeRequire; } catch {}",
+    ) catch {};
 
     vm.setModuleLoaderFunc(ModuleLoaderState, &module_loader_state, moduleNormalize, moduleLoad);
 
@@ -2617,6 +2986,59 @@ fn evalRunnerProcessGlobals(allocator: Allocator, vm: *Runtime, root: []const u8
     defer allocator.free(source);
 
     try vm.evalScript("<zig-process-globals>", source);
+}
+
+fn installNativeRequire(vm: *Runtime) !void {
+    const ctx = vm.adapter.ctx;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const func = quickjs.Value.initCFunction(ctx, jsNativeRequire, "__zigNativeRequire", 3);
+    if (func.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigNativeRequire", func) catch return error.EvaluationFailed;
+}
+
+fn jsNativeRequire(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const state = active_cjs_loader_state orelse {
+        _ = quickjs.c.JS_ThrowReferenceError(ctx.cval(), "native CommonJS loader is not active");
+        return quickjs.Value.exception;
+    };
+    if (args.len < 2) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "__zigNativeRequire expects parent and specifier");
+        return quickjs.Value.exception;
+    }
+
+    const parent = dupArgString(state.allocator, ctx, args[0]) catch return quickjs.Value.exception;
+    defer state.allocator.free(parent);
+    const specifier = dupArgString(state.allocator, ctx, args[1]) catch return quickjs.Value.exception;
+    defer state.allocator.free(specifier);
+    const resolved_hint = if (args.len > 2)
+        dupArgString(state.allocator, ctx, args[2]) catch return quickjs.Value.exception
+    else
+        state.allocator.dupe(u8, "") catch return quickjs.Value.exception;
+    defer state.allocator.free(resolved_hint);
+
+    return state.loadCommonJsValue(ctx, parent, specifier, resolved_hint) catch |err| {
+        if (err == error.EvaluationFailed) {
+            return quickjs.Value.exception;
+        }
+        _ = quickjs.c.JS_ThrowReferenceError(
+            ctx.cval(),
+            "native CommonJS require failed: %s from %s (%s)",
+            specifier.ptr,
+            parent.ptr,
+            @errorName(err).ptr,
+        );
+        return quickjs.Value.exception;
+    };
+}
+
+fn dupArgString(allocator: Allocator, ctx: *quickjs.Context, value: quickjs.c.JSValue) ![]u8 {
+    const js_value = quickjs.Value.fromCVal(value);
+    const c_text = js_value.toCStringLen(ctx) orelse return error.ValueConversionFailed;
+    defer ctx.freeCString(c_text.ptr);
+    return allocator.dupe(u8, c_text.ptr[0..c_text.len]);
 }
 
 fn escapeProcessJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
@@ -3169,8 +3591,13 @@ fn pruneUnrequestedCommonJsExportAssignments(allocator: Allocator, source: []con
             if (name_end > name_start) {
                 const name = source[name_start..name_end];
                 const after_name = std.mem.trim(u8, source[name_end..], " \t\r\n");
-                if (std.mem.startsWith(u8, after_name, "=") and !requested.contains(name)) {
-                    cursor = findStatementEnd(source, cursor);
+                const statement_end = findStatementEnd(source, cursor);
+                if (std.mem.startsWith(u8, after_name, "=") and
+                    !requested.contains(name) and
+                    startsStatementAt(source, cursor) and
+                    std.mem.indexOf(u8, source[cursor + "exports.".len .. statement_end], "exports.") == null)
+                {
+                    cursor = statement_end;
                     if (cursor < source.len and source[cursor] == ';') cursor += 1;
                     continue;
                 }
@@ -3299,6 +3726,19 @@ fn findStatementEnd(source: []const u8, start: usize) usize {
     }
 
     return source.len;
+}
+
+fn startsStatementAt(source: []const u8, index: usize) bool {
+    var cursor = index;
+    while (cursor > 0) {
+        cursor -= 1;
+        switch (source[cursor]) {
+            ' ', '\t', '\r' => continue,
+            '\n', ';', '{', '}' => return true,
+            else => return false,
+        }
+    }
+    return true;
 }
 
 fn isUnusedImportStatement(source: []const u8, statement: []const u8, statement_end: usize) bool {
