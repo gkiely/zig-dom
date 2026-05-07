@@ -398,6 +398,43 @@ pub const Summary = struct {
     }
 };
 
+const ExportNameSet = struct {
+    all: bool = false,
+    names: std.StringHashMap(void) = undefined,
+    initialized: bool = false,
+
+    fn init() ExportNameSet {
+        return .{};
+    }
+
+    fn add(self: *ExportNameSet, allocator: Allocator, name: []const u8) !void {
+        if (self.all) return;
+        if (!self.initialized) {
+            self.names = std.StringHashMap(void).init(allocator);
+            self.initialized = true;
+        }
+        const entry = try self.names.getOrPut(name);
+        if (!entry.found_existing) {
+            entry.key_ptr.* = try allocator.dupe(u8, name);
+            entry.value_ptr.* = {};
+        }
+    }
+
+    fn contains(self: *const ExportNameSet, name: []const u8) bool {
+        if (self.all) return true;
+        if (!self.initialized) return false;
+        return self.names.contains(name);
+    }
+
+    fn deinit(self: *ExportNameSet, allocator: Allocator) void {
+        if (!self.initialized) return;
+        var iterator = self.names.iterator();
+        while (iterator.next()) |entry| allocator.free(entry.key_ptr.*);
+        self.names.deinit();
+        self.initialized = false;
+    }
+};
+
 const ModuleLoaderState = struct {
     const PathAlias = struct {
         pattern: []u8,
@@ -409,6 +446,7 @@ const ModuleLoaderState = struct {
     runtime: ?*Runtime,
     loaded_modules: std.StringHashMap(*ModuleDef),
     mock_module_sources: std.StringHashMap([]u8),
+    requested_exports: std.StringHashMap(ExportNameSet),
     path_alias_root: ?[]u8,
     path_aliases: std.ArrayList(PathAlias),
     profile_enabled: bool,
@@ -425,6 +463,7 @@ const ModuleLoaderState = struct {
             .runtime = null,
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
+            .requested_exports = std.StringHashMap(ExportNameSet).init(allocator),
             .path_alias_root = null,
             .path_aliases = .empty,
             .profile_enabled = std.c.getenv("ZIG_DOM_PROFILE") != null,
@@ -445,6 +484,12 @@ const ModuleLoaderState = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.mock_module_sources.deinit();
+        var requested_iterator = self.requested_exports.iterator();
+        while (requested_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            entry.value_ptr.deinit(self.allocator);
+        }
+        self.requested_exports.deinit();
 
         var loaded_iterator = self.loaded_modules.iterator();
         while (loaded_iterator.next()) |entry| {
@@ -455,6 +500,28 @@ const ModuleLoaderState = struct {
 
     fn profileNow(self: *ModuleLoaderState) i128 {
         return std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
+    }
+
+    fn requestedExportsFor(self: *ModuleLoaderState, module_id: []const u8) ?*ExportNameSet {
+        return self.requested_exports.getPtr(module_id);
+    }
+
+    fn recordRequestedExport(self: *ModuleLoaderState, module_id: []const u8, export_name: []const u8) !void {
+        const entry = try self.requested_exports.getOrPut(module_id);
+        if (!entry.found_existing) {
+            entry.key_ptr.* = try self.allocator.dupe(u8, module_id);
+            entry.value_ptr.* = ExportNameSet.init();
+        }
+        try entry.value_ptr.add(self.allocator, export_name);
+    }
+
+    fn recordAllRequestedExports(self: *ModuleLoaderState, module_id: []const u8) !void {
+        const entry = try self.requested_exports.getOrPut(module_id);
+        if (!entry.found_existing) {
+            entry.key_ptr.* = try self.allocator.dupe(u8, module_id);
+            entry.value_ptr.* = ExportNameSet.init();
+        }
+        entry.value_ptr.all = true;
     }
 
     fn normalizeSpecifier(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) ![]u8 {
@@ -850,9 +917,150 @@ const ModuleLoaderState = struct {
         else
             return error.UnsupportedTransformLoader;
         _ = extension;
-        const transformed = try yuku_transform.transformSource(self.allocator, module_id, contents, loader);
+        const can_tree_shake = std.mem.eql(u8, loader, "ts") or std.mem.eql(u8, loader, "tsx");
+        const source = if (can_tree_shake) blk: {
+            const requested = self.requestedExportsFor(module_id) orelse break :blk try self.allocator.dupe(u8, contents);
+            const export_pruned = try pruneUnrequestedTsExports(self.allocator, contents, requested);
+            defer self.allocator.free(export_pruned);
+            break :blk try pruneUnusedTsConstDeclarations(self.allocator, export_pruned);
+        } else try self.allocator.dupe(u8, contents);
+        defer self.allocator.free(source);
+
+        const transformed = try yuku_transform.transformSource(self.allocator, module_id, source, loader);
         defer self.allocator.free(transformed);
         return pruneUnusedImports(self.allocator, transformed);
+    }
+
+    fn recordStaticImportRequests(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) !void {
+        var cursor: usize = 0;
+        while (std.mem.indexOfPos(u8, source, cursor, "import")) |start| {
+            if (!hasWordAt(source, start, "import")) {
+                cursor = start + "import".len;
+                continue;
+            }
+
+            const end = findImportStatementEnd(source, start);
+            const statement = source[start..end];
+            const parsed = parseImportStatement(statement) orelse {
+                cursor = end;
+                continue;
+            };
+
+            const resolved = self.normalizeSpecifier(module_id, parsed.specifier) catch {
+                cursor = end;
+                continue;
+            };
+            defer self.allocator.free(resolved);
+
+            if (parsed.all) {
+                try self.recordAllRequestedExports(resolved);
+            } else {
+                try self.recordImportBindings(resolved, parsed.bindings);
+            }
+
+            cursor = end;
+        }
+    }
+
+    fn collectImportGraph(self: *ModuleLoaderState, module_id: []const u8) !void {
+        var visited = std.StringHashMap(void).init(self.allocator);
+        defer {
+            var iterator = visited.iterator();
+            while (iterator.next()) |entry| self.allocator.free(entry.key_ptr.*);
+            visited.deinit();
+        }
+
+        try self.collectImportGraphInto(module_id, &visited);
+    }
+
+    fn collectImportGraphInto(self: *ModuleLoaderState, module_id: []const u8, visited: *std.StringHashMap(void)) !void {
+        if (visited.contains(module_id)) return;
+        const visited_key = try self.allocator.dupe(u8, module_id);
+        errdefer self.allocator.free(visited_key);
+        try visited.put(visited_key, {});
+
+        if (builtInModuleSource(module_id) != null or isMockModuleId(module_id)) return;
+
+        const source = try self.loadModuleSource(module_id);
+        defer self.allocator.free(source);
+
+        var imports: std.ArrayList([]u8) = .empty;
+        defer {
+            for (imports.items) |item| self.allocator.free(item);
+            imports.deinit(self.allocator);
+        }
+
+        try self.recordStaticImportRequestsAndCollect(module_id, source, &imports);
+        for (imports.items) |import_id| {
+            try self.collectImportGraphInto(import_id, visited);
+        }
+    }
+
+    fn recordStaticImportRequestsAndCollect(
+        self: *ModuleLoaderState,
+        module_id: []const u8,
+        source: []const u8,
+        imports: *std.ArrayList([]u8),
+    ) !void {
+        var cursor: usize = 0;
+        while (std.mem.indexOfPos(u8, source, cursor, "import")) |start| {
+            if (!hasWordAt(source, start, "import")) {
+                cursor = start + "import".len;
+                continue;
+            }
+
+            const end = findImportStatementEnd(source, start);
+            const statement = source[start..end];
+            const parsed = parseImportStatement(statement) orelse {
+                cursor = end;
+                continue;
+            };
+
+            const resolved = self.normalizeSpecifier(module_id, parsed.specifier) catch {
+                cursor = end;
+                continue;
+            };
+            errdefer self.allocator.free(resolved);
+
+            if (parsed.all) {
+                try self.recordAllRequestedExports(resolved);
+            } else {
+                try self.recordImportBindings(resolved, parsed.bindings);
+            }
+
+            try imports.append(self.allocator, resolved);
+            cursor = end;
+        }
+    }
+
+    fn recordImportBindings(self: *ModuleLoaderState, resolved: []const u8, bindings: []const u8) !void {
+        const trimmed = std.mem.trim(u8, bindings, " \t\r\n");
+        if (trimmed.len == 0) return;
+
+        if (std.mem.startsWith(u8, trimmed, "{") and std.mem.endsWith(u8, trimmed, "}")) {
+            var parts = std.mem.tokenizeScalar(u8, trimmed[1 .. trimmed.len - 1], ',');
+            while (parts.next()) |raw_part| {
+                const part = std.mem.trim(u8, raw_part, " \t\r\n");
+                if (part.len == 0 or std.mem.startsWith(u8, part, "type ")) continue;
+                const as_index = std.mem.indexOf(u8, part, " as ");
+                const name = std.mem.trim(u8, if (as_index) |idx| part[0..idx] else part, " \t\r\n");
+                if (name.len > 0) try self.recordRequestedExport(resolved, name);
+            }
+            return;
+        }
+
+        if (std.mem.startsWith(u8, trimmed, "* as ")) {
+            try self.recordAllRequestedExports(resolved);
+            return;
+        }
+
+        if (std.mem.indexOfScalar(u8, trimmed, ',')) |comma| {
+            try self.recordRequestedExport(resolved, "default");
+            try self.recordImportBindings(resolved, trimmed[comma + 1 ..]);
+            return;
+        }
+
+        try self.recordRequestedExport(resolved, "default");
     }
 
     fn clearMockModules(self: *ModuleLoaderState) void {
@@ -2123,6 +2331,9 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             return collectionFailureFromError(allocator, path, "collection failed", err);
         };
         defer allocator.free(setup_source);
+        module_loader_state.recordStaticImportRequests(setup_module_id, setup_source) catch |err| {
+            return collectionFailureFromError(allocator, path, "collection failed", err);
+        };
 
         vm.evalScript("<zig-setup-dom-probe-begin>", setup_dom_probe_begin_source) catch |err| {
             return failureFromRuntimeException(allocator, path, "failed to prepare setup environment", err, &vm);
@@ -2147,10 +2358,17 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
 
+    module_loader_state.collectImportGraph(entry_module_id) catch |err| {
+        return collectionFailureFromError(allocator, path, "collection failed", err);
+    };
+
     const entry_source = module_loader_state.loadModuleSource(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
     defer allocator.free(entry_source);
+    module_loader_state.recordStaticImportRequests(entry_module_id, entry_source) catch |err| {
+        return collectionFailureFromError(allocator, path, "collection failed", err);
+    };
 
     vm.evalModule(entry_module_id, entry_source) catch |err| {
         return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
@@ -2404,6 +2622,10 @@ fn moduleLoad(
         return null;
     };
     defer state.allocator.free(source);
+    state.recordStaticImportRequests(module_id, source) catch {
+        _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
+        return null;
+    };
 
     const source_z = state.allocator.dupeZ(u8, source) catch {
         _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
@@ -2744,6 +2966,34 @@ fn findImportStatementEnd(source: []const u8, start: usize) usize {
     return source.len;
 }
 
+const ParsedImportStatement = struct {
+    specifier: []const u8,
+    bindings: []const u8,
+    all: bool,
+};
+
+fn parseImportStatement(statement: []const u8) ?ParsedImportStatement {
+    const trimmed = std.mem.trim(u8, statement, " \t\r\n;");
+    if (!std.mem.startsWith(u8, trimmed, "import")) return null;
+    if (!hasWordAt(trimmed, 0, "import")) return null;
+    const rest = std.mem.trim(u8, trimmed["import".len..], " \t\r\n");
+
+    if (rest.len > 0 and (rest[0] == '"' or rest[0] == '\'')) {
+        const specifier = parseImportQuotedSpecifier(rest) orelse return null;
+        return .{ .specifier = specifier, .bindings = "", .all = true };
+    }
+
+    const from_index = findImportFromIndex(rest) orelse return null;
+    const bindings = std.mem.trim(u8, rest[0..from_index], " \t\r\n");
+    const from_rest = std.mem.trim(u8, rest[from_index + "from".len ..], " \t\r\n");
+    const specifier = parseImportQuotedSpecifier(from_rest) orelse return null;
+    return .{
+        .specifier = specifier,
+        .bindings = bindings,
+        .all = std.mem.startsWith(u8, bindings, "* as "),
+    };
+}
+
 fn findImportFromIndex(source: []const u8) ?usize {
     var cursor: usize = 0;
     while (std.mem.indexOfPos(u8, source, cursor, "from")) |index| {
@@ -2754,6 +3004,136 @@ fn findImportFromIndex(source: []const u8) ?usize {
         cursor = after;
     }
     return null;
+}
+
+fn parseImportQuotedSpecifier(source: []const u8) ?[]const u8 {
+    if (source.len < 2) return null;
+    const quote = source[0];
+    if (quote != '"' and quote != '\'') return null;
+    var cursor: usize = 1;
+    while (cursor < source.len) : (cursor += 1) {
+        if (source[cursor] == quote) return source[1..cursor];
+    }
+    return null;
+}
+
+fn pruneUnrequestedTsExports(allocator: Allocator, source: []const u8, requested: *const ExportNameSet) ![]u8 {
+    if (requested.all) return allocator.dupe(u8, source);
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        if (std.mem.startsWith(u8, source[cursor..], "export const ")) {
+            const name_start = cursor + "export const ".len;
+            const name_end = readIdentifierEnd(source, name_start);
+            if (name_end > name_start) {
+                const name = source[name_start..name_end];
+                const statement_end = findStatementEnd(source, cursor);
+                if (!requested.contains(name)) {
+                    cursor = statement_end;
+                    if (cursor < source.len and source[cursor] == ';') cursor += 1;
+                    continue;
+                }
+            }
+        }
+
+        try out.append(allocator, source[cursor]);
+        cursor += 1;
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn pruneUnusedTsConstDeclarations(allocator: Allocator, source: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        if (std.mem.startsWith(u8, source[cursor..], "const ") and !isExportedConstPrefix(source, cursor)) {
+            const name_start = cursor + "const ".len;
+            const name_end = readIdentifierEnd(source, name_start);
+            if (name_end > name_start) {
+                const name = source[name_start..name_end];
+                const statement_end = findStatementEnd(source, cursor);
+                if (!identifierUsedAfter(source, statement_end, name)) {
+                    cursor = statement_end;
+                    if (cursor < source.len and source[cursor] == ';') cursor += 1;
+                    continue;
+                }
+            }
+        }
+
+        try out.append(allocator, source[cursor]);
+        cursor += 1;
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn isExportedConstPrefix(source: []const u8, const_index: usize) bool {
+    if (const_index < "export ".len) return false;
+    return std.mem.eql(u8, source[const_index - "export ".len .. const_index], "export ");
+}
+
+fn readIdentifierEnd(source: []const u8, start: usize) usize {
+    var cursor = start;
+    while (cursor < source.len and isIdentifierContinue(source[cursor])) : (cursor += 1) {}
+    return cursor;
+}
+
+fn findStatementEnd(source: []const u8, start: usize) usize {
+    var cursor = start;
+    var paren_depth: usize = 0;
+    var brace_depth: usize = 0;
+    var bracket_depth: usize = 0;
+    var quote: ?u8 = null;
+    var escaped = false;
+
+    while (cursor < source.len) : (cursor += 1) {
+        const ch = source[cursor];
+        if (quote) |q| {
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == q) {
+                quote = null;
+            }
+            continue;
+        }
+
+        if (ch == '"' or ch == '\'' or ch == '`') {
+            quote = ch;
+            continue;
+        }
+
+        switch (ch) {
+            '(' => paren_depth += 1,
+            ')' => {
+                if (paren_depth > 0) paren_depth -= 1;
+            },
+            '{' => brace_depth += 1,
+            '}' => {
+                if (brace_depth > 0) brace_depth -= 1;
+            },
+            '[' => bracket_depth += 1,
+            ']' => {
+                if (bracket_depth > 0) bracket_depth -= 1;
+            },
+            ';' => {
+                if (paren_depth == 0 and brace_depth == 0 and bracket_depth == 0) return cursor;
+            },
+            '\n' => {
+                if (paren_depth == 0 and brace_depth == 0 and bracket_depth == 0) return cursor;
+            },
+            else => {},
+        }
+    }
+
+    return source.len;
 }
 
 fn isUnusedImportStatement(source: []const u8, statement: []const u8, statement_end: usize) bool {
@@ -2847,6 +3227,30 @@ test "foldNodeEnvConditionals keeps only active CommonJS branch" {
     try std.testing.expect(std.mem.indexOf(u8, out, "require('./dev.js')") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "require('./prod.js')") == null);
     try std.testing.expect(std.mem.indexOf(u8, out, "checkDCE") != null);
+}
+
+test "onLoad tree shake prunes unrequested exports before transform" {
+    var requested = ExportNameSet.init();
+    defer requested.deinit(std.testing.allocator);
+    try requested.add(std.testing.allocator, "used");
+
+    const source =
+        \\import { darken } from "polished";
+        \\export const used = "used";
+        \\export const unused = darken(0.2, "#fff");
+        \\const helper = darken(0.1, "#000");
+    ;
+    const export_pruned = try pruneUnrequestedTsExports(std.testing.allocator, source, &requested);
+    defer std.testing.allocator.free(export_pruned);
+    const const_pruned = try pruneUnusedTsConstDeclarations(std.testing.allocator, export_pruned);
+    defer std.testing.allocator.free(const_pruned);
+    const import_pruned = try pruneUnusedImports(std.testing.allocator, const_pruned);
+    defer std.testing.allocator.free(import_pruned);
+
+    try std.testing.expect(std.mem.indexOf(u8, import_pruned, "export const used") != null);
+    try std.testing.expect(std.mem.indexOf(u8, import_pruned, "unused") == null);
+    try std.testing.expect(std.mem.indexOf(u8, import_pruned, "helper") == null);
+    try std.testing.expect(std.mem.indexOf(u8, import_pruned, "darken") == null);
 }
 
 fn canonicalizePath(allocator: Allocator, io: std.Io, path: []const u8) ![]u8 {
