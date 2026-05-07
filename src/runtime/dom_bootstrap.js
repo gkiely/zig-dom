@@ -489,6 +489,7 @@
       super();
       this[HANDLE] = Number(handle);
       this[OWNER_DOCUMENT_HANDLE] = Number(ownerDocumentHandle || 0);
+      this.__zigDomNativeHandle = this[HANDLE];
       this._nodeTypeOverride = Number(nodeTypeOverride || 0);
       this._nodeNameOverride = nodeNameOverride == null ? null : String(nodeNameOverride);
       this._childNodesCache = null;
@@ -1895,6 +1896,7 @@
     ResizeObserver,
     Window,
     Document,
+    __zigDomWrapNode: wrapNode,
     window,
     self: window,
     document

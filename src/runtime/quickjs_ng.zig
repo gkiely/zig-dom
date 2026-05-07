@@ -1,6 +1,7 @@
 const std = @import("std");
 const quickjs = @import("quickjs");
 const zig_dom = @import("../zig_dom.zig");
+const dom_classes = @import("dom_classes.zig");
 
 const Allocator = std.mem.Allocator;
 const dom_bootstrap_source = @embedFile("dom_bootstrap.js");
@@ -34,6 +35,7 @@ pub const Runtime = struct {
     rt: *quickjs.Runtime,
     ctx: *quickjs.Context,
     dom_window_handle: u64,
+    dom_classes_state: ?dom_classes.DomClasses,
 
     pub fn init(allocator: Allocator, io: std.Io) RuntimeError!Runtime {
         host_io = io;
@@ -49,6 +51,7 @@ pub const Runtime = struct {
             .rt = rt,
             .ctx = ctx,
             .dom_window_handle = 0,
+            .dom_classes_state = null,
         };
 
         try runtime.installHostGlobals();
@@ -57,6 +60,10 @@ pub const Runtime = struct {
     }
 
     pub fn deinit(self: *Runtime) void {
+        if (self.dom_classes_state) |*classes| {
+            classes.deinit();
+            self.dom_classes_state = null;
+        }
         if (self.dom_window_handle != 0) {
             zig_dom.zig_dom_destroy_window(self.dom_window_handle);
             self.dom_window_handle = 0;
@@ -326,6 +333,15 @@ pub const Runtime = struct {
         const global = self.ctx.getGlobalObject();
         defer global.deinit(self.ctx);
 
+        var classes_state = dom_classes.DomClasses.init(self.allocator, self.rt, self.ctx, global) catch |err| {
+            return switch (err) {
+                error.OutOfMemory => error.OutOfMemory,
+                else => error.EvaluationFailed,
+            };
+        };
+        errdefer classes_state.deinit();
+        self.dom_classes_state = classes_state;
+
         const native = quickjs.Value.initObject(self.ctx);
         if (native.isException()) {
             return error.OutOfMemory;
@@ -485,6 +501,14 @@ pub const Runtime = struct {
         global.setPropertyStr(self.ctx, "__zigDomDocumentHandle", quickjs.Value.initInt64(@intCast(document_handle))) catch return error.EvaluationFailed;
 
         try self.evalScript("<zig-dom-bootstrap>", dom_bootstrap_source);
+        if (self.dom_classes_state) |*classes| {
+            classes.installNodeSlice(self.ctx) catch |err| {
+                return switch (err) {
+                    error.OutOfMemory => error.OutOfMemory,
+                    else => error.EvaluationFailed,
+                };
+            };
+        }
         self.dom_window_handle = window_handle;
     }
 };
