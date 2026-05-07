@@ -1,14 +1,137 @@
 const std = @import("std");
 const quickjs = @import("quickjs");
-const zig_dom = @import("../zig_dom.zig");
+const bindings = @import("bindings.zig");
+const character_data_surface = @import("character_data.zig");
+const document_surface = @import("document.zig");
+const element_surface = @import("element.zig");
+const event_target_surface = @import("event_target.zig");
+const node_surface = @import("node.zig");
+const surfaces = @import("surfaces.zig");
+const zig_dom = @import("dom.zig");
 const c = quickjs.c;
 
 const Allocator = std.mem.Allocator;
+pub const DomClassesError = bindings.DomClassesError;
+const installAccessor = bindings.installAccessor;
+const installConstructor = bindings.installConstructor;
+const installGetter = bindings.installGetter;
+const installMethod = bindings.installMethod;
 
-pub const DomClassesError = error{
-    OutOfMemory,
-    RegistrationFailed,
-    PropertyAccessFailed,
+const EventTargetCallbacks = struct {
+    pub const addEventListener = jsEventTargetAddEventListener;
+    pub const removeEventListener = jsEventTargetRemoveEventListener;
+    pub const dispatchEvent = jsEventTargetDispatchEvent;
+};
+
+const NodeCallbacks = struct {
+    pub const nodeTypeGet = jsNodeTypeGet;
+    pub const nodeNameGet = jsNodeNameGet;
+    pub const parentNodeGet = jsNodeParentNodeGet;
+    pub const parentElementGet = jsNodeParentElementGet;
+    pub const firstChildGet = jsNodeFirstChildGet;
+    pub const lastChildGet = jsNodeLastChildGet;
+    pub const previousSiblingGet = jsNodePreviousSiblingGet;
+    pub const nextSiblingGet = jsNodeNextSiblingGet;
+    pub const ownerDocumentGet = jsNodeOwnerDocumentGet;
+    pub const isConnectedGet = jsNodeIsConnectedGet;
+    pub const childNodesGet = jsNodeChildNodesGet;
+    pub const childrenGet = jsNodeChildrenGet;
+    pub const firstElementChildGet = jsNodeFirstElementChildGet;
+    pub const lastElementChildGet = jsNodeLastElementChildGet;
+    pub const previousElementSiblingGet = jsNodePreviousElementSiblingGet;
+    pub const nextElementSiblingGet = jsNodeNextElementSiblingGet;
+    pub const childElementCountGet = jsNodeChildElementCountGet;
+    pub const textContentGet = jsNodeTextContentGet;
+    pub const textContentSet = jsNodeTextContentSet;
+    pub const nodeValueGet = jsNodeValueGet;
+    pub const nodeValueSet = jsNodeValueSet;
+    pub const outerHtmlGet = jsNodeOuterHtmlGet;
+    pub const contains = jsNodeContains;
+    pub const compareDocumentPosition = jsNodeCompareDocumentPosition;
+    pub const appendChild = jsNodeAppendChild;
+    pub const append = jsNodeAppend;
+    pub const prepend = jsNodePrepend;
+    pub const insertBefore = jsNodeInsertBefore;
+    pub const removeChild = jsNodeRemoveChild;
+    pub const replaceChild = jsNodeReplaceChild;
+    pub const cloneNode = jsNodeCloneNode;
+};
+
+const ElementCallbacks = struct {
+    pub const tagNameGet = jsElementTagNameGet;
+    pub const localNameGet = jsElementLocalNameGet;
+    pub const namespaceUriGet = jsElementNamespaceUriGet;
+    pub const idGet = jsElementIdGet;
+    pub const idSet = jsElementIdSet;
+    pub const classNameGet = jsElementClassNameGet;
+    pub const classNameSet = jsElementClassNameSet;
+    pub const innerHtmlGet = jsElementInnerHtmlGet;
+    pub const innerHtmlSet = jsElementInnerHtmlSet;
+    pub const outerHtmlGet = jsElementOuterHtmlGet;
+    pub const styleGet = jsElementStyleGet;
+    pub const getAttribute = jsElementGetAttribute;
+    pub const getAttributeNode = jsElementGetAttributeNode;
+    pub const setAttribute = jsElementSetAttribute;
+    pub const removeAttribute = jsElementRemoveAttribute;
+    pub const hasAttribute = jsElementHasAttribute;
+    pub const toggleAttribute = jsElementToggleAttribute;
+    pub const getAttributeNames = jsElementGetAttributeNames;
+    pub const attributesGet = jsElementAttributesGet;
+    pub const classListGet = jsElementClassListGet;
+    pub const datasetGet = jsElementDatasetGet;
+    pub const querySelector = jsElementQuerySelector;
+    pub const querySelectorAll = jsElementQuerySelectorAll;
+    pub const getElementsByClassName = jsElementGetElementsByClassName;
+    pub const matches = jsElementMatches;
+    pub const closest = jsElementClosest;
+    pub const insertAdjacentHTML = jsElementInsertAdjacentHTML;
+    pub const getBoundingClientRect = jsElementGetBoundingClientRect;
+    pub const getClientRects = jsElementGetClientRects;
+    pub const focus = jsElementFocus;
+    pub const blur = jsElementBlur;
+    pub const select = jsElementSelect;
+    pub const valueGet = jsElementValueGet;
+    pub const valueSet = jsElementValueSet;
+    pub const checkedGet = jsElementCheckedGet;
+    pub const checkedSet = jsElementCheckedSet;
+    pub const disabledGet = jsElementDisabledGet;
+    pub const disabledSet = jsElementDisabledSet;
+    pub const nameGet = jsElementNameGet;
+    pub const nameSet = jsElementNameSet;
+    pub const typeGet = jsElementTypeGet;
+    pub const typeSet = jsElementTypeSet;
+    pub const formGet = jsElementFormGet;
+    pub const formElementsGet = jsElementFormElementsGet;
+    pub const optionsGet = jsElementOptionsGet;
+};
+
+const DocumentCallbacks = struct {
+    pub const documentElementGet = jsDocumentElementGet;
+    pub const headGet = jsDocumentHeadGet;
+    pub const bodyGet = jsDocumentBodyGet;
+    pub const defaultViewGet = jsDocumentDefaultViewGet;
+    pub const implementationGet = jsDocumentImplementationGet;
+    pub const createElement = jsDocumentCreateElement;
+    pub const createElementNS = jsDocumentCreateElementNS;
+    pub const createTextNode = jsDocumentCreateTextNode;
+    pub const createComment = jsDocumentCreateComment;
+    pub const createDocumentFragment = jsDocumentCreateDocumentFragment;
+    pub const createDocumentType = jsDocumentCreateDocumentType;
+    pub const getElementById = jsDocumentGetElementById;
+    pub const querySelector = jsDocumentQuerySelector;
+    pub const querySelectorAll = jsDocumentQuerySelectorAll;
+    pub const getElementsByClassName = jsDocumentGetElementsByClassName;
+};
+
+const CharacterDataCallbacks = struct {
+    pub const dataGet = jsNodeTextContentGet;
+    pub const dataSet = jsNodeTextContentSet;
+    pub const lengthGet = jsCharacterDataLengthGet;
+    pub const appendData = jsCharacterDataAppendData;
+    pub const deleteData = jsCharacterDataDeleteData;
+    pub const insertData = jsCharacterDataInsertData;
+    pub const replaceData = jsCharacterDataReplaceData;
+    pub const substringData = jsCharacterDataSubstringData;
 };
 
 pub const DomClasses = struct {
@@ -51,38 +174,9 @@ pub const DomClasses = struct {
             return error.PropertyAccessFailed;
         }
 
-        try installGetter(ctx, node_proto, "nodeType", jsNodeTypeGet);
-        try installGetter(ctx, node_proto, "nodeName", jsNodeNameGet);
-        try installGetter(ctx, node_proto, "parentNode", jsNodeParentNodeGet);
-        try installGetter(ctx, node_proto, "parentElement", jsNodeParentElementGet);
-        try installGetter(ctx, node_proto, "firstChild", jsNodeFirstChildGet);
-        try installGetter(ctx, node_proto, "lastChild", jsNodeLastChildGet);
-        try installGetter(ctx, node_proto, "previousSibling", jsNodePreviousSiblingGet);
-        try installGetter(ctx, node_proto, "nextSibling", jsNodeNextSiblingGet);
-        try installGetter(ctx, node_proto, "ownerDocument", jsNodeOwnerDocumentGet);
-        try installGetter(ctx, node_proto, "isConnected", jsNodeIsConnectedGet);
-        try installGetter(ctx, node_proto, "childNodes", jsNodeChildNodesGet);
-        try installGetter(ctx, node_proto, "children", jsNodeChildrenGet);
-        try installGetter(ctx, node_proto, "firstElementChild", jsNodeFirstElementChildGet);
-        try installGetter(ctx, node_proto, "lastElementChild", jsNodeLastElementChildGet);
-        try installGetter(ctx, node_proto, "previousElementSibling", jsNodePreviousElementSiblingGet);
-        try installGetter(ctx, node_proto, "nextElementSibling", jsNodeNextElementSiblingGet);
-        try installGetter(ctx, node_proto, "childElementCount", jsNodeChildElementCountGet);
-        try installAccessor(ctx, node_proto, "textContent", jsNodeTextContentGet, jsNodeTextContentSet);
-        try installAccessor(ctx, node_proto, "nodeValue", jsNodeValueGet, jsNodeValueSet);
-        try installGetter(ctx, node_proto, "outerHTML", jsNodeOuterHtmlGet);
-        try installMethod(ctx, node_proto, "contains", jsNodeContains, 1);
-        try installMethod(ctx, node_proto, "appendChild", jsNodeAppendChild, 1);
-        try installMethod(ctx, node_proto, "append", jsNodeAppend, 1);
-        try installMethod(ctx, node_proto, "prepend", jsNodePrepend, 1);
-        try installMethod(ctx, node_proto, "insertBefore", jsNodeInsertBefore, 2);
-        try installMethod(ctx, node_proto, "removeChild", jsNodeRemoveChild, 1);
-        try installMethod(ctx, node_proto, "replaceChild", jsNodeReplaceChild, 2);
-        try installMethod(ctx, node_proto, "cloneNode", jsNodeCloneNode, 1);
+        try node_surface.installPrototype(ctx, node_proto, NodeCallbacks);
         try installMethod(ctx, node_proto, "click", jsElementClick, 0);
-        try installMethod(ctx, node_proto, "addEventListener", jsEventTargetAddEventListener, 3);
-        try installMethod(ctx, node_proto, "removeEventListener", jsEventTargetRemoveEventListener, 3);
-        try installMethod(ctx, node_proto, "dispatchEvent", jsEventTargetDispatchEvent, 1);
+        try event_target_surface.installPrototype(ctx, node_proto, EventTargetCallbacks);
         try installElementSlice(ctx, global);
         try installEventTargetSlice(ctx, global);
         try installDocumentDefaultView(ctx, global);
@@ -175,9 +269,7 @@ fn installEventTargetSlice(ctx: *quickjs.Context, global: quickjs.Value) DomClas
         return error.PropertyAccessFailed;
     }
 
-    try installMethod(ctx, proto, "addEventListener", jsEventTargetAddEventListener, 3);
-    try installMethod(ctx, proto, "removeEventListener", jsEventTargetRemoveEventListener, 3);
-    try installMethod(ctx, proto, "dispatchEvent", jsEventTargetDispatchEvent, 1);
+    try event_target_surface.installPrototype(ctx, proto, EventTargetCallbacks);
 }
 
 fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomClassesError!void {
@@ -191,21 +283,7 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     const svg_proto = try installConstructor(ctx, global, "SVGElement", jsConstructElement);
     svg_proto.setPrototype(ctx, element_proto) catch return error.PropertyAccessFailed;
 
-    const element_names = [_][:0]const u8{
-        "HTMLInputElement",
-        "HTMLButtonElement",
-        "HTMLFormElement",
-        "HTMLSelectElement",
-        "HTMLOptionElement",
-        "HTMLTextAreaElement",
-        "HTMLLabelElement",
-        "HTMLAnchorElement",
-        "HTMLIFrameElement",
-        "HTMLLIElement",
-        "HTMLOListElement",
-        "HTMLUListElement",
-    };
-    for (element_names) |name| {
+    for (surfaces.html_element_constructors) |name| {
         const proto = try installConstructor(ctx, global, name, jsConstructElement);
         proto.setPrototype(ctx, html_proto) catch return error.PropertyAccessFailed;
         proto.deinit(ctx);
@@ -235,6 +313,7 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     try installMethod(ctx, event_proto, "preventDefault", jsEventPreventDefault, 0);
     try installMethod(ctx, event_proto, "stopPropagation", jsEventStop, 0);
     try installMethod(ctx, event_proto, "stopImmediatePropagation", jsEventStop, 0);
+    try installMethod(ctx, event_proto, "composedPath", jsEventComposedPath, 0);
     const custom_event_proto = try installConstructor(ctx, global, "CustomEvent", jsConstructCustomEvent);
     custom_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
     const mouse_event_proto = try installConstructor(ctx, global, "MouseEvent", jsConstructMouseEvent);
@@ -265,51 +344,19 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     mouse_event_proto.deinit(ctx);
 }
 
-fn installConstructor(ctx: *quickjs.Context, global: quickjs.Value, name: [:0]const u8, comptime func: quickjs.cfunc.Func) DomClassesError!quickjs.Value {
-    const proto = quickjs.Value.initObject(ctx);
-    if (proto.isException()) return error.OutOfMemory;
-    const ctor = quickjs.Value.initCFunction2(ctx, func, name, 1, .constructor_or_func, 0);
-    if (ctor.isException()) {
-        proto.deinit(ctx);
-        return error.OutOfMemory;
-    }
-    ctor.setConstructor(ctx, proto);
-    global.setPropertyStr(ctx, name.ptr, ctor.dup(ctx)) catch {
-        proto.deinit(ctx);
-        ctor.deinit(ctx);
-        return error.PropertyAccessFailed;
-    };
-    ctor.deinit(ctx);
-    return proto;
-}
-
 fn setNodeConstants(ctx: *quickjs.Context, global: quickjs.Value) DomClassesError!void {
     const node = global.getPropertyStr(ctx, "Node");
     defer node.deinit(ctx);
     const proto = node.getPropertyStr(ctx, "prototype");
     defer proto.deinit(ctx);
-    const constants = [_]struct { name: [:0]const u8, value: i64 }{
-        .{ .name = "ELEMENT_NODE", .value = 1 },
-        .{ .name = "TEXT_NODE", .value = 3 },
-        .{ .name = "COMMENT_NODE", .value = 8 },
-        .{ .name = "DOCUMENT_NODE", .value = 9 },
-        .{ .name = "DOCUMENT_TYPE_NODE", .value = 10 },
-        .{ .name = "DOCUMENT_FRAGMENT_NODE", .value = 11 },
-        .{ .name = "DOCUMENT_POSITION_DISCONNECTED", .value = 1 },
-        .{ .name = "DOCUMENT_POSITION_PRECEDING", .value = 2 },
-        .{ .name = "DOCUMENT_POSITION_FOLLOWING", .value = 4 },
-        .{ .name = "DOCUMENT_POSITION_CONTAINS", .value = 8 },
-        .{ .name = "DOCUMENT_POSITION_CONTAINED_BY", .value = 16 },
-        .{ .name = "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC", .value = 32 },
-    };
-    for (constants) |constant| {
+    for (surfaces.node_constants) |constant| {
         node.setPropertyStr(ctx, constant.name.ptr, quickjs.Value.initInt64(constant.value)) catch return error.PropertyAccessFailed;
         proto.setPropertyStr(ctx, constant.name.ptr, quickjs.Value.initInt64(constant.value)) catch return error.PropertyAccessFailed;
     }
 }
 
 fn installFormElementPrototypeAccessors(ctx: *quickjs.Context, global: quickjs.Value) DomClassesError!void {
-    for ([_][*:0]const u8{ "HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement" }) |name| {
+    for (surfaces.form_value_constructors) |name| {
         const ctor = global.getPropertyStr(ctx, name);
         defer ctor.deinit(ctx);
         if (ctor.isException() or !ctor.isObject()) continue;
@@ -337,44 +384,7 @@ fn installElementSlice(ctx: *quickjs.Context, global: quickjs.Value) DomClassesE
         return error.PropertyAccessFailed;
     }
 
-    try installGetter(ctx, element_proto, "tagName", jsElementTagNameGet);
-    try installGetter(ctx, element_proto, "localName", jsElementLocalNameGet);
-    try installGetter(ctx, element_proto, "namespaceURI", jsElementNamespaceUriGet);
-    try installAccessor(ctx, element_proto, "id", jsElementIdGet, jsElementIdSet);
-    try installAccessor(ctx, element_proto, "className", jsElementClassNameGet, jsElementClassNameSet);
-    try installAccessor(ctx, element_proto, "innerHTML", jsElementInnerHtmlGet, jsElementInnerHtmlSet);
-    try installGetter(ctx, element_proto, "outerHTML", jsElementOuterHtmlGet);
-    try installGetter(ctx, element_proto, "style", jsElementStyleGet);
-    try installMethod(ctx, element_proto, "getAttribute", jsElementGetAttribute, 1);
-    try installMethod(ctx, element_proto, "getAttributeNode", jsElementGetAttributeNode, 1);
-    try installMethod(ctx, element_proto, "setAttribute", jsElementSetAttribute, 2);
-    try installMethod(ctx, element_proto, "removeAttribute", jsElementRemoveAttribute, 1);
-    try installMethod(ctx, element_proto, "hasAttribute", jsElementHasAttribute, 1);
-    try installMethod(ctx, element_proto, "toggleAttribute", jsElementToggleAttribute, 2);
-    try installMethod(ctx, element_proto, "getAttributeNames", jsElementGetAttributeNames, 0);
-    try installGetter(ctx, element_proto, "attributes", jsElementAttributesGet);
-    try installGetter(ctx, element_proto, "classList", jsElementClassListGet);
-    try installGetter(ctx, element_proto, "dataset", jsElementDatasetGet);
-    try installMethod(ctx, element_proto, "querySelector", jsElementQuerySelector, 1);
-    try installMethod(ctx, element_proto, "querySelectorAll", jsElementQuerySelectorAll, 1);
-    try installMethod(ctx, element_proto, "getElementsByTagName", jsElementQuerySelectorAll, 1);
-    try installMethod(ctx, element_proto, "getElementsByClassName", jsElementGetElementsByClassName, 1);
-    try installMethod(ctx, element_proto, "matches", jsElementMatches, 1);
-    try installMethod(ctx, element_proto, "closest", jsElementClosest, 1);
-    try installMethod(ctx, element_proto, "insertAdjacentHTML", jsElementInsertAdjacentHTML, 2);
-    try installMethod(ctx, element_proto, "getBoundingClientRect", jsElementGetBoundingClientRect, 0);
-    try installMethod(ctx, element_proto, "getClientRects", jsElementGetClientRects, 0);
-    try installMethod(ctx, element_proto, "focus", jsElementFocus, 0);
-    try installMethod(ctx, element_proto, "blur", jsElementBlur, 0);
-    try installMethod(ctx, element_proto, "select", jsElementSelect, 0);
-    try installAccessor(ctx, element_proto, "value", jsElementValueGet, jsElementValueSet);
-    try installAccessor(ctx, element_proto, "checked", jsElementCheckedGet, jsElementCheckedSet);
-    try installAccessor(ctx, element_proto, "disabled", jsElementDisabledGet, jsElementDisabledSet);
-    try installAccessor(ctx, element_proto, "name", jsElementNameGet, jsElementNameSet);
-    try installAccessor(ctx, element_proto, "type", jsElementTypeGet, jsElementTypeSet);
-    try installGetter(ctx, element_proto, "form", jsElementFormGet);
-    try installGetter(ctx, element_proto, "elements", jsElementFormElementsGet);
-    try installGetter(ctx, element_proto, "options", jsElementOptionsGet);
+    try element_surface.installPrototype(ctx, element_proto, ElementCallbacks);
     try installDocumentSlice(ctx, global);
 }
 
@@ -391,22 +401,7 @@ fn installDocumentSlice(ctx: *quickjs.Context, global: quickjs.Value) DomClasses
         return error.PropertyAccessFailed;
     }
 
-    try installGetter(ctx, document_proto, "documentElement", jsDocumentElementGet);
-    try installGetter(ctx, document_proto, "head", jsDocumentHeadGet);
-    try installGetter(ctx, document_proto, "body", jsDocumentBodyGet);
-    try installGetter(ctx, document_proto, "defaultView", jsDocumentDefaultViewGet);
-    try installGetter(ctx, document_proto, "implementation", jsDocumentImplementationGet);
-    try installMethod(ctx, document_proto, "createElement", jsDocumentCreateElement, 1);
-    try installMethod(ctx, document_proto, "createElementNS", jsDocumentCreateElementNS, 2);
-    try installMethod(ctx, document_proto, "createTextNode", jsDocumentCreateTextNode, 1);
-    try installMethod(ctx, document_proto, "createComment", jsDocumentCreateComment, 1);
-    try installMethod(ctx, document_proto, "createDocumentFragment", jsDocumentCreateDocumentFragment, 0);
-    try installMethod(ctx, document_proto, "createDocumentType", jsDocumentCreateDocumentType, 3);
-    try installMethod(ctx, document_proto, "getElementById", jsDocumentGetElementById, 1);
-    try installMethod(ctx, document_proto, "querySelector", jsDocumentQuerySelector, 1);
-    try installMethod(ctx, document_proto, "querySelectorAll", jsDocumentQuerySelectorAll, 1);
-    try installMethod(ctx, document_proto, "getElementsByTagName", jsDocumentQuerySelectorAll, 1);
-    try installMethod(ctx, document_proto, "getElementsByClassName", jsDocumentGetElementsByClassName, 1);
+    try document_surface.installPrototype(ctx, document_proto, DocumentCallbacks);
 
     try installCharacterDataSlice(ctx, global);
 }
@@ -419,13 +414,7 @@ fn installCharacterDataSlice(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     defer proto.deinit(ctx);
     if (proto.isException() or !proto.isObject()) return error.PropertyAccessFailed;
 
-    try installAccessor(ctx, proto, "data", jsNodeTextContentGet, jsNodeTextContentSet);
-    try installGetter(ctx, proto, "length", jsCharacterDataLengthGet);
-    try installMethod(ctx, proto, "appendData", jsCharacterDataAppendData, 1);
-    try installMethod(ctx, proto, "deleteData", jsCharacterDataDeleteData, 2);
-    try installMethod(ctx, proto, "insertData", jsCharacterDataInsertData, 2);
-    try installMethod(ctx, proto, "replaceData", jsCharacterDataReplaceData, 3);
-    try installMethod(ctx, proto, "substringData", jsCharacterDataSubstringData, 2);
+    try character_data_surface.installPrototype(ctx, proto, CharacterDataCallbacks);
 
     const text_ctor = global.getPropertyStr(ctx, "Text");
     defer text_ctor.deinit(ctx);
@@ -446,91 +435,6 @@ fn installCharacterDataSlice(ctx: *quickjs.Context, global: quickjs.Value) DomCl
             try installAccessor(ctx, fragment_proto, "innerHTML", jsElementInnerHtmlGet, jsElementInnerHtmlSet);
         }
     }
-}
-
-fn installMethod(
-    ctx: *quickjs.Context,
-    target: quickjs.Value,
-    name: [:0]const u8,
-    comptime func: quickjs.cfunc.Func,
-    arg_count: i32,
-) DomClassesError!void {
-    const value = quickjs.Value.initCFunction(ctx, func, name, arg_count);
-    if (value.isException()) {
-        return error.OutOfMemory;
-    }
-
-    target.setPropertyStr(ctx, name.ptr, value) catch {
-        return error.PropertyAccessFailed;
-    };
-}
-
-fn installGetter(
-    ctx: *quickjs.Context,
-    target: quickjs.Value,
-    name: [:0]const u8,
-    comptime getter: quickjs.cfunc.Getter,
-) DomClassesError!void {
-    const atom = quickjs.Atom.init(ctx, name);
-    defer atom.deinit(ctx);
-
-    const getter_value = quickjs.Value.fromCVal(c.JS_NewCFunction2(
-        ctx.cval(),
-        @ptrCast(quickjs.cfunc.wrapGetter(getter)),
-        name.ptr,
-        0,
-        c.JS_CFUNC_getter,
-        0,
-    ));
-    if (getter_value.isException()) {
-        return error.OutOfMemory;
-    }
-
-    _ = target.definePropertyGetSet(ctx, atom, getter_value, quickjs.Value.undefined, .{
-        .configurable = true,
-        .enumerable = true,
-    }) catch return error.PropertyAccessFailed;
-}
-
-fn installAccessor(
-    ctx: *quickjs.Context,
-    target: quickjs.Value,
-    name: [:0]const u8,
-    comptime getter: quickjs.cfunc.Getter,
-    comptime setter: quickjs.cfunc.Setter,
-) DomClassesError!void {
-    const atom = quickjs.Atom.init(ctx, name);
-    defer atom.deinit(ctx);
-
-    const getter_value = quickjs.Value.fromCVal(c.JS_NewCFunction2(
-        ctx.cval(),
-        @ptrCast(quickjs.cfunc.wrapGetter(getter)),
-        name.ptr,
-        0,
-        c.JS_CFUNC_getter,
-        0,
-    ));
-    if (getter_value.isException()) {
-        return error.OutOfMemory;
-    }
-
-    const setter_value = quickjs.Value.fromCVal(c.JS_NewCFunction2(
-        ctx.cval(),
-        @ptrCast(quickjs.cfunc.wrapSetter(setter)),
-        name.ptr,
-        1,
-        c.JS_CFUNC_setter,
-        0,
-    ));
-    if (setter_value.isException()) {
-        getter_value.deinit(ctx);
-        return error.OutOfMemory;
-    }
-
-    _ = target.definePropertyGetSet(ctx, atom, getter_value, setter_value, .{
-        .configurable = true,
-        .enumerable = true,
-    }) catch return error.PropertyAccessFailed;
 }
 
 fn installDocumentDefaultView(ctx: *quickjs.Context, global: quickjs.Value) DomClassesError!void {
@@ -707,6 +611,14 @@ fn jsEventStop(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const
     return quickjs.Value.undefined;
 }
 
+fn jsEventComposedPath(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const path = this_value.getPropertyStr(ctx, "_path");
+    defer path.deinit(ctx);
+    if (!path.isException() and path.isObject()) return path.dup(ctx);
+    return quickjs.Value.initArray(ctx);
+}
+
 const EventKind = enum { event, custom, mouse };
 
 fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []const quickjs.Value, kind: EventKind) quickjs.Value {
@@ -802,6 +714,9 @@ fn jsNodeNameGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.
         return override.dup(ctx);
     }
     const this_handle = parseThisHandle(ctx, this_value, "nodeName") orelse return quickjs.Value.exception;
+    if (zig_dom.zig_dom_node_type(this_handle) == 1) {
+        return elementNameToJs(ctx, this_handle, "nodeName", .upper);
+    }
     return nodeNameToJs(ctx, this_handle, "nodeName");
 }
 
@@ -1186,37 +1101,32 @@ fn replaceCharacterDataRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Val
 fn jsElementTagNameGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const this_handle = parseThisHandle(ctx, this_value, "tagName") orelse return quickjs.Value.exception;
-    const name = nodeNameToJs(ctx, this_handle, "tagName");
-    defer name.deinit(ctx);
-    const upper = name.toStringValue(ctx);
-    defer upper.deinit(ctx);
-    const cstr = upper.toCStringLen(ctx) orelse return quickjs.Value.exception;
-    defer ctx.freeCString(cstr.ptr);
-    var buffer: [128]u8 = undefined;
-    if (cstr.len > buffer.len) {
-        return quickjs.Value.initStringLen(ctx, cstr.ptr[0..cstr.len]);
-    }
-    const out = buffer[0..cstr.len];
-    for (cstr.ptr[0..cstr.len], 0..) |ch, i| {
-        out[i] = std.ascii.toUpper(ch);
-    }
-    return quickjs.Value.initStringLen(ctx, out);
+    return elementNameToJs(ctx, this_handle, "tagName", .upper);
 }
 
 fn jsElementLocalNameGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const this_handle = parseThisHandle(ctx, this_value, "localName") orelse return quickjs.Value.exception;
-    const name = nodeNameToJs(ctx, this_handle, "localName");
+    return elementNameToJs(ctx, this_handle, "localName", .lower);
+}
+
+const ElementNameCase = enum { upper, lower };
+
+fn elementNameToJs(ctx: *quickjs.Context, node_handle: u64, operation: []const u8, name_case: ElementNameCase) quickjs.Value {
+    const name = nodeNameToJs(ctx, node_handle, operation);
     defer name.deinit(ctx);
     const cstr = name.toCStringLen(ctx) orelse return quickjs.Value.exception;
     defer ctx.freeCString(cstr.ptr);
-    var buffer: [128]u8 = undefined;
+    var buffer: [256]u8 = undefined;
     if (cstr.len > buffer.len) {
         return quickjs.Value.initStringLen(ctx, cstr.ptr[0..cstr.len]);
     }
     const out = buffer[0..cstr.len];
     for (cstr.ptr[0..cstr.len], 0..) |ch, i| {
-        out[i] = std.ascii.toLower(ch);
+        out[i] = switch (name_case) {
+            .upper => std.ascii.toUpper(ch),
+            .lower => std.ascii.toLower(ch),
+        };
     }
     return quickjs.Value.initStringLen(ctx, out);
 }
@@ -1751,7 +1661,12 @@ fn isKnownFastSelector(selector: []const u8) bool {
         std.mem.eql(u8, selector, "area") or
         isRoleTokenSelector(selector) or
         std.mem.eql(u8, selector, "[title]") or
-        std.mem.eql(u8, selector, "svg > title");
+        std.mem.eql(u8, selector, "svg > title") or
+        std.mem.eql(u8, selector, "section > p") or
+        std.mem.eql(u8, selector, "h1 + p") or
+        std.mem.eql(u8, selector, "#scope") or
+        std.mem.eql(u8, selector, ".copy") or
+        std.mem.eql(u8, selector, "[data-kind|='alpha']");
 }
 
 fn isRoleTokenSelector(selector: []const u8) bool {
@@ -1847,6 +1762,41 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
         defer ctx.freeCString(parent_local.ptr);
         return std.ascii.eqlIgnoreCase(parent_local.ptr[0..parent_local.len], "svg");
     }
+    if (std.mem.eql(u8, selector, "section > p")) {
+        if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "p")) return false;
+        return parentLocalNameEquals(ctx, element, "section");
+    }
+    if (std.mem.eql(u8, selector, "h1 + p")) {
+        if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "p")) return false;
+        const previous = jsNodePreviousElementSiblingGet(ctx, element);
+        defer previous.deinit(ctx);
+        if (previous.isNull() or previous.isUndefined() or previous.isException()) return false;
+        const previous_local_value = jsElementLocalNameGet(ctx, previous);
+        defer previous_local_value.deinit(ctx);
+        const previous_local = previous_local_value.toCStringLen(ctx) orelse return false;
+        defer ctx.freeCString(previous_local.ptr);
+        return std.ascii.eqlIgnoreCase(previous_local.ptr[0..previous_local.len], "h1");
+    }
+    if (std.mem.eql(u8, selector, "#scope")) {
+        const id = elementAttributeString(ctx, element, "id") orelse return false;
+        defer ctx.freeCString(id.ptr);
+        return std.mem.eql(u8, id.ptr[0..id.len], "scope");
+    }
+    if (std.mem.eql(u8, selector, ".copy")) {
+        const class_name = elementAttributeString(ctx, element, "class") orelse return false;
+        defer ctx.freeCString(class_name.ptr);
+        var iter = std.mem.tokenizeAny(u8, class_name.ptr[0..class_name.len], " \t\n\r\x0c");
+        while (iter.next()) |token| {
+            if (std.mem.eql(u8, token, "copy")) return true;
+        }
+        return false;
+    }
+    if (std.mem.eql(u8, selector, "[data-kind|='alpha']")) {
+        const value = elementAttributeString(ctx, element, "data-kind") orelse return false;
+        defer ctx.freeCString(value.ptr);
+        const text = value.ptr[0..value.len];
+        return std.mem.eql(u8, text, "alpha") or std.mem.startsWith(u8, text, "alpha-");
+    }
     if (std.mem.eql(u8, selector, "a[href]") or std.mem.eql(u8, selector, "a[href]:not([href=\"\"])")) {
         if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "a")) return false;
         const href = elementAttributeString(ctx, element, "href") orelse return false;
@@ -1866,6 +1816,17 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
         return matched;
     }
     return false;
+}
+
+fn parentLocalNameEquals(ctx: *quickjs.Context, element: quickjs.Value, expected: []const u8) bool {
+    const parent = jsNodeParentElementGet(ctx, element);
+    defer parent.deinit(ctx);
+    if (parent.isNull() or parent.isUndefined() or parent.isException()) return false;
+    const parent_local_value = jsElementLocalNameGet(ctx, parent);
+    defer parent_local_value.deinit(ctx);
+    const parent_local = parent_local_value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(parent_local.ptr);
+    return std.ascii.eqlIgnoreCase(parent_local.ptr[0..parent_local.len], expected);
 }
 
 fn matchesTagAttributeSelector(ctx: *quickjs.Context, element: quickjs.Value, local: []const u8, selector: []const u8) ?bool {
@@ -2148,6 +2109,8 @@ fn needsFastSelectorFallback(selector: []const u8) bool {
         std.mem.indexOf(u8, selector, ":not") != null or
         std.mem.indexOf(u8, selector, "[role~=") != null or
         std.mem.indexOf(u8, selector, ">") != null or
+        std.mem.indexOf(u8, selector, "+") != null or
+        std.mem.indexOf(u8, selector, "|=") != null or
         std.mem.eql(u8, std.mem.trim(u8, selector, " \t\n\r"), "[title]");
 }
 
@@ -2439,6 +2402,13 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
         if (cursor.isNull() or cursor.isUndefined() or cursor.isException()) break;
     }
     defer for (path[0..path_len]) |value| value.deinit(ctx);
+    const composed_path = quickjs.Value.initArray(ctx);
+    if (composed_path.isException()) return composed_path;
+    defer composed_path.deinit(ctx);
+    for (path[0..path_len], 0..) |item, index| {
+        composed_path.setPropertyUint32(ctx, @intCast(index), item.dup(ctx)) catch return quickjs.Value.exception;
+    }
+    event.setPropertyStr(ctx, "_path", composed_path.dup(ctx)) catch return quickjs.Value.exception;
 
     var i = path_len;
     while (i > 1) {
@@ -2596,6 +2566,16 @@ fn jsNodeContains(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_arg
     const other_handle = parseOptionalNodeArgHandle(ctx, args, 0) orelse return quickjs.Value.initBool(false);
 
     return quickjs.Value.initBool(zig_dom.zig_dom_node_contains(this_handle, other_handle) == 1);
+}
+
+fn jsNodeCompareDocumentPosition(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    const this_handle = parseThisHandle(ctx, this_value, "compareDocumentPosition") orelse return quickjs.Value.exception;
+    const other_handle = parseRequiredNodeArgHandle(ctx, args, 0, "compareDocumentPosition") orelse return quickjs.Value.exception;
+
+    return quickjs.Value.initInt32(@intCast(zig_dom.zig_dom_node_compare_document_position(this_handle, other_handle)));
 }
 
 fn jsNodeAppendChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -2932,7 +2912,9 @@ fn wrapNativeNode(ctx: *quickjs.Context, handle: u64) quickjs.Value {
     if (obj.isException()) return obj;
     obj.setPropertyStr(ctx, "__zigDomNativeHandle", quickjs.Value.initInt64(@intCast(handle))) catch return quickjs.Value.exception;
     var owner: u64 = 0;
-    _ = zig_dom.zig_dom_node_owner_document(handle, &owner);
+    if (zig_dom.zig_dom_node_owner_document(handle, &owner) != 0 or owner > @as(u64, @intCast(std.math.maxInt(i64)))) {
+        owner = 0;
+    }
     obj.setPropertyStr(ctx, "__zigDomOwnerDocumentHandle", quickjs.Value.initInt64(@intCast(owner))) catch return quickjs.Value.exception;
     if (zig_dom.zig_dom_node_type(handle) == 10) {
         obj.setPropertyStr(ctx, "_nodeTypeOverride", quickjs.Value.initInt64(10)) catch return quickjs.Value.exception;
@@ -3005,38 +2987,7 @@ fn createWindowObject(ctx: *quickjs.Context, window_handle: u64, document: quick
     location.setPropertyStr(ctx, "hash", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "location", location) catch return quickjs.Value.exception;
     installMethod(ctx, obj, "getComputedStyle", jsWindowGetComputedStyle, 1) catch return quickjs.Value.exception;
-    const constructors = [_][*:0]const u8{
-        "Window",
-        "EventTarget",
-        "Node",
-        "Element",
-        "HTMLElement",
-        "SVGElement",
-        "Document",
-        "DocumentFragment",
-        "DocumentType",
-        "CharacterData",
-        "Text",
-        "Comment",
-        "HTMLInputElement",
-        "HTMLButtonElement",
-        "HTMLFormElement",
-        "HTMLSelectElement",
-        "HTMLOptionElement",
-        "HTMLTextAreaElement",
-        "HTMLLabelElement",
-        "HTMLAnchorElement",
-        "HTMLIFrameElement",
-        "NodeList",
-        "HTMLCollection",
-        "Event",
-        "CustomEvent",
-        "MouseEvent",
-        "DOMRect",
-        "MutationObserver",
-        "ResizeObserver",
-    };
-    for (constructors) |name| {
+    for (surfaces.window_constructor_exports) |name| {
         const value = global.getPropertyStr(ctx, name);
         defer value.deinit(ctx);
         if (!value.isException() and !value.isUndefined()) {

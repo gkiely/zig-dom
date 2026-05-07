@@ -56,22 +56,24 @@ pub fn printHelp() void {
         \\
         \\Usage:
         \\  zig build run -- help
-        \\  zig build run -- test [--root <dir>] [--setup <file>]... [--dom auto|always|never] [--dry-run] [patterns...]
+        \\  zig build run -- test [--root <dir>] [--setup <file>]... [--dom] [--dom=.vue,.jsx,.tsx] [--dry-run] [patterns...]
         \\  zig build run -- wpt [args...]
         \\  zig build run -- wpt-sync
         \\  zig build run -- wpt-manifest [args...]
         \\
         \\Examples:
         \\  zig build run -- test tests/runner/basic.test.js
-        \\  zig build run -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json
+        \\  zig build run -- wpt --manifest wpt/manifest/dom-core.json
         \\  zig build run -- wpt-sync
         \\  zig build run -- wpt-manifest --dir dom --out wpt/manifest/upstream-dom-smoke.json
         \\
         \\Notes:
         \\  - test executes through the embedded QuickJS-ng runtime and Zig runner harness.
+        \\  - DOM is auto-enabled for .jsx/.tsx files by default; --dom enables it for every file.
+        \\  - --dom=.vue,.jsx,.tsx replaces the default auto-enable suffix list.
         \\  - with --root, test auto-loads [test].preload from <root>/bunfig.toml when present.
         \\  - explicit --setup values are additive and run after bunfig preloads.
-        \\  - wpt and wpt-manifest forward to existing scripts in scripts/.
+        \\  - wpt runs the native WPT runner in scripts/.
         \\
     ,
         .{},

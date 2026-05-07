@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
     yuku_parser_module.addImport("util", yuku_util_module);
 
     const module = b.createModule(.{
-        .root_source_file = b.path("src/zig_dom.zig"),
+        .root_source_file = b.path("src/dom/dom.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,

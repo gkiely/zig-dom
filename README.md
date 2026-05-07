@@ -31,8 +31,8 @@ Current status:
 
 - `test` command discovers test files in Zig, transforms TS/JSX as needed, and executes through the embedded QuickJS-ng runtime.
 - Runner collection and execution are split phases with support for nested `describe`, hooks, `skip`, and `only`.
-- `wpt`, `wpt-sync`, and `wpt-manifest` bridge to existing scripts under `scripts/`.
-- The runtime abstraction files were added in `src/runtime/` for upcoming QuickJS embedding work.
+- `wpt`, `wpt-sync`, and `wpt-manifest` bridge to native WPT scripts under `scripts/`.
+- Runtime glue now lives at `src/runtime.zig` and `src/quickjs_ng.zig`; native DOM code lives under `src/dom/`.
 
 ## Perf Build (Edit.test.tsx)
 

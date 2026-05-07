@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { native } from "../../js/ffi";
-import { Window } from "../../js/wrappers/Window";
 
 const windows: number[] = [];
 
@@ -61,32 +60,21 @@ describe("native handles", () => {
     expect(native.nodeType(documentHandle)).toBe(9);
   });
 
-  test("throws a controlled error when wrappers are used after close", () => {
-    const window = new Window();
-    const node = window.document.createElement("div");
-
-    window.close();
-
-    expect(() => {
-      void node.nodeType;
-    }).toThrow("Window is closed");
-
-    expect(() => window.document.createElement("span")).toThrow("Window is closed");
-  });
-
   test("debug counters stay balanced across repeated create/close cycles", () => {
     native.debugResetCounters();
 
     for (let index = 0; index < 25; index += 1) {
-      const window = new Window();
-      const root = window.document.createElement("div");
+      const windowHandle = native.createWindow();
+      const documentHandle = native.windowDocument(windowHandle);
+      const bodyHandle = native.windowBody(windowHandle);
+      const rootHandle = native.createElement(documentHandle, "div");
       for (let i = 0; i < 20; i += 1) {
-        const child = window.document.createElement("span");
-        child.textContent = `node-${index}-${i}`;
-        root.appendChild(child);
+        const childHandle = native.createElement(documentHandle, "span");
+        native.setTextContent(childHandle, `node-${index}-${i}`);
+        native.appendChild(rootHandle, childHandle);
       }
-      window.document.body.appendChild(root);
-      window.close();
+      native.appendChild(bodyHandle, rootHandle);
+      native.destroyWindow(windowHandle);
     }
 
     const counters = native.debugGetCounters();

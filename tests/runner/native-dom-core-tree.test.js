@@ -27,7 +27,7 @@ test("native DOM core tree navigation and mutation", () => {
   expect(middle.isConnected).toBe(true);
 
   expect(root.nodeType).toBe(Node.ELEMENT_NODE);
-  expect(root.nodeName).toBe("div");
+  expect(root.nodeName).toBe("DIV");
   expect(root.nodeValue).toBe(null);
 
   const text = document.createTextNode("abc");
@@ -51,9 +51,9 @@ test("native DOM core tree navigation and mutation", () => {
   expect(first.parentNode).toBe(null);
 
   const deepClone = root.cloneNode(true);
-  expect(deepClone.nodeName).toBe("div");
-  expect(deepClone.firstChild.nodeName).toBe("aside");
-  expect(deepClone.lastChild.nodeName).toBe("footer");
+  expect(deepClone.nodeName).toBe("DIV");
+  expect(deepClone.firstChild.nodeName).toBe("ASIDE");
+  expect(deepClone.lastChild.nodeName).toBe("FOOTER");
 
   const shallowClone = root.cloneNode(false);
   expect(shallowClone.firstChild).toBe(null);

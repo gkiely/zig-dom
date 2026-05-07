@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { Window } from "../../../js/wrappers/Window";
 
 describe("native-backed tree mutation", () => {
   test("append, insert, replace, and remove maintain stable relationships", () => {
@@ -33,11 +32,11 @@ describe("native-backed tree mutation", () => {
     expect(document.getElementById("save")).toBe(button);
   });
 
-  test("adoptNode detaches nodes and importNode clones into the target document", () => {
-    const externalWindow = new Window();
-    const source = externalWindow.document.createElement("article");
+  test("importNode clones into the target document and adoptNode detaches local nodes", () => {
+    const externalDocument = document.implementation.createHTMLDocument("external");
+    const source = externalDocument.createElement("article");
     source.setAttribute("data-kind", "source");
-    source.appendChild(externalWindow.document.createTextNode("external"));
+    source.appendChild(externalDocument.createTextNode("external"));
 
     const imported = document.importNode(source, true);
     expect(imported).not.toBe(source);
@@ -49,8 +48,5 @@ describe("native-backed tree mutation", () => {
     const adopted = document.adoptNode(localNode);
     expect(adopted).toBe(localNode);
     expect(adopted.parentNode).toBeNull();
-
-    externalWindow.close();
   });
-
 });

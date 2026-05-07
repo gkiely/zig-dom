@@ -1,5 +1,5 @@
 const std = @import("std");
-const runtime_pkg = @import("../runtime/runtime.zig");
+const runtime_pkg = @import("../runtime.zig");
 const transform = @import("transform.zig");
 const yuku_transform = @import("yuku_transform.zig");
 const quickjs = @import("quickjs");
@@ -10,11 +10,15 @@ const Exception = runtime_pkg.Exception;
 const ModuleContext = runtime_pkg.ModuleContext;
 const ModuleDef = runtime_pkg.ModuleDef;
 
-pub const DomMode = enum {
+pub const DomMode = union(enum) {
     auto,
     always,
-    never,
+    suffixes: []const []const u8,
 };
+
+pub fn defaultDomSuffixes() []const []const u8 {
+    return &.{ ".jsx", ".tsx" };
+}
 
 const run_bootstrap_source =
     \\globalThis.__zigDone = false;
@@ -1402,11 +1406,10 @@ const ModuleLoaderState = struct {
             return try pruneUnusedImports(self.allocator, rewritten);
         }
 
-        if (
-            std.mem.eql(u8, effective_loader, "ts") or
+        if (std.mem.eql(u8, effective_loader, "ts") or
             std.mem.eql(u8, effective_loader, "tsx") or
-            std.mem.eql(u8, effective_loader, "jsx")
-        ) {
+            std.mem.eql(u8, effective_loader, "jsx"))
+        {
             const transformed = try self.transformOnLoadContents(module_id, effective_loader, hook_result.contents);
             return transformed;
         }
@@ -1705,33 +1708,32 @@ const ModuleLoaderState = struct {
         self.mock_module_sources.clearRetainingCapacity();
     }
 
+    fn escapeJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
+        var builder: std.ArrayList(u8) = .empty;
+        errdefer builder.deinit(allocator);
 
-fn escapeJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
-    var builder: std.ArrayList(u8) = .empty;
-    errdefer builder.deinit(allocator);
-
-    for (text) |ch| {
-        switch (ch) {
-            '\\' => try builder.appendSlice(allocator, "\\\\"),
-            '\'' => try builder.appendSlice(allocator, "\\'"),
-            '\n' => try builder.appendSlice(allocator, "\\n"),
-            '\r' => try builder.appendSlice(allocator, "\\r"),
-            '\t' => try builder.appendSlice(allocator, "\\t"),
-            else => {
-                if (ch < 0x20) {
-                    const hex = "0123456789ABCDEF";
-                    try builder.appendSlice(allocator, "\\x");
-                    try builder.append(allocator, hex[(ch >> 4) & 0x0F]);
-                    try builder.append(allocator, hex[ch & 0x0F]);
-                } else {
-                    try builder.append(allocator, ch);
-                }
-            },
+        for (text) |ch| {
+            switch (ch) {
+                '\\' => try builder.appendSlice(allocator, "\\\\"),
+                '\'' => try builder.appendSlice(allocator, "\\'"),
+                '\n' => try builder.appendSlice(allocator, "\\n"),
+                '\r' => try builder.appendSlice(allocator, "\\r"),
+                '\t' => try builder.appendSlice(allocator, "\\t"),
+                else => {
+                    if (ch < 0x20) {
+                        const hex = "0123456789ABCDEF";
+                        try builder.appendSlice(allocator, "\\x");
+                        try builder.append(allocator, hex[(ch >> 4) & 0x0F]);
+                        try builder.append(allocator, hex[ch & 0x0F]);
+                    } else {
+                        try builder.append(allocator, ch);
+                    }
+                },
+            }
         }
-    }
 
-    return builder.toOwnedSlice(allocator);
-}
+        return builder.toOwnedSlice(allocator);
+    }
     fn resolveRelativePath(self: *ModuleLoaderState, module_base_name: []const u8, specifier: []const u8) ![]u8 {
         if (!std.fs.path.isAbsolute(module_base_name)) {
             return error.ModuleNotFound;
@@ -2947,58 +2949,28 @@ pub fn runFiles(allocator: Allocator, io: std.Io, paths: []const []u8, setup_pat
 }
 
 fn shouldInstallDom(
-    allocator: Allocator,
-    io: std.Io,
     dom_mode: DomMode,
     entry_module_id: []const u8,
     setup_module_ids: []const []u8,
 ) bool {
-    return switch (dom_mode) {
-        .always => true,
-        .never => false,
-        .auto => blk: {
-            if (pathImpliesDom(entry_module_id)) break :blk true;
-
-            if (sourceImpliesDom(allocator, io, entry_module_id)) break :blk true;
-            for (setup_module_ids) |setup_module_id| {
-                if (pathImpliesDom(setup_module_id) or sourceImpliesDom(allocator, io, setup_module_id)) break :blk true;
-            }
-
-            break :blk false;
-        },
-    };
-}
-
-fn pathImpliesDom(path: []const u8) bool {
-    return std.mem.endsWith(u8, path, ".jsx") or
-        std.mem.endsWith(u8, path, ".tsx") or
-        std.mem.startsWith(u8, std.fs.path.basename(path), "native-dom-");
-}
-
-fn sourceImpliesDom(allocator: Allocator, io: std.Io, path: []const u8) bool {
-    const source = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_module_source_bytes)) catch return false;
-    defer allocator.free(source);
-
-    const markers = [_][]const u8{
-        "@testing-library/react",
-        "@testing-library/dom",
-        "react-dom",
-        "zig-dom",
-        "GlobalRegistrator",
-        "document",
-        "window",
-        "HTMLElement",
-        "Element",
-        "Node",
-        "MutationObserver",
-        "ResizeObserver",
-        "happyDOM",
+    const suffixes = switch (dom_mode) {
+        .always => return true,
+        .auto => defaultDomSuffixes(),
+        .suffixes => |items| items,
     };
 
-    for (markers) |marker| {
-        if (std.mem.indexOf(u8, source, marker) != null) return true;
+    if (pathImpliesDom(entry_module_id, suffixes)) return true;
+    for (setup_module_ids) |setup_module_id| {
+        if (pathImpliesDom(setup_module_id, suffixes)) return true;
     }
 
+    return false;
+}
+
+fn pathImpliesDom(path: []const u8, suffixes: []const []const u8) bool {
+    for (suffixes) |suffix| {
+        if (suffix.len > 0 and std.mem.endsWith(u8, path, suffix)) return true;
+    }
     return false;
 }
 
@@ -3026,7 +2998,7 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         };
     }
 
-    const install_dom = shouldInstallDom(allocator, io, dom_mode, entry_module_id, setup_module_ids.items);
+    const install_dom = shouldInstallDom(dom_mode, entry_module_id, setup_module_ids.items);
 
     var vm = try Runtime.initWithDom(allocator, io, install_dom);
     defer vm.deinit();
@@ -3230,13 +3202,12 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
     const only_mode = vm.getGlobalBool("__zigOnlyMode") catch false;
     const has_runnable = vm.getGlobalBool("__zigHasRunnable") catch false;
 
-    if (
-        passed_i32 == 0 and
+    if (passed_i32 == 0 and
         failed_i32 == 0 and
         skipped_i32 == 0 and
         timed_out_i32 == 0 and
-        collection_errors_i32 == 0
-    ) {
+        collection_errors_i32 == 0)
+    {
         const diagnostic = try std.fmt.allocPrint(
             allocator,
             "collection failed: no tests executed (registered={d}, onlyMode={}, hasRunnable={})",
@@ -3568,10 +3539,9 @@ fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
         return zig_dom_index_shim_source;
     }
 
-    if (
-        std.mem.eql(u8, module_name, zig_dom_global_registrator_specifier) or
-        std.mem.eql(u8, module_name, zig_dom_global_registrar_specifier)
-    ) {
+    if (std.mem.eql(u8, module_name, zig_dom_global_registrator_specifier) or
+        std.mem.eql(u8, module_name, zig_dom_global_registrar_specifier))
+    {
         return zig_dom_global_registrator_shim_source;
     }
 
@@ -3612,12 +3582,11 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
         return false;
     }
 
-    if (
-        std.mem.indexOf(u8, source, "module.exports") != null or
+    if (std.mem.indexOf(u8, source, "module.exports") != null or
         std.mem.indexOf(u8, source, "exports.") != null or
         std.mem.indexOf(u8, source, "Object.defineProperty(exports") != null or
-        std.mem.indexOf(u8, source, "Object.defineProperty(module") != null
-    ) {
+        std.mem.indexOf(u8, source, "Object.defineProperty(module") != null)
+    {
         return true;
     }
 

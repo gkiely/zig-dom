@@ -1,18 +1,18 @@
 const std = @import("std");
 const quickjs = @import("quickjs");
-const zig_dom = @import("../zig_dom.zig");
-const dom_classes = @import("dom_classes.zig");
-const host_platform = @import("host_platform.zig");
-const host_assertions = @import("host_assertions.zig");
-const host_runner = @import("host_runner.zig");
-const host_mocks = @import("host_mocks.zig");
+const zig_dom = @import("dom/dom.zig");
+const dom = @import("dom/classes.zig");
+const platform = @import("host/platform.zig");
+const assertions = @import("host/assertions.zig");
+const runner = @import("host/runner.zig");
+const mocks = @import("host/mocks.zig");
 
 const Allocator = std.mem.Allocator;
 var host_io: ?std.Io = null;
 
 pub const Context = quickjs.Context;
 pub const ModuleDef = quickjs.ModuleDef;
-pub const OnLoadResult = host_mocks.OnLoadResult;
+pub const OnLoadResult = mocks.OnLoadResult;
 
 pub const RuntimeError = error{
     OutOfMemory,
@@ -39,9 +39,9 @@ pub const Runtime = struct {
     rt: *quickjs.Runtime,
     ctx: *quickjs.Context,
     dom_window_handle: u64,
-    dom_classes_state: ?*dom_classes.DomClasses,
-    host_runner_state: ?*host_runner.HostRunner,
-    host_mocks_state: ?*host_mocks.HostMocks,
+    dom_state: ?*dom.DomClasses,
+    runner_state: ?*runner.HostRunner,
+    mocks_state: ?*mocks.HostMocks,
 
     pub fn init(allocator: Allocator, io: std.Io) RuntimeError!Runtime {
         return initWithDom(allocator, io, true);
@@ -61,9 +61,9 @@ pub const Runtime = struct {
             .rt = rt,
             .ctx = ctx,
             .dom_window_handle = 0,
-            .dom_classes_state = null,
-            .host_runner_state = null,
-            .host_mocks_state = null,
+            .dom_state = null,
+            .runner_state = null,
+            .mocks_state = null,
         };
 
         try runtime.installHostGlobals();
@@ -78,32 +78,32 @@ pub const Runtime = struct {
     }
 
     pub fn deinit(self: *Runtime) void {
-        if (self.host_runner_state) |runner| {
-            runner.deinit();
-            self.host_runner_state = null;
+        if (self.runner_state) |active_runner| {
+            active_runner.deinit();
+            self.runner_state = null;
         }
-        if (self.dom_classes_state) |classes| {
+        if (self.dom_state) |classes| {
             classes.deinit();
             self.allocator.destroy(classes);
-            self.dom_classes_state = null;
+            self.dom_state = null;
         }
         if (self.dom_window_handle != 0) {
             zig_dom.zig_dom_destroy_window(self.dom_window_handle);
             self.dom_window_handle = 0;
         }
-        if (self.host_mocks_state) |mocks| {
-            mocks.clearGlobals();
-            mocks.clearHooks();
-            mocks.clearMockStates();
+        if (self.mocks_state) |active_mocks| {
+            active_mocks.clearGlobals();
+            active_mocks.clearHooks();
+            active_mocks.clearMockStates();
         }
         self.clearRuntimeGlobalsForShutdown();
         self.rt.runGC();
         self.ctx.deinit();
         self.rt.runGC();
         self.rt.deinit();
-        if (self.host_mocks_state) |mocks| {
-            mocks.destroyAfterRuntimeFree();
-            self.host_mocks_state = null;
+        if (self.mocks_state) |active_mocks| {
+            active_mocks.destroyAfterRuntimeFree();
+            self.mocks_state = null;
         }
     }
 
@@ -265,18 +265,18 @@ pub const Runtime = struct {
     }
 
     pub fn loadFromOnLoad(self: *Runtime, path: []const u8) RuntimeError!?OnLoadResult {
-        const mocks = self.host_mocks_state orelse return null;
-        if (!mocks.hasOnLoadHooks()) return null;
-        return mocks.applyOnLoad(path) catch |err| switch (err) {
+        const active_mocks = self.mocks_state orelse return null;
+        if (!active_mocks.hasOnLoadHooks()) return null;
+        return active_mocks.applyOnLoad(path) catch |err| switch (err) {
             error.OutOfMemory => error.OutOfMemory,
             error.JSError => error.EvaluationFailed,
         };
     }
 
     pub fn matchesOnLoad(self: *Runtime, path: []const u8) RuntimeError!bool {
-        const mocks = self.host_mocks_state orelse return false;
-        if (!mocks.hasOnLoadHooks()) return false;
-        return mocks.matchesOnLoad(path) catch |err| switch (err) {
+        const active_mocks = self.mocks_state orelse return false;
+        if (!active_mocks.hasOnLoadHooks()) return false;
+        return active_mocks.matchesOnLoad(path) catch |err| switch (err) {
             error.OutOfMemory => error.OutOfMemory,
             error.JSError => error.EvaluationFailed,
         };
@@ -398,17 +398,17 @@ pub const Runtime = struct {
         const global = self.ctx.getGlobalObject();
         defer global.deinit(self.ctx);
 
-        const classes_state = self.allocator.create(dom_classes.DomClasses) catch return error.OutOfMemory;
+        const classes_state = self.allocator.create(dom.DomClasses) catch return error.OutOfMemory;
         errdefer self.allocator.destroy(classes_state);
-        classes_state.* = dom_classes.DomClasses.init(self.allocator, self.rt, self.ctx, global) catch |err| {
+        classes_state.* = dom.DomClasses.init(self.allocator, self.rt, self.ctx, global) catch |err| {
             return switch (err) {
                 error.OutOfMemory => error.OutOfMemory,
                 else => error.EvaluationFailed,
             };
         };
         errdefer classes_state.deinit();
-        self.dom_classes_state = classes_state;
-        self.ctx.setOpaque(dom_classes.DomClasses, classes_state);
+        self.dom_state = classes_state;
+        self.ctx.setOpaque(dom.DomClasses, classes_state);
 
         const native = quickjs.Value.initObject(self.ctx);
         if (native.isException()) {
@@ -568,7 +568,7 @@ pub const Runtime = struct {
         global.setPropertyStr(self.ctx, "__zigDomWindowHandle", quickjs.Value.initInt64(@intCast(window_handle))) catch return error.EvaluationFailed;
         global.setPropertyStr(self.ctx, "__zigDomDocumentHandle", quickjs.Value.initInt64(@intCast(document_handle))) catch return error.EvaluationFailed;
 
-        if (self.dom_classes_state) |classes| {
+        if (self.dom_state) |classes| {
             classes.installNativeGlobals(self.ctx, global, window_handle, document_handle) catch |err| {
                 return switch (err) {
                     error.OutOfMemory => error.OutOfMemory,
@@ -580,16 +580,16 @@ pub const Runtime = struct {
     }
 
     fn installHostPlatformGlobals(self: *Runtime) RuntimeError!void {
-        host_platform.install(self.ctx) catch return error.EvaluationFailed;
-        host_platform.linkWindow(self.ctx) catch return error.EvaluationFailed;
+        platform.install(self.ctx) catch return error.EvaluationFailed;
+        platform.linkWindow(self.ctx) catch return error.EvaluationFailed;
     }
 
     fn installHostAssertions(self: *Runtime) RuntimeError!void {
-        host_assertions.install(self.ctx) catch return error.EvaluationFailed;
+        assertions.install(self.ctx) catch return error.EvaluationFailed;
     }
 
     fn installHostMocks(self: *Runtime) RuntimeError!void {
-        self.host_mocks_state = host_mocks.HostMocks.init(self.allocator, self.rt, self.ctx) catch |err| {
+        self.mocks_state = mocks.HostMocks.init(self.allocator, self.rt, self.ctx) catch |err| {
             return switch (err) {
                 error.OutOfMemory => error.OutOfMemory,
                 else => error.EvaluationFailed,
@@ -598,7 +598,7 @@ pub const Runtime = struct {
     }
 
     fn installHostRunner(self: *Runtime) RuntimeError!void {
-        self.host_runner_state = host_runner.HostRunner.init(self.allocator, self.rt, self.ctx) catch |err| {
+        self.runner_state = runner.HostRunner.init(self.allocator, self.rt, self.ctx) catch |err| {
             return switch (err) {
                 error.OutOfMemory => error.OutOfMemory,
                 else => error.EvaluationFailed,

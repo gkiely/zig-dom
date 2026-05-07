@@ -25,7 +25,7 @@ test("native DOM collections and sibling element traversal", () => {
     root.childNodes.item(2).nodeName,
     root.childNodes.item(3).nodeName
   ];
-  expect(nodeNames).toEqual(["#text", "p", "span", "#text"]);
+  expect(nodeNames).toEqual(["#text", "P", "SPAN", "#text"]);
 
   expect(root.children.length).toBe(2);
   expect(root.children.item(0)).toBe(first);

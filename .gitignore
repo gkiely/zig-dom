@@ -12,6 +12,7 @@ bun.lockb
 zig-cache/
 zig-pkg/
 zig-out/
+wpt/
 
 # Build output
 dist/

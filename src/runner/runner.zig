@@ -12,7 +12,6 @@ pub const RunnerError = error{
     MissingValueAfterOut,
     MissingValueAfterSetup,
     MissingValueAfterRoot,
-    MissingValueAfterDom,
     InvalidDomMode,
 };
 
@@ -27,6 +26,7 @@ const ParsedTestArgs = struct {
     dom_mode: DomMode,
 
     fn deinit(self: ParsedTestArgs, allocator: Allocator) void {
+        deinitDomMode(allocator, self.dom_mode);
         allocator.free(self.patterns);
         allocator.free(self.setup_files);
         allocator.free(self.root_dir);
@@ -48,7 +48,7 @@ pub fn run(allocator: Allocator, io: std.Io, command: cli.ParsedCommand) !u8 {
             return runSimpleScript(allocator, io, "scripts/sync-wpt.ts", &.{});
         },
         .wpt_cmd => |args_command| {
-            return runSimpleScript(allocator, io, "scripts/run-wpt-subset.ts", args_command.args);
+            return runSimpleScript(allocator, io, "scripts/run-wpt-native.ts", args_command.args);
         },
         .wpt_manifest_cmd => |args_command| {
             return runWptManifestCommand(allocator, io, args_command.args);
@@ -163,17 +163,15 @@ fn parseTestArgs(allocator: Allocator, raw_args: []const []const u8) !ParsedTest
         }
 
         if (std.mem.eql(u8, current, "--dom")) {
-            if (index + 1 >= raw_args.len) {
-                return error.MissingValueAfterDom;
-            }
-
-            dom_mode = parseDomMode(raw_args[index + 1]) orelse return error.InvalidDomMode;
-            index += 2;
+            deinitDomMode(allocator, dom_mode);
+            dom_mode = .always;
+            index += 1;
             continue;
         }
 
         if (std.mem.startsWith(u8, current, "--dom=")) {
-            dom_mode = parseDomMode(current["--dom=".len..]) orelse return error.InvalidDomMode;
+            deinitDomMode(allocator, dom_mode);
+            dom_mode = try parseDomSuffixes(allocator, current["--dom=".len..]);
             index += 1;
             continue;
         }
@@ -200,11 +198,37 @@ fn parseTestArgs(allocator: Allocator, raw_args: []const []const u8) !ParsedTest
     };
 }
 
-fn parseDomMode(value: []const u8) ?DomMode {
-    if (std.mem.eql(u8, value, "auto")) return .auto;
-    if (std.mem.eql(u8, value, "always")) return .always;
-    if (std.mem.eql(u8, value, "never")) return .never;
-    return null;
+fn parseDomSuffixes(allocator: Allocator, value: []const u8) !DomMode {
+    if (value.len == 0) return error.InvalidDomMode;
+
+    var suffixes: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (suffixes.items) |suffix| {
+            allocator.free(suffix);
+        }
+        suffixes.deinit(allocator);
+    }
+
+    var parts = std.mem.splitScalar(u8, value, ',');
+    while (parts.next()) |raw| {
+        const suffix = std.mem.trim(u8, raw, " \t\n\r");
+        if (suffix.len == 0) return error.InvalidDomMode;
+        try suffixes.append(allocator, try allocator.dupe(u8, suffix));
+    }
+
+    return .{ .suffixes = try suffixes.toOwnedSlice(allocator) };
+}
+
+fn deinitDomMode(allocator: Allocator, dom_mode: DomMode) void {
+    switch (dom_mode) {
+        .suffixes => |suffixes| {
+            for (suffixes) |suffix| {
+                allocator.free(suffix);
+            }
+            allocator.free(suffixes);
+        },
+        else => {},
+    }
 }
 
 fn resolveTestPatterns(
@@ -657,6 +681,34 @@ test "parseTestArgs supports --root and --setup" {
     try std.testing.expect(std.mem.eql(u8, parsed.setup_files[0], "setup.ts"));
     try std.testing.expect(std.mem.eql(u8, parsed.root_dir, "../app"));
     try std.testing.expect(parsed.has_root);
+}
+
+test "parseTestArgs treats bare --dom as always enabled" {
+    const allocator = std.testing.allocator;
+
+    const parsed = try parseTestArgs(allocator, &.{ "--dom", "tests/runner/basic.test.js" });
+    defer parsed.deinit(allocator);
+
+    try std.testing.expect(std.meta.activeTag(parsed.dom_mode) == .always);
+    try std.testing.expect(parsed.patterns.len == 1);
+    try std.testing.expectEqualStrings("tests/runner/basic.test.js", parsed.patterns[0]);
+}
+
+test "parseTestArgs supports custom DOM suffixes" {
+    const allocator = std.testing.allocator;
+
+    const parsed = try parseTestArgs(allocator, &.{ "--dom=.vue,.jsx,.tsx", "tests" });
+    defer parsed.deinit(allocator);
+
+    switch (parsed.dom_mode) {
+        .suffixes => |suffixes| {
+            try std.testing.expect(suffixes.len == 3);
+            try std.testing.expectEqualStrings(".vue", suffixes[0]);
+            try std.testing.expectEqualStrings(".jsx", suffixes[1]);
+            try std.testing.expectEqualStrings(".tsx", suffixes[2]);
+        },
+        else => return error.TestUnexpectedResult,
+    }
 }
 
 test "parseBunfigPreloadEntries reads test preload arrays" {

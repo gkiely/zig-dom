@@ -1,5 +1,23 @@
 const std = @import("std");
-const api = @import("ffi/api.zig");
+
+const Status = enum(u32) {
+    ok = 0,
+    invalid_handle = 1,
+    hierarchy_request = 2,
+    not_found = 3,
+    out_of_memory = 4,
+    invalid_argument = 5,
+    internal_error = 6,
+};
+
+const NodeKind = enum(u32) {
+    unknown = 0,
+    element = 1,
+    text = 3,
+    comment = 8,
+    document = 9,
+    document_fragment = 11,
+};
 
 const Allocator = std.mem.Allocator;
 const c_allocator = std.heap.c_allocator;
@@ -10,7 +28,7 @@ const Attribute = struct {
 };
 
 const Node = struct {
-    kind: api.NodeKind,
+    kind: NodeKind,
     name: []u8,
     data: []u8,
     owner_document: u64,
@@ -76,13 +94,13 @@ fn unregisterWindow(window_handle: u64) void {
     global_windows.items[index] = null;
 }
 
-const STATUS_OK: u32 = @intFromEnum(api.Status.ok);
-const STATUS_INVALID_HANDLE: u32 = @intFromEnum(api.Status.invalid_handle);
-const STATUS_HIERARCHY: u32 = @intFromEnum(api.Status.hierarchy_request);
-const STATUS_NOT_FOUND: u32 = @intFromEnum(api.Status.not_found);
-const STATUS_OOM: u32 = @intFromEnum(api.Status.out_of_memory);
-const STATUS_INVALID_ARGUMENT: u32 = @intFromEnum(api.Status.invalid_argument);
-const STATUS_INTERNAL: u32 = @intFromEnum(api.Status.internal_error);
+const STATUS_OK: u32 = @intFromEnum(Status.ok);
+const STATUS_INVALID_HANDLE: u32 = @intFromEnum(Status.invalid_handle);
+const STATUS_HIERARCHY: u32 = @intFromEnum(Status.hierarchy_request);
+const STATUS_NOT_FOUND: u32 = @intFromEnum(Status.not_found);
+const STATUS_OOM: u32 = @intFromEnum(Status.out_of_memory);
+const STATUS_INVALID_ARGUMENT: u32 = @intFromEnum(Status.invalid_argument);
+const STATUS_INTERNAL: u32 = @intFromEnum(Status.internal_error);
 
 const DOC_POS_DISCONNECTED: u32 = 0x01;
 const DOC_POS_PRECEDING: u32 = 0x02;
@@ -165,7 +183,7 @@ fn resolveNode(window: *Window, node_handle: u64) ?*Node {
     return &window.nodes.items[index];
 }
 
-fn createNode(window: *Window, kind: api.NodeKind, name: []const u8, data: []const u8, owner_document: u64, lowercase_name: bool) !u64 {
+fn createNode(window: *Window, kind: NodeKind, name: []const u8, data: []const u8, owner_document: u64, lowercase_name: bool) !u64 {
     window.next_node_id += 1;
     const handle = encodeNodeHandle(window.handle, window.next_node_id);
 
@@ -211,7 +229,7 @@ fn appendPathToRoot(window: *Window, start: u64, output: *std.ArrayListUnmanaged
     }
 }
 
-fn detachFromParent(window: *Window, child_handle: u64) api.Status {
+fn detachFromParent(window: *Window, child_handle: u64) Status {
     const child = resolveNode(window, child_handle) orelse return .invalid_handle;
     const parent_handle = child.parent;
     if (parent_handle == 0) {
@@ -242,7 +260,7 @@ fn detachFromParent(window: *Window, child_handle: u64) api.Status {
     return .ok;
 }
 
-fn appendChildResolved(window: *Window, parent_handle: u64, parent: *Node, child_handle: u64, child: *Node) api.Status {
+fn appendChildResolved(window: *Window, parent_handle: u64, parent: *Node, child_handle: u64, child: *Node) Status {
     if (parent_handle == child_handle) return .hierarchy_request;
 
     // Fast path: detached children cannot form cycles and do not require detach bookkeeping.
@@ -286,13 +304,13 @@ fn appendChildResolved(window: *Window, parent_handle: u64, parent: *Node, child
     return .ok;
 }
 
-fn appendChild(window: *Window, parent_handle: u64, child_handle: u64) api.Status {
+fn appendChild(window: *Window, parent_handle: u64, child_handle: u64) Status {
     const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
     const child = resolveNode(window, child_handle) orelse return .invalid_handle;
     return appendChildResolved(window, parent_handle, parent, child_handle, child);
 }
 
-fn appendFragmentChildren(window: *Window, parent_handle: u64, fragment_handle: u64) api.Status {
+fn appendFragmentChildren(window: *Window, parent_handle: u64, fragment_handle: u64) Status {
     const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
     const fragment = resolveNode(window, fragment_handle) orelse return .invalid_handle;
     if (fragment.kind != .document_fragment) return .invalid_argument;
@@ -324,7 +342,7 @@ fn appendFragmentChildren(window: *Window, parent_handle: u64, fragment_handle: 
     return .ok;
 }
 
-fn clearChildrenResolved(window: *Window, parent: *Node) api.Status {
+fn clearChildrenResolved(window: *Window, parent: *Node) Status {
     var cursor = parent.first_child;
     while (cursor != 0) {
         const child = resolveNode(window, cursor) orelse return .invalid_handle;
@@ -339,7 +357,7 @@ fn clearChildrenResolved(window: *Window, parent: *Node) api.Status {
     return .ok;
 }
 
-fn replaceChildrenWithDetached(window: *Window, parent_handle: u64, handles: []const u64) api.Status {
+fn replaceChildrenWithDetached(window: *Window, parent_handle: u64, handles: []const u64) Status {
     const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
     const clear_status = clearChildrenResolved(window, parent);
     if (clear_status != .ok) return clear_status;
@@ -370,7 +388,7 @@ fn replaceChildrenWithDetached(window: *Window, parent_handle: u64, handles: []c
     return .ok;
 }
 
-fn insertBefore(window: *Window, parent_handle: u64, child_handle: u64, reference_handle: u64) api.Status {
+fn insertBefore(window: *Window, parent_handle: u64, child_handle: u64, reference_handle: u64) Status {
     if (reference_handle == 0) {
         return appendChild(window, parent_handle, child_handle);
     }
@@ -411,7 +429,7 @@ fn insertBefore(window: *Window, parent_handle: u64, child_handle: u64, referenc
     return .ok;
 }
 
-fn removeChild(window: *Window, parent_handle: u64, child_handle: u64) api.Status {
+fn removeChild(window: *Window, parent_handle: u64, child_handle: u64) Status {
     _ = resolveNode(window, parent_handle) orelse return .invalid_handle;
     const child = resolveNode(window, child_handle) orelse return .invalid_handle;
     if (child.parent != parent_handle) {
@@ -420,7 +438,7 @@ fn removeChild(window: *Window, parent_handle: u64, child_handle: u64) api.Statu
     return detachFromParent(window, child_handle);
 }
 
-fn replaceChild(window: *Window, parent_handle: u64, new_child_handle: u64, old_child_handle: u64) api.Status {
+fn replaceChild(window: *Window, parent_handle: u64, new_child_handle: u64, old_child_handle: u64) Status {
     if (new_child_handle == old_child_handle) {
         return .ok;
     }
@@ -579,7 +597,8 @@ fn parseAttributesInto(node: *Node, source: []const u8) !void {
             !isAsciiWhitespace(source[index]) and
             source[index] != '=' and
             source[index] != '/' and
-            source[index] != '>') : (index += 1) {}
+            source[index] != '>') : (index += 1)
+        {}
         if (index == name_start) {
             index += 1;
             continue;
@@ -606,7 +625,8 @@ fn parseAttributesInto(node: *Node, source: []const u8) !void {
                     !isAsciiWhitespace(source[index]) and
                     source[index] != '"' and
                     source[index] != '\'' and
-                    source[index] != '>') : (index += 1) {}
+                    source[index] != '>') : (index += 1)
+                {}
                 raw_value = source[value_start..index];
             }
         }
@@ -617,7 +637,7 @@ fn parseAttributesInto(node: *Node, source: []const u8) !void {
     }
 }
 
-fn nativeParseHtmlInto(window: *Window, parent_handle: u64, html: []const u8) api.Status {
+fn nativeParseHtmlInto(window: *Window, parent_handle: u64, html: []const u8) Status {
     const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
     if (parent.kind != .element and parent.kind != .document_fragment) return .invalid_argument;
 
@@ -736,7 +756,7 @@ fn appendTextContent(window: *Window, node_handle: u64, output: *std.ArrayListUn
     }
 }
 
-fn clearChildren(window: *Window, node_handle: u64) api.Status {
+fn clearChildren(window: *Window, node_handle: u64) Status {
     const node = resolveNode(window, node_handle) orelse return .invalid_handle;
     var cursor = node.first_child;
     while (cursor != 0) {
@@ -812,11 +832,10 @@ fn compareDocumentPositionInternal(left: u64, right: u64) u32 {
 
     var left_index = left_path.items.len;
     var right_index = right_path.items.len;
-    while (
-        left_index > 0 and
+    while (left_index > 0 and
         right_index > 0 and
-        left_path.items[left_index - 1] == right_path.items[right_index - 1]
-    ) {
+        left_path.items[left_index - 1] == right_path.items[right_index - 1])
+    {
         left_index -= 1;
         right_index -= 1;
     }
@@ -1201,7 +1220,7 @@ fn destroyWindowInternal(window_handle: u64) void {
     debug_windows_destroyed += 1;
 }
 
-fn toNodeType(kind: api.NodeKind) u32 {
+fn toNodeType(kind: NodeKind) u32 {
     return switch (kind) {
         .element => 1,
         .text => 3,
@@ -1221,7 +1240,6 @@ pub export fn zig_dom_can_return_structs() u32 {
 }
 
 pub export fn zig_dom_echo_utf8(data_ptr: [*]const u8, data_len: usize, out_ptr: *[*c]u8, out_len: *usize) u32 {
-
     const input = data_ptr[0..data_len];
     return outputString(input, out_ptr, out_len);
 }
@@ -1235,49 +1253,42 @@ pub export fn zig_dom_destroy_window(window: u64) void {
 }
 
 pub export fn zig_dom_window_document(window: u64, out_document: *u64) u32 {
-
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
     out_document.* = win.document_handle;
     return STATUS_OK;
 }
 
 pub export fn zig_dom_window_document_element(window: u64, out_element: *u64) u32 {
-
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
     out_element.* = win.html_handle;
     return STATUS_OK;
 }
 
 pub export fn zig_dom_window_head(window: u64, out_head: *u64) u32 {
-
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
     out_head.* = win.head_handle;
     return STATUS_OK;
 }
 
 pub export fn zig_dom_window_body(window: u64, out_body: *u64) u32 {
-
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
     out_body.* = win.body_handle;
     return STATUS_OK;
 }
 
 pub export fn zig_dom_node_kind(node: u64) u32 {
-
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
     return @intFromEnum(record.kind);
 }
 
 pub export fn zig_dom_node_type(node: u64) u32 {
-
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
     return toNodeType(record.kind);
 }
 
 pub export fn zig_dom_node_owner_document(node: u64, out_document: *u64) u32 {
-
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
     out_document.* = record.owner_document;
@@ -1285,42 +1296,36 @@ pub export fn zig_dom_node_owner_document(node: u64, out_document: *u64) u32 {
 }
 
 pub export fn zig_dom_node_parent(node: u64) u64 {
-
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
     return record.parent;
 }
 
 pub export fn zig_dom_node_first_child(node: u64) u64 {
-
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
     return record.first_child;
 }
 
 pub export fn zig_dom_node_last_child(node: u64) u64 {
-
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
     return record.last_child;
 }
 
 pub export fn zig_dom_node_next_sibling(node: u64) u64 {
-
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
     return record.next_sibling;
 }
 
 pub export fn zig_dom_node_previous_sibling(node: u64) u64 {
-
     const window = resolveNodeWindow(node) orelse return 0;
     const record = resolveNode(window, node) orelse return 0;
     return record.prev_sibling;
 }
 
 pub export fn zig_dom_node_child_handles(node: u64, out_ptr: *[*c]u64, out_len: *usize) u32 {
-
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
 
@@ -1338,7 +1343,6 @@ pub export fn zig_dom_node_child_handles(node: u64, out_ptr: *[*c]u64, out_len: 
 }
 
 pub export fn zig_dom_node_contains(ancestor: u64, node: u64) u32 {
-
     const window = resolveNodeWindow(ancestor) orelse return 0;
     const other_window = resolveNodeWindow(node) orelse return 0;
     if (window.handle != other_window.handle) return 0;
@@ -1350,7 +1354,6 @@ pub export fn zig_dom_node_compare_document_position(left: u64, right: u64) u32 
 }
 
 pub export fn zig_dom_node_name(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
-
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
 
@@ -1358,7 +1361,6 @@ pub export fn zig_dom_node_name(node: u64, out_ptr: *[*c]u8, out_len: *usize) u3
 }
 
 pub export fn zig_dom_node_append_child(parent: u64, child: u64) u32 {
-
     const window_handle = decodeNodeWindowHandle(parent);
     if (window_handle == 0) return STATUS_INVALID_HANDLE;
     if (decodeNodeWindowHandle(child) != window_handle) return STATUS_HIERARCHY;
@@ -1368,7 +1370,6 @@ pub export fn zig_dom_node_append_child(parent: u64, child: u64) u32 {
 }
 
 pub export fn zig_dom_node_append_fragment(parent: u64, fragment: u64) u32 {
-
     const window_handle = decodeNodeWindowHandle(parent);
     if (window_handle == 0) return STATUS_INVALID_HANDLE;
     if (decodeNodeWindowHandle(fragment) != window_handle) return STATUS_HIERARCHY;
@@ -1378,7 +1379,6 @@ pub export fn zig_dom_node_append_fragment(parent: u64, fragment: u64) u32 {
 }
 
 pub export fn zig_dom_node_replace_children(parent: u64, children_ptr: [*]const u64, children_len: usize) u32 {
-
     const window_handle = decodeNodeWindowHandle(parent);
     if (window_handle == 0) return STATUS_INVALID_HANDLE;
     const window = resolveWindow(window_handle) orelse return STATUS_INVALID_HANDLE;
@@ -1392,13 +1392,11 @@ pub export fn zig_dom_node_replace_children(parent: u64, children_ptr: [*]const 
 }
 
 pub export fn zig_dom_node_set_inner_html(parent: u64, html_ptr: [*]const u8, html_len: usize) u32 {
-
     const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
     return @intFromEnum(nativeParseHtmlInto(window, parent, html_ptr[0..html_len]));
 }
 
 pub export fn zig_dom_window_append_child(window: u64, parent: u64, child: u64) u32 {
-
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
     if (decodeNodeWindowHandle(parent) != 0 and decodeNodeWindowHandle(parent) != win.handle) return STATUS_HIERARCHY;
     if (decodeNodeWindowHandle(child) != 0 and decodeNodeWindowHandle(child) != win.handle) return STATUS_HIERARCHY;
@@ -1408,7 +1406,6 @@ pub export fn zig_dom_window_append_child(window: u64, parent: u64, child: u64) 
 }
 
 pub export fn zig_dom_node_insert_before(parent: u64, child: u64, reference_child: u64) u32 {
-
     const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
     const child_window = resolveNodeWindow(child) orelse return STATUS_INVALID_HANDLE;
     if (window.handle != child_window.handle) return STATUS_HIERARCHY;
@@ -1421,13 +1418,11 @@ pub export fn zig_dom_node_insert_before(parent: u64, child: u64, reference_chil
 }
 
 pub export fn zig_dom_node_remove_child(parent: u64, child: u64) u32 {
-
     const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
     return @intFromEnum(removeChild(window, parent, child));
 }
 
 pub export fn zig_dom_node_replace_child(parent: u64, new_child: u64, old_child: u64) u32 {
-
     const window = resolveNodeWindow(parent) orelse return STATUS_INVALID_HANDLE;
     const new_window = resolveNodeWindow(new_child) orelse return STATUS_INVALID_HANDLE;
     const old_window = resolveNodeWindow(old_child) orelse return STATUS_INVALID_HANDLE;
@@ -1437,7 +1432,6 @@ pub export fn zig_dom_node_replace_child(parent: u64, new_child: u64, old_child:
 }
 
 pub export fn zig_dom_document_create_element(document: u64, name_ptr: [*]const u8, name_len: usize, out_handle: *u64) u32 {
-
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
 
     out_handle.* = createNode(window, .element, name_ptr[0..name_len], "", document, false) catch return STATUS_OOM;
@@ -1445,14 +1439,12 @@ pub export fn zig_dom_document_create_element(document: u64, name_ptr: [*]const 
 }
 
 pub export fn zig_dom_document_create_div_element(document: u64) u64 {
-
     const window = resolveNodeWindow(document) orelse return 0;
 
     return createNode(window, .element, "div", "", document, false) catch 0;
 }
 
 pub export fn zig_dom_document_create_text_node(document: u64, data_ptr: [*]const u8, data_len: usize, out_handle: *u64) u32 {
-
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (record.kind != .document) return STATUS_INVALID_ARGUMENT;
@@ -1462,7 +1454,6 @@ pub export fn zig_dom_document_create_text_node(document: u64, data_ptr: [*]cons
 }
 
 pub export fn zig_dom_document_create_text_node_direct(document: u64, data_ptr: [*]const u8, data_len: usize) u64 {
-
     const window = resolveNodeWindow(document) orelse return 0;
     const record = resolveNode(window, document) orelse return 0;
     if (record.kind != .document) return 0;
@@ -1471,7 +1462,6 @@ pub export fn zig_dom_document_create_text_node_direct(document: u64, data_ptr: 
 }
 
 pub export fn zig_dom_document_create_comment(document: u64, data_ptr: [*]const u8, data_len: usize, out_handle: *u64) u32 {
-
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (record.kind != .document) return STATUS_INVALID_ARGUMENT;
@@ -1481,7 +1471,6 @@ pub export fn zig_dom_document_create_comment(document: u64, data_ptr: [*]const 
 }
 
 pub export fn zig_dom_document_create_document_fragment(document: u64, out_handle: *u64) u32 {
-
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (record.kind != .document) return STATUS_INVALID_ARGUMENT;
@@ -1491,7 +1480,6 @@ pub export fn zig_dom_document_create_document_fragment(document: u64, out_handl
 }
 
 pub export fn zig_dom_element_get_attribute(element: u64, name_ptr: [*]const u8, name_len: usize, out_ptr: *[*c]u8, out_len: *usize, out_exists: *u8) u32 {
-
     const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
     const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
     if (node.kind != .element) return STATUS_INVALID_ARGUMENT;
@@ -1510,7 +1498,6 @@ pub export fn zig_dom_element_get_attribute(element: u64, name_ptr: [*]const u8,
 }
 
 pub export fn zig_dom_element_get_attribute_ref(element: u64, name_ptr: [*]const u8, name_len: usize, out_ptr: *[*c]u8, out_len: *usize, out_exists: *u8) u32 {
-
     const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
     const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
     if (node.kind != .element) return STATUS_INVALID_ARGUMENT;
@@ -1536,7 +1523,6 @@ pub export fn zig_dom_element_get_attribute_ref(element: u64, name_ptr: [*]const
 }
 
 pub export fn zig_dom_element_set_attribute(element: u64, name_ptr: [*]const u8, name_len: usize, value_ptr: [*]const u8, value_len: usize) u32 {
-
     const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
     const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
     if (node.kind != .element) return STATUS_INVALID_ARGUMENT;
@@ -1546,7 +1532,6 @@ pub export fn zig_dom_element_set_attribute(element: u64, name_ptr: [*]const u8,
 }
 
 pub export fn zig_dom_element_remove_attribute(element: u64, name_ptr: [*]const u8, name_len: usize) u32 {
-
     const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
     const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
     if (node.kind != .element) return STATUS_INVALID_ARGUMENT;
@@ -1556,7 +1541,6 @@ pub export fn zig_dom_element_remove_attribute(element: u64, name_ptr: [*]const 
 }
 
 pub export fn zig_dom_element_has_attribute(element: u64, name_ptr: [*]const u8, name_len: usize) u32 {
-
     const window = resolveNodeWindow(element) orelse return 0;
     const node = resolveNode(window, element) orelse return 0;
     if (node.kind != .element) return 0;
@@ -1565,7 +1549,6 @@ pub export fn zig_dom_element_has_attribute(element: u64, name_ptr: [*]const u8,
 }
 
 pub export fn zig_dom_element_attributes_json(element: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
-
     const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
     const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
     if (node.kind != .element) return STATUS_INVALID_ARGUMENT;
@@ -1590,7 +1573,6 @@ pub export fn zig_dom_element_attributes_json(element: u64, out_ptr: *[*c]u8, ou
 }
 
 pub export fn zig_dom_node_text_content(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
-
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
 
@@ -1612,7 +1594,6 @@ pub export fn zig_dom_node_text_content(node: u64, out_ptr: *[*c]u8, out_len: *u
 }
 
 pub export fn zig_dom_node_set_text_content(node: u64, data_ptr: [*]const u8, data_len: usize) u32 {
-
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
     const data = data_ptr[0..data_len];
@@ -1639,7 +1620,6 @@ pub export fn zig_dom_node_set_text_content(node: u64, data_ptr: [*]const u8, da
 }
 
 pub export fn zig_dom_character_data_set_data_direct(node: u64, data_ptr: [*]const u8, data_len: usize) void {
-
     const window = resolveNodeWindow(node) orelse return;
     const record = resolveNode(window, node) orelse return;
     switch (record.kind) {
@@ -1649,7 +1629,6 @@ pub export fn zig_dom_character_data_set_data_direct(node: u64, data_ptr: [*]con
 }
 
 pub export fn zig_dom_node_outer_html(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
-
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     _ = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
 
@@ -1661,7 +1640,6 @@ pub export fn zig_dom_node_outer_html(node: u64, out_ptr: *[*c]u8, out_len: *usi
 }
 
 pub export fn zig_dom_document_get_element_by_id(document: u64, id_ptr: [*]const u8, id_len: usize, out_handle: *u64) u32 {
-
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
@@ -1702,7 +1680,6 @@ pub export fn zig_dom_document_get_element_by_id(document: u64, id_ptr: [*]const
 }
 
 pub export fn zig_dom_document_query_selector(document: u64, selector_ptr: [*]const u8, selector_len: usize, out_handle: *u64) u32 {
-
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
@@ -1721,7 +1698,6 @@ pub export fn zig_dom_document_query_selector(document: u64, selector_ptr: [*]co
 }
 
 pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [*]const u8, selector_len: usize, out_ptr: *[*c]u64, out_len: *usize) u32 {
-
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
@@ -1750,7 +1726,6 @@ pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [
 }
 
 pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const u8, selector_len: usize, out_ptr: *[*c]u64, out_len: *usize) u32 {
-
     const window = resolveNodeWindow(root) orelse return STATUS_INVALID_HANDLE;
     const root_node = resolveNode(window, root) orelse return STATUS_INVALID_HANDLE;
     if (root_node.kind != .element and root_node.kind != .document_fragment and root_node.kind != .document) {
@@ -1769,7 +1744,6 @@ pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const 
 }
 
 pub export fn zig_dom_node_query_selector(root: u64, selector_ptr: [*]const u8, selector_len: usize, out_handle: *u64) u32 {
-
     const window = resolveNodeWindow(root) orelse return STATUS_INVALID_HANDLE;
     const root_node = resolveNode(window, root) orelse return STATUS_INVALID_HANDLE;
     if (root_node.kind != .element and root_node.kind != .document_fragment and root_node.kind != .document) {
@@ -1785,7 +1759,6 @@ pub export fn zig_dom_node_query_selector(root: u64, selector_ptr: [*]const u8, 
 }
 
 pub export fn zig_dom_document_reset(document: u64) u32 {
-
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     if (window.document_handle != document) return STATUS_INVALID_ARGUMENT;
 

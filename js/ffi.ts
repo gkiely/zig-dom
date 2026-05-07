@@ -1,7 +1,6 @@
 import { dlopen, ptr, suffix, toArrayBuffer, type Pointer } from "bun:ffi";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { domExceptionForStatus } from "./wrappers/DOMException.ts";
 
 export const enum NativeStatus {
   Ok = 0,
@@ -32,6 +31,41 @@ function statusName(status: number): string {
     default:
       return `unknown_${status}`;
   }
+}
+
+type DomExceptionMapping = {
+  name: string;
+  code: number;
+  defaultMessage: string;
+};
+
+const DOM_EXCEPTION_BY_STATUS = new Map<number, DomExceptionMapping>([
+  [NativeStatus.InvalidHandle, { name: "InvalidStateError", code: 11, defaultMessage: "The object is in an invalid state." }],
+  [NativeStatus.HierarchyRequest, { name: "HierarchyRequestError", code: 3, defaultMessage: "The operation would yield an incorrect node tree." }],
+  [NativeStatus.NotFound, { name: "NotFoundError", code: 8, defaultMessage: "The object can not be found here." }],
+  [NativeStatus.OutOfMemory, { name: "QuotaExceededError", code: 22, defaultMessage: "The operation ran out of memory." }],
+  [NativeStatus.InvalidArgument, { name: "SyntaxError", code: 12, defaultMessage: "The provided input is invalid." }],
+  [NativeStatus.InternalError, { name: "InvalidStateError", code: 11, defaultMessage: "A native internal error occurred." }]
+]);
+
+export class ZigDOMException extends Error {
+  readonly code: number;
+
+  constructor(message: string, name: string, code = 0) {
+    super(message);
+    this.name = name;
+    this.code = code;
+  }
+}
+
+function domExceptionForStatus(status: number, operation: string, details?: string): ZigDOMException {
+  const mapping = DOM_EXCEPTION_BY_STATUS.get(status);
+  if (!mapping) {
+    return new ZigDOMException(`${operation} failed${details ? `: ${details}` : ""}`, "InvalidStateError", 11);
+  }
+
+  const message = details ? `${mapping.defaultMessage} ${details}` : `${mapping.defaultMessage} (${operation})`;
+  return new ZigDOMException(message, mapping.name, mapping.code);
 }
 
 function assertStatus(status: number, operation: string): void {

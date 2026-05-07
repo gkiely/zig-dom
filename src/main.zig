@@ -38,6 +38,6 @@ test {
     _ = @import("runner/cli.zig");
     _ = @import("runner/discovery.zig");
     _ = @import("runner/runner.zig");
-    _ = @import("runtime/runtime.zig");
-    _ = @import("runtime/quickjs_ng.zig");
+    _ = @import("runtime.zig");
+    _ = @import("quickjs_ng.zig");
 }

@@ -23,6 +23,7 @@
     ]
   },
   "include": [
-    "js/**/*.ts"
+    "js/index.ts",
+    "js/global-registrator.ts"
   ]
 }

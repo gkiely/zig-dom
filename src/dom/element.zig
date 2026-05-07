@@ -1,0 +1,45 @@
+const quickjs = @import("quickjs");
+const bindings = @import("bindings.zig");
+
+const DomClassesError = bindings.DomClassesError;
+
+pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime callbacks: type) DomClassesError!void {
+    try bindings.installGetter(ctx, proto, "tagName", callbacks.tagNameGet);
+    try bindings.installGetter(ctx, proto, "localName", callbacks.localNameGet);
+    try bindings.installGetter(ctx, proto, "namespaceURI", callbacks.namespaceUriGet);
+    try bindings.installAccessor(ctx, proto, "id", callbacks.idGet, callbacks.idSet);
+    try bindings.installAccessor(ctx, proto, "className", callbacks.classNameGet, callbacks.classNameSet);
+    try bindings.installAccessor(ctx, proto, "innerHTML", callbacks.innerHtmlGet, callbacks.innerHtmlSet);
+    try bindings.installGetter(ctx, proto, "outerHTML", callbacks.outerHtmlGet);
+    try bindings.installGetter(ctx, proto, "style", callbacks.styleGet);
+    try bindings.installMethod(ctx, proto, "getAttribute", callbacks.getAttribute, 1);
+    try bindings.installMethod(ctx, proto, "getAttributeNode", callbacks.getAttributeNode, 1);
+    try bindings.installMethod(ctx, proto, "setAttribute", callbacks.setAttribute, 2);
+    try bindings.installMethod(ctx, proto, "removeAttribute", callbacks.removeAttribute, 1);
+    try bindings.installMethod(ctx, proto, "hasAttribute", callbacks.hasAttribute, 1);
+    try bindings.installMethod(ctx, proto, "toggleAttribute", callbacks.toggleAttribute, 2);
+    try bindings.installMethod(ctx, proto, "getAttributeNames", callbacks.getAttributeNames, 0);
+    try bindings.installGetter(ctx, proto, "attributes", callbacks.attributesGet);
+    try bindings.installGetter(ctx, proto, "classList", callbacks.classListGet);
+    try bindings.installGetter(ctx, proto, "dataset", callbacks.datasetGet);
+    try bindings.installMethod(ctx, proto, "querySelector", callbacks.querySelector, 1);
+    try bindings.installMethod(ctx, proto, "querySelectorAll", callbacks.querySelectorAll, 1);
+    try bindings.installMethod(ctx, proto, "getElementsByTagName", callbacks.querySelectorAll, 1);
+    try bindings.installMethod(ctx, proto, "getElementsByClassName", callbacks.getElementsByClassName, 1);
+    try bindings.installMethod(ctx, proto, "matches", callbacks.matches, 1);
+    try bindings.installMethod(ctx, proto, "closest", callbacks.closest, 1);
+    try bindings.installMethod(ctx, proto, "insertAdjacentHTML", callbacks.insertAdjacentHTML, 2);
+    try bindings.installMethod(ctx, proto, "getBoundingClientRect", callbacks.getBoundingClientRect, 0);
+    try bindings.installMethod(ctx, proto, "getClientRects", callbacks.getClientRects, 0);
+    try bindings.installMethod(ctx, proto, "focus", callbacks.focus, 0);
+    try bindings.installMethod(ctx, proto, "blur", callbacks.blur, 0);
+    try bindings.installMethod(ctx, proto, "select", callbacks.select, 0);
+    try bindings.installAccessor(ctx, proto, "value", callbacks.valueGet, callbacks.valueSet);
+    try bindings.installAccessor(ctx, proto, "checked", callbacks.checkedGet, callbacks.checkedSet);
+    try bindings.installAccessor(ctx, proto, "disabled", callbacks.disabledGet, callbacks.disabledSet);
+    try bindings.installAccessor(ctx, proto, "name", callbacks.nameGet, callbacks.nameSet);
+    try bindings.installAccessor(ctx, proto, "type", callbacks.typeGet, callbacks.typeSet);
+    try bindings.installGetter(ctx, proto, "form", callbacks.formGet);
+    try bindings.installGetter(ctx, proto, "elements", callbacks.formElementsGet);
+    try bindings.installGetter(ctx, proto, "options", callbacks.optionsGet);
+}
