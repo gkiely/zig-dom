@@ -63,6 +63,8 @@ const node_stream_web_colon_specifier = "node:stream/web";
 const node_vm_specifier = "vm";
 const node_vm_colon_specifier = "node:vm";
 const node_perf_hooks_colon_specifier = "node:perf_hooks";
+const zig_dom_specifier = "zig-dom";
+const zig_dom_index_specifier = "zig-dom/index";
 const zig_dom_global_registrator_specifier = "zig-dom/global-registrator";
 const zig_dom_global_registrar_specifier = "zig-dom/global-registrar";
 const react_specifier = "react";
@@ -103,6 +105,7 @@ const bun_test_shim_source =
 ;
 
 const zig_dom_global_registrator_shim_source = @embedFile("builtins/zig-dom/global-registrator.js");
+const zig_dom_index_shim_source = @embedFile("builtins/zig-dom/index.js");
 
 const node_url_shim_source =
     \\const URLCtor = globalThis.URL;
@@ -2665,6 +2668,10 @@ fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
 
     if (std.mem.eql(u8, module_name, node_perf_hooks_colon_specifier)) {
         return node_perf_hooks_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, zig_dom_specifier) or std.mem.eql(u8, module_name, zig_dom_index_specifier)) {
+        return zig_dom_index_shim_source;
     }
 
     if (

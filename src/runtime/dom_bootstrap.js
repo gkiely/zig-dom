@@ -1504,12 +1504,57 @@
 
   class Window extends EventTarget {
     constructor(handle, doc) {
+      if (handle == null || (typeof handle === "object" && doc == null)) {
+        const options = handle && typeof handle === "object" ? handle : {};
+        const created = createNativeWindow();
+        if (options.url && created.happyDOM && typeof created.happyDOM.setURL === "function") {
+          created.happyDOM.setURL(options.url);
+        }
+        return created;
+      }
+
       super();
       this[HANDLE] = Number(handle);
       this.document = doc;
       this.window = this;
       this.self = this;
       this.globalThis = globalThis;
+      this.closed = false;
+      this.navigator = globalThis.navigator || { userAgent: "zig-dom" };
+      this.location = {
+        href: "http://localhost/",
+        protocol: "http:",
+        host: "localhost",
+        hostname: "localhost",
+        port: "",
+        pathname: "/",
+        search: "",
+        hash: ""
+      };
+      this.happyDOM = {
+        reset: () => {
+          if (this.document && this.document.body) {
+            this.document.body.innerHTML = "";
+          }
+        },
+        setURL: (url) => {
+          const next = new URL(String(url), this.location.href);
+          this.location.href = next.href;
+          this.location.protocol = next.protocol;
+          this.location.host = next.host;
+          this.location.hostname = next.hostname;
+          this.location.port = next.port;
+          this.location.pathname = next.pathname;
+          this.location.search = next.search;
+          this.location.hash = next.hash;
+        },
+        whenAsyncComplete: () => Promise.resolve(),
+        abort() {}
+      };
+    }
+
+    close() {
+      this.closed = true;
     }
 
     getComputedStyle(element) {
