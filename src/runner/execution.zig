@@ -3080,15 +3080,15 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch {};
             return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
         };
-        vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch |err| {
-            return failureFromRuntimeException(allocator, path, "failed to restore setup environment", err, &vm);
-        };
-
         while (vm.isJobPending()) {
             _ = vm.executePendingJob() catch |err| {
+                vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch {};
                 return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
             };
         }
+        vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch |err| {
+            return failureFromRuntimeException(allocator, path, "failed to restore setup environment", err, &vm);
+        };
         if (module_loader_state.profile_enabled) {
             module_loader_state.profile_setup_eval_ns += module_loader_state.profileNow() - setup_eval_start;
         }

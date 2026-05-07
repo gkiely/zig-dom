@@ -19,6 +19,7 @@ const Matcher = enum(i32) {
     toBeNull = 13,
     toBeDefined = 14,
     toBeUndefined = 15,
+    toHaveLength = 16,
 };
 
 pub fn install(ctx: *quickjs.Context) AssertionError!void {
@@ -221,6 +222,7 @@ fn installBuiltinMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted
     try installMatcher(ctx, object, "toBeNull", .toBeNull, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toBeDefined", .toBeDefined, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toBeUndefined", .toBeUndefined, inverted, received.dup(ctx));
+    try installMatcher(ctx, object, "toHaveLength", .toHaveLength, inverted, received.dup(ctx));
 }
 
 fn installCustomMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted: bool, received: quickjs.Value) AssertionError!void {
@@ -432,6 +434,7 @@ fn jsMatcher(
         .toBeNull => matcherToBeNull(received),
         .toBeDefined => matcherToBeDefined(received),
         .toBeUndefined => matcherToBeUndefined(received),
+        .toHaveLength => matcherToHaveLength(ctx, received, args),
     } catch return quickjs.Value.exception;
 
     if (pass != inverted) return quickjs.Value.undefined;
@@ -846,6 +849,13 @@ fn matcherToBeUndefined(received: quickjs.Value) !bool {
     return received.isUndefined();
 }
 
+fn matcherToHaveLength(ctx: *quickjs.Context, received: quickjs.Value, args: []const quickjs.c.JSValue) !bool {
+    if (args.len == 0) return false;
+    const expected = quickjs.Value.fromCVal(args[0]).toInt64(ctx) catch return false;
+    if (expected < 0) return false;
+    return getLength(ctx, received) == expected;
+}
+
 fn isRegExp(ctx: *quickjs.Context, value: quickjs.Value) bool {
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
@@ -1063,6 +1073,7 @@ fn throwMatcherError(ctx: *quickjs.Context, matcher: Matcher, inverted: bool) qu
         .toBeNull => "toBeNull",
         .toBeDefined => "toBeDefined",
         .toBeUndefined => "toBeUndefined",
+        .toHaveLength => "toHaveLength",
     };
 
     const prefix = if (inverted) "Expected matcher not to pass: " else "Expected matcher to pass: ";

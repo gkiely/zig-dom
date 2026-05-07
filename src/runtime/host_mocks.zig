@@ -519,7 +519,11 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
             const existing_mock = existing_state.mock_function.dup(ctx);
             const atom = quickjs.Atom.fromValue(ctx, property_key);
             defer atom.deinit(ctx);
-            if (!setSpyTargetProperty(ctx, target, atom, existing_mock)) return quickjs.Value.exception;
+            if (!setSpyTargetProperty(ctx, target, atom, existing_mock)) {
+                // Some objects (for example ESM module namespace bindings) are not replaceable.
+                // Keep Bun-compatible behavior by returning the existing mock wrapper without throwing.
+                return existing_mock;
+            }
             mirrorGlobalWindowProperty(ctx, target, property_key, current, existing_mock);
             return existing_mock;
         }
@@ -550,7 +554,10 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
     if (wrapped.isException()) return quickjs.Value.exception;
     const atom = quickjs.Atom.fromValue(ctx, property_key);
     defer atom.deinit(ctx);
-    if (!setSpyTargetProperty(ctx, target, atom, wrapped)) return quickjs.Value.exception;
+    if (!setSpyTargetProperty(ctx, target, atom, wrapped)) {
+        // Fall back to returning the spy wrapper even when the target cannot be redefined.
+        return wrapped;
+    }
     mirrorGlobalWindowProperty(ctx, target, property_key, current, wrapped);
     return wrapped;
 }
