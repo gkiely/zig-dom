@@ -553,5 +553,6 @@ Do not make upstream WPT sync part of the fast path.
 
 ## Todo
 - WPT tests
+- Broaden `../youneedawiki` component support
 - Only load dom for jsx/tsx files by default, but allow me to pass a flag for specific file types to enable it.
 
