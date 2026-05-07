@@ -7,7 +7,6 @@ type RunResult = {
 };
 
 type TimingRange = {
-  min: number;
   max: number;
 };
 
@@ -17,8 +16,8 @@ const rootDir = "../youneedawiki";
 const expectedPass = 7;
 const expectedFail = 0;
 
-const coldRange: TimingRange = { min: 0.35, max: 0.4 };
-const warmRange: TimingRange = { min: 0.16, max: 0.22 };
+const coldRange: TimingRange = { max: 0.4 };
+const warmRange: TimingRange = {  max: 0.16 };
 
 const ANSI_YELLOW = "\x1b[33m";
 const ANSI_RESET = "\x1b[0m";

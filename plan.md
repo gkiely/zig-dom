@@ -13,6 +13,47 @@ Primary tracks in order:
 
 Prefer generic fixes in the runner, native DOM, module loader, setup/plugin handling, mocks, and platform globals. Do not add package-specific hacks unless explicitly approved.
 
+## No Downstream-Specific Logic
+
+`../youneedawiki` is a compatibility suite, not an implementation target.
+
+Do not hardcode any `youneedawiki`-specific behavior in `zig-dom`, including:
+
+- component names
+- file paths
+- package names
+- module specifiers
+- setup file names
+- environment variables
+- CSS/runtime bypasses
+- plugin names
+- test names
+- downstream library shims
+
+If a `youneedawiki` test needs special setup behavior, implement the generic mechanism that Bun/browser-compatible tests expect:
+
+- `Bun.plugin(...).onLoad`
+- `mock.module`
+- setup/preload ordering
+- import/module resolution
+- browser/platform globals
+- DOM and Testing Library compatible behavior
+- standard environment/config flags supplied by the user
+
+Allowed downstream references:
+
+- commands in this plan
+- regression test names used for validation
+- comments in tests that explain the downstream behavior being generalized
+
+Not allowed:
+
+- `if specifier contains "@mui/icons-material"` style code
+- `process.env.SOME_YOUNEEDAWIKI_FLAG = ...` in runtime/platform setup
+- package-specific fallback modules
+- component-specific selector, role, or DOM behavior
+- hardcoded skip/transform logic for `.css.ts`, icons, style systems, or app modules
+
 ## Current Baseline
 
 Known passing downstream files:
@@ -74,7 +115,7 @@ zig-out/bin/zig-dom test tests/runner/native-dom-*.test.js tests/runner/mock-spy
 
 Use ReleaseFast only for the perf guard or performance comparisons.
 
-Anything in test execution over 30s should be treated as a likely hang, async timeout, or Zig/runtime error. Build time can exceed 30s.
+Anything in test execution over 20s should be treated as a likely hang, async timeout, or Zig/runtime error.
 
 ## Milestone 1: Broaden Simple YouNeedAWiki Components
 
@@ -117,7 +158,7 @@ Defer larger complex suites until after the WPT fast/core milestones:
 Rules:
 
 - Do not edit downstream tests.
-- Do not hardcode downstream package names or component names in runner code.
+- Do not hardcode downstream package names, module paths, environment variables, setup files, library names, or component names in runner/runtime code.
 - Prefer happy-dom/browser-compatible behavior where possible.
 - If a test exceeds 30s, treat it as a likely hang/timeout and profile before behavior work.
 - If a setup plugin should transform or skip a module, fix generic `Bun.plugin(...).onLoad` support instead of special-casing that module.
@@ -243,7 +284,7 @@ These flags/manifests are not all implemented yet. Implement them in this milest
 Acceptance:
 
 - A single WPT file runs in Debug mode without requiring ReleaseFast.
-- A small smoke manifest stays under the 30s iteration budget.
+- A small smoke manifest
 - Full upstream manifests are not required during normal fix/debug loops.
 
 Validation:
@@ -309,6 +350,7 @@ Rules:
 
 - If one of these exceeds 30s, treat it as a hang/async/runtime issue and profile first.
 - Prefer generic runner and native DOM fixes over downstream-specific patches.
+- Do not hardcode downstream package names, module paths, environment variables, setup files, library names, or component names in runner/runtime code.
 - Keep setup/onLoad, mock cleanup, user-event behavior, and QuickJS shutdown cleanup generic.
 - Do not edit downstream tests unless explicitly approved.
 
