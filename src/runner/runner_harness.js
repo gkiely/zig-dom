@@ -253,6 +253,8 @@
     return matchers;
   }
 
+  let reactIdCounter = 0;
+
   const React = {
     Fragment: Symbol.for("react.fragment"),
     createElement(type, props, ...children) {
@@ -266,6 +268,109 @@
         $$typeof: Symbol.for("react.element"),
         type,
         props: finalProps
+      };
+    },
+    isValidElement(value) {
+      return !!(value && typeof value === "object" && value.$$typeof === Symbol.for("react.element"));
+    },
+    cloneElement(element, props, ...children) {
+      const nextProps = {
+        ...((element && element.props) || {}),
+        ...(props || {})
+      };
+
+      if (children.length === 1) {
+        nextProps.children = children[0];
+      } else if (children.length > 1) {
+        nextProps.children = children;
+      }
+
+      return {
+        ...(element || {}),
+        $$typeof: Symbol.for("react.element"),
+        type: element ? element.type : undefined,
+        props: nextProps
+      };
+    },
+    useRef(initialValue) {
+      return { current: initialValue };
+    },
+    useState(initialState) {
+      let value = typeof initialState === "function" ? initialState() : initialState;
+      const setValue = (nextValue) => {
+        value = typeof nextValue === "function" ? nextValue(value) : nextValue;
+      };
+      return [value, setValue];
+    },
+    useMemo(factory) {
+      return typeof factory === "function" ? factory() : undefined;
+    },
+    useCallback(callback) {
+      return callback;
+    },
+    useEffect(effect) {
+      if (typeof effect === "function") {
+        effect();
+      }
+    },
+    useLayoutEffect(effect) {
+      if (typeof effect === "function") {
+        effect();
+      }
+    },
+    useInsertionEffect(effect) {
+      if (typeof effect === "function") {
+        effect();
+      }
+    },
+    useReducer(reducer, initialArg, init) {
+      let state = typeof init === "function" ? init(initialArg) : initialArg;
+      const dispatch = (action) => {
+        state = reducer(state, action);
+      };
+      return [state, dispatch];
+    },
+    useSyncExternalStore(_subscribe, getSnapshot, getServerSnapshot) {
+      if (typeof getSnapshot === "function") {
+        return getSnapshot();
+      }
+      if (typeof getServerSnapshot === "function") {
+        return getServerSnapshot();
+      }
+      return undefined;
+    },
+    createContext(defaultValue) {
+      const context = {
+        _currentValue: defaultValue
+      };
+      context.Provider = function Provider({ value, children }) {
+        context._currentValue = value;
+        return children ?? null;
+      };
+      context.Consumer = function Consumer({ children }) {
+        return typeof children === "function" ? children(context._currentValue) : null;
+      };
+      return context;
+    },
+    useContext(context) {
+      return context ? context._currentValue : undefined;
+    },
+    useEffectEvent(callback) {
+      return callback;
+    },
+    useDebugValue() {
+      // no-op in lightweight harness
+    },
+    useId() {
+      reactIdCounter += 1;
+      return `zig-id-${String(reactIdCounter)}`;
+    },
+    memo(component) {
+      return component;
+    },
+    forwardRef(render) {
+      return function ForwardRef(props) {
+        return render(props, null);
       };
     }
   };

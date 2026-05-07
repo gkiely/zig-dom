@@ -30,6 +30,15 @@ const react_specifier = "react";
 const react_dom_client_specifier = "react-dom/client";
 const testing_library_specifier = "@testing-library/react";
 const vanilla_extract_css_specifier = "@vanilla-extract/css";
+const classnames_specifier = "classnames";
+const graphemesplit_specifier = "graphemesplit";
+const use_sync_external_store_specifier = "use-sync-external-store";
+const use_sync_external_store_with_selector_specifier = "use-sync-external-store/with-selector";
+const use_sync_external_store_with_selector_js_specifier = "use-sync-external-store/with-selector.js";
+const use_sync_external_store_shim_specifier = "use-sync-external-store/shim";
+const use_sync_external_store_shim_index_specifier = "use-sync-external-store/shim/index.js";
+const use_sync_external_store_shim_with_selector_specifier = "use-sync-external-store/shim/with-selector";
+const use_sync_external_store_shim_with_selector_js_specifier = "use-sync-external-store/shim/with-selector.js";
 
 const bun_test_shim_source =
     \\export const test = globalThis.test;
@@ -48,6 +57,24 @@ const react_shim_source =
     \\const React = globalThis.React;
     \\export const createElement = React.createElement;
     \\export const Fragment = React.Fragment;
+    \\export const useRef = React.useRef;
+    \\export const useState = React.useState;
+    \\export const useMemo = React.useMemo;
+    \\export const useCallback = React.useCallback;
+    \\export const useEffect = React.useEffect;
+    \\export const useLayoutEffect = React.useLayoutEffect;
+    \\export const useInsertionEffect = React.useInsertionEffect;
+    \\export const useReducer = React.useReducer;
+    \\export const useContext = React.useContext;
+    \\export const createContext = React.createContext;
+    \\export const isValidElement = React.isValidElement;
+    \\export const cloneElement = React.cloneElement;
+    \\export const useSyncExternalStore = React.useSyncExternalStore;
+    \\export const useEffectEvent = React.useEffectEvent;
+    \\export const useDebugValue = React.useDebugValue;
+    \\export const useId = React.useId;
+    \\export const memo = React.memo;
+    \\export const forwardRef = React.forwardRef;
     \\export default React;
 ;
 
@@ -67,15 +94,113 @@ const testing_library_shim_source =
 
 const vanilla_extract_css_shim_source =
     \\let __zigStyleCounter = 0;
-    \\export function style(_rules) {
+    \\function nextName(prefix) {
     \\  __zigStyleCounter += 1;
-    \\  return "ve-" + String(__zigStyleCounter);
+    \\  return prefix + String(__zigStyleCounter);
     \\}
-    \\export default { style };
+    \\
+    \\export function style(_rules) {
+    \\  return nextName("ve-");
+    \\}
+    \\
+    \\export function globalStyle(_selector, _rules) {
+    \\  // no-op in lightweight harness
+    \\}
+    \\
+    \\export function keyframes(_rules) {
+    \\  return nextName("kf-");
+    \\}
+    \\
+    \\export function createThemeContract(tokens) {
+    \\  return tokens;
+    \\}
+    \\
+    \\export function createTheme(contractOrTokens, maybeTokens) {
+    \\  const className = nextName("theme-");
+    \\  if (arguments.length === 1) {
+    \\    return [className, contractOrTokens];
+    \\  }
+    \\  return className;
+    \\}
+    \\export default { style, globalStyle, keyframes, createTheme, createThemeContract };
+;
+
+const classnames_shim_source =
+    \\function flatten(values, output) {
+    \\  for (const value of values) {
+    \\    if (!value) {
+    \\      continue;
+    \\    }
+    \\
+    \\    if (Array.isArray(value)) {
+    \\      flatten(value, output);
+    \\      continue;
+    \\    }
+    \\
+    \\    if (typeof value === "object") {
+    \\      for (const key of Object.keys(value)) {
+    \\        if (value[key]) {
+    \\          output.push(key);
+    \\        }
+    \\      }
+    \\      continue;
+    \\    }
+    \\
+    \\    output.push(String(value));
+    \\  }
+    \\}
+    \\
+    \\export default function classNames(...values) {
+    \\  const parts = [];
+    \\  flatten(values, parts);
+    \\  return parts.join(" ");
+    \\}
+;
+
+const graphemesplit_shim_source =
+    \\export default function split(input) {
+    \\  return Array.from(String(input ?? ""));
+    \\}
+;
+
+const use_sync_external_store_shim_source =
+    \\function readSnapshot(getSnapshot, getServerSnapshot) {
+    \\  if (typeof getSnapshot === "function") {
+    \\    return getSnapshot();
+    \\  }
+    \\  if (typeof getServerSnapshot === "function") {
+    \\    return getServerSnapshot();
+    \\  }
+    \\  return undefined;
+    \\}
+    \\
+    \\export function useSyncExternalStore(_subscribe, getSnapshot, getServerSnapshot) {
+    \\  return readSnapshot(getSnapshot, getServerSnapshot);
+    \\}
+    \\
+    \\export default { useSyncExternalStore };
+;
+
+const use_sync_external_store_with_selector_shim_source =
+    \\import { useSyncExternalStore } from "use-sync-external-store";
+    \\
+    \\export function useSyncExternalStoreWithSelector(
+    \\  subscribe,
+    \\  getSnapshot,
+    \\  getServerSnapshot,
+    \\  selector,
+    \\  _isEqual
+    \\) {
+    \\  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+    \\  return typeof selector === "function" ? selector(snapshot) : snapshot;
+    \\}
+    \\
+    \\export default { useSyncExternalStoreWithSelector };
 ;
 
 const max_module_source_bytes = 4 * 1024 * 1024;
 const max_tsconfig_bytes = 2 * 1024 * 1024;
+const max_package_json_bytes = 512 * 1024;
 
 pub const FileResult = struct {
     path: []u8,
@@ -185,6 +310,10 @@ const ModuleLoaderState = struct {
             return self.resolveRelativePath(module_base_name, module_name);
         }
 
+        if (try self.resolveNodeModule(module_base_name, module_name)) |resolved| {
+            return resolved;
+        }
+
         return error.UnsupportedExternalModule;
     }
 
@@ -275,6 +404,12 @@ const ModuleLoaderState = struct {
                 const resolved = self.normalizeSpecifier(module_id, specifier) catch |err| switch (err) {
                     // External package specifiers may be type-only imports erased by transform.
                     error.UnsupportedExternalModule => continue,
+                    error.ModuleNotFound => {
+                        if (isBarePackageSpecifier(specifier)) {
+                            continue;
+                        }
+                        return err;
+                    },
                     else => return err,
                 };
                 if (shimModuleSource(resolved) != null) {
@@ -382,7 +517,7 @@ const ModuleLoaderState = struct {
     }
 
     fn resolvePathWithoutExtension(self: *ModuleLoaderState, base_path: []const u8) !?[]u8 {
-        const extensions = [_][]const u8{ ".ts", ".tsx", ".jsx", ".js" };
+        const extensions = [_][]const u8{ ".ts", ".tsx", ".jsx", ".mjs", ".js", ".cjs" };
 
         for (extensions) |extension| {
             const candidate = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ base_path, extension });
@@ -401,6 +536,173 @@ const ModuleLoaderState = struct {
         }
 
         return null;
+    }
+
+    fn resolveNodeModule(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) !?[]u8 {
+        const parsed = parseBarePackageSpecifier(module_name) orelse return null;
+        if (!std.fs.path.isAbsolute(module_base_name)) {
+            return null;
+        }
+
+        var current_dir = try self.allocator.dupe(u8, std.fs.path.dirname(module_base_name) orelse return null);
+        defer self.allocator.free(current_dir);
+
+        while (true) {
+            const package_dir = try std.fs.path.resolve(self.allocator, &.{ current_dir, "node_modules", parsed.package_name });
+            defer self.allocator.free(package_dir);
+
+            if (self.pathIsDirectory(package_dir)) {
+                const resolved = try self.resolveNodeModuleFromDirectory(package_dir, parsed.subpath);
+                return resolved;
+            }
+
+            const parent = std.fs.path.dirname(current_dir) orelse break;
+            if (parent.len == current_dir.len) {
+                break;
+            }
+
+            const next_dir = try self.allocator.dupe(u8, parent);
+            self.allocator.free(current_dir);
+            current_dir = next_dir;
+        }
+
+        return null;
+    }
+
+    fn resolveNodeModuleFromDirectory(self: *ModuleLoaderState, package_dir: []const u8, subpath: []const u8) ![]u8 {
+        if (subpath.len > 0) {
+            if (try self.resolveNodeModuleSubpathFromExports(package_dir, subpath)) |resolved_from_exports| {
+                return resolved_from_exports;
+            }
+
+            const subpath_candidate = try std.fs.path.resolve(self.allocator, &.{ package_dir, subpath });
+            errdefer self.allocator.free(subpath_candidate);
+
+            if (self.pathIsDirectory(subpath_candidate)) {
+                if (try self.resolveNodeModulePackageRoot(subpath_candidate)) |resolved_dir_entry| {
+                    self.allocator.free(subpath_candidate);
+                    return resolved_dir_entry;
+                }
+            }
+
+            return self.resolvePathWithProbing(subpath_candidate);
+        }
+
+        if (try self.resolveNodeModulePackageRoot(package_dir)) |resolved| {
+            return resolved;
+        }
+
+        const index_candidate = try std.fs.path.resolve(self.allocator, &.{ package_dir, "index" });
+        errdefer self.allocator.free(index_candidate);
+        return self.resolvePathWithProbing(index_candidate);
+    }
+
+    fn resolveNodeModuleSubpathFromExports(self: *ModuleLoaderState, package_dir: []const u8, subpath: []const u8) !?[]u8 {
+        const package_json_path = try std.fs.path.resolve(self.allocator, &.{ package_dir, "package.json" });
+        defer self.allocator.free(package_json_path);
+
+        const package_json_stat = std.Io.Dir.cwd().statFile(self.io, package_json_path, .{}) catch return null;
+        if (package_json_stat.kind != .file) {
+            return null;
+        }
+
+        const package_json_source = try std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            package_json_path,
+            self.allocator,
+            .limited(max_package_json_bytes),
+        );
+        defer self.allocator.free(package_json_source);
+
+        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, package_json_source, .{});
+        defer parsed.deinit();
+
+        const root = parsed.value;
+        const target = jsonResolvePackageSubpathImport(self.allocator, root, subpath) orelse return null;
+        defer self.allocator.free(target);
+
+        return self.resolveNodeModulePackageEntryPath(package_dir, target);
+    }
+
+    fn resolveNodeModulePackageRoot(self: *ModuleLoaderState, package_dir: []const u8) !?[]u8 {
+        const package_json_path = try std.fs.path.resolve(self.allocator, &.{ package_dir, "package.json" });
+        defer self.allocator.free(package_json_path);
+
+        const package_json_stat = std.Io.Dir.cwd().statFile(self.io, package_json_path, .{}) catch return null;
+        if (package_json_stat.kind != .file) {
+            return null;
+        }
+
+        const package_json_source = try std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            package_json_path,
+            self.allocator,
+            .limited(max_package_json_bytes),
+        );
+        defer self.allocator.free(package_json_source);
+
+        if (try self.resolveNodeModulePackageEntry(package_dir, package_json_source, true)) |resolved| {
+            return resolved;
+        }
+
+        return null;
+    }
+
+    fn resolveNodeModulePackageEntry(
+        self: *ModuleLoaderState,
+        package_dir: []const u8,
+        package_json_source: []const u8,
+        allow_exports: bool,
+    ) !?[]u8 {
+        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, package_json_source, .{});
+        defer parsed.deinit();
+
+        const root = parsed.value;
+        if (root != .object) {
+            return null;
+        }
+
+        if (allow_exports) {
+            if (jsonResolvePackageRootImport(root)) |entry| {
+                if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
+                    return resolved;
+                }
+            }
+        }
+
+        if (jsonObjectString(root.object, "module")) |entry| {
+            if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
+                return resolved;
+            }
+        }
+
+        if (jsonObjectString(root.object, "main")) |entry| {
+            if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
+                return resolved;
+            }
+        }
+
+        return null;
+    }
+
+    fn resolveNodeModulePackageEntryPath(self: *ModuleLoaderState, package_dir: []const u8, entry: []const u8) !?[]u8 {
+        if (entry.len == 0) {
+            return null;
+        }
+
+        const entry_path = if (std.fs.path.isAbsolute(entry))
+            try std.fs.path.resolve(self.allocator, &.{entry})
+        else
+            try std.fs.path.resolve(self.allocator, &.{ package_dir, entry });
+        errdefer self.allocator.free(entry_path);
+
+        return self.resolvePathWithProbing(entry_path) catch |err| switch (err) {
+            error.ModuleNotFound => {
+                self.allocator.free(entry_path);
+                return null;
+            },
+            else => return err,
+        };
     }
 
     fn resolvePathAlias(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) !?[]u8 {
@@ -646,7 +948,185 @@ const ModuleLoaderState = struct {
         const stat = std.Io.Dir.cwd().statFile(self.io, path, .{}) catch return false;
         return stat.kind == .file;
     }
+
+    fn pathIsDirectory(self: *ModuleLoaderState, path: []const u8) bool {
+        const stat = std.Io.Dir.cwd().statFile(self.io, path, .{}) catch return false;
+        return stat.kind == .directory;
+    }
 };
+
+const BarePackageSpecifier = struct {
+    package_name: []const u8,
+    subpath: []const u8,
+};
+
+fn parseBarePackageSpecifier(specifier: []const u8) ?BarePackageSpecifier {
+    if (specifier.len == 0) {
+        return null;
+    }
+
+    if (specifier[0] == '.' or specifier[0] == '/' or std.mem.indexOfScalar(u8, specifier, ':') != null) {
+        return null;
+    }
+
+    const first_slash = std.mem.indexOfScalar(u8, specifier, '/') orelse return .{
+        .package_name = specifier,
+        .subpath = "",
+    };
+
+    if (specifier[0] == '@') {
+        const second_slash = std.mem.indexOfScalarPos(u8, specifier, first_slash + 1, '/') orelse return .{
+            .package_name = specifier,
+            .subpath = "",
+        };
+        return .{
+            .package_name = specifier[0..second_slash],
+            .subpath = specifier[second_slash + 1 ..],
+        };
+    }
+
+    return .{
+        .package_name = specifier[0..first_slash],
+        .subpath = specifier[first_slash + 1 ..],
+    };
+}
+
+fn isBarePackageSpecifier(specifier: []const u8) bool {
+    if (specifier.len == 0) {
+        return false;
+    }
+
+    if (isRelativeSpecifier(specifier) or std.fs.path.isAbsolute(specifier)) {
+        return false;
+    }
+
+    if (std.mem.startsWith(u8, specifier, "~/") or std.mem.startsWith(u8, specifier, "@/")) {
+        return false;
+    }
+
+    return true;
+}
+
+fn jsonObjectString(object: std.json.ObjectMap, key: []const u8) ?[]const u8 {
+    const value = object.get(key) orelse return null;
+    return switch (value) {
+        .string => |text| text,
+        else => null,
+    };
+}
+
+fn jsonResolvePackageRootImport(root: std.json.Value) ?[]const u8 {
+    if (root != .object) {
+        return null;
+    }
+
+    const exports_value = root.object.get("exports") orelse return null;
+    return jsonExtractImportTarget(exports_value);
+}
+
+fn jsonResolvePackageSubpathImport(allocator: Allocator, root: std.json.Value, subpath: []const u8) ?[]u8 {
+    if (root != .object) {
+        return null;
+    }
+
+    const exports_value = root.object.get("exports") orelse return null;
+    if (exports_value != .object) {
+        return null;
+    }
+
+    const exports_object = exports_value.object;
+    const exact_key = std.fmt.allocPrint(allocator, "./{s}", .{subpath}) catch return null;
+    defer allocator.free(exact_key);
+
+    if (exports_object.get(exact_key)) |exact_export| {
+        if (jsonExtractImportTarget(exact_export)) |target| {
+            return allocator.dupe(u8, target) catch return null;
+        }
+    }
+
+    var iterator = exports_object.iterator();
+    while (iterator.next()) |entry| {
+        const key = entry.key_ptr.*;
+        if (!std.mem.startsWith(u8, key, "./")) {
+            continue;
+        }
+
+        const key_pattern = key[2..];
+        const wildcard_index = std.mem.indexOfScalar(u8, key_pattern, '*') orelse continue;
+        const key_pattern_prefix = key_pattern[0..wildcard_index];
+        const key_pattern_suffix = key_pattern[wildcard_index + 1 ..];
+
+        if (!std.mem.startsWith(u8, subpath, key_pattern_prefix)) {
+            continue;
+        }
+
+        if (key_pattern_suffix.len > 0 and !std.mem.endsWith(u8, subpath, key_pattern_suffix)) {
+            continue;
+        }
+
+        if (subpath.len < key_pattern_prefix.len + key_pattern_suffix.len) {
+            continue;
+        }
+
+        const wildcard_value = subpath[key_pattern_prefix.len .. subpath.len - key_pattern_suffix.len];
+        const target = jsonExtractImportTarget(entry.value_ptr.*) orelse continue;
+        if (std.mem.indexOfScalar(u8, target, '*')) |target_wildcard_index| {
+            var builder: std.ArrayList(u8) = .empty;
+            defer builder.deinit(allocator);
+
+            builder.appendSlice(allocator, target[0..target_wildcard_index]) catch return null;
+            builder.appendSlice(allocator, wildcard_value) catch return null;
+            builder.appendSlice(allocator, target[target_wildcard_index + 1 ..]) catch return null;
+            return builder.toOwnedSlice(allocator) catch return null;
+        }
+
+        return allocator.dupe(u8, target) catch return null;
+    }
+
+    return null;
+}
+
+fn jsonExtractImportTarget(value: std.json.Value) ?[]const u8 {
+    return switch (value) {
+        .string => |text| text,
+        .object => |object| blk: {
+            if (object.get(".")) |root_export| {
+                if (jsonExtractImportTarget(root_export)) |target| {
+                    break :blk target;
+                }
+            }
+
+            if (object.get("import")) |import_export| {
+                if (jsonExtractImportTarget(import_export)) |target| {
+                    break :blk target;
+                }
+            }
+
+            if (object.get("default")) |default_export| {
+                if (jsonExtractImportTarget(default_export)) |target| {
+                    break :blk target;
+                }
+            }
+
+            if (object.get("require")) |require_export| {
+                if (jsonExtractImportTarget(require_export)) |target| {
+                    break :blk target;
+                }
+            }
+
+            break :blk null;
+        },
+        .array => |array| blk: {
+            for (array.items) |item| {
+                if (jsonExtractImportTarget(item)) |target| {
+                    break :blk target;
+                }
+            }
+            break :blk null;
+        },
+        else => null,
+    };
+}
 
 const JsonStringResult = struct {
     value: []u8,
@@ -1302,7 +1782,12 @@ fn moduleNormalize(
     const state = state_opt orelse return null;
 
     const resolved = state.normalizeSpecifier(module_base_name, module_name) catch {
-        _ = quickjs.c.JS_ThrowReferenceError(ctx.cval(), "module resolution failed");
+        _ = quickjs.c.JS_ThrowReferenceError(
+            ctx.cval(),
+            "module resolution failed: %s (from %s)",
+            module_name.ptr,
+            module_base_name.ptr,
+        );
         return null;
     };
     defer state.allocator.free(resolved);
@@ -1389,6 +1874,31 @@ fn shimModuleSource(module_name: []const u8) ?[]const u8 {
 
     if (std.mem.eql(u8, module_name, vanilla_extract_css_specifier)) {
         return vanilla_extract_css_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, classnames_specifier)) {
+        return classnames_shim_source;
+    }
+
+    if (std.mem.eql(u8, module_name, graphemesplit_specifier)) {
+        return graphemesplit_shim_source;
+    }
+
+    if (
+        std.mem.eql(u8, module_name, use_sync_external_store_specifier) or
+        std.mem.eql(u8, module_name, use_sync_external_store_shim_specifier) or
+        std.mem.eql(u8, module_name, use_sync_external_store_shim_index_specifier)
+    ) {
+        return use_sync_external_store_shim_source;
+    }
+
+    if (
+        std.mem.eql(u8, module_name, use_sync_external_store_with_selector_specifier) or
+        std.mem.eql(u8, module_name, use_sync_external_store_with_selector_js_specifier) or
+        std.mem.eql(u8, module_name, use_sync_external_store_shim_with_selector_specifier) or
+        std.mem.eql(u8, module_name, use_sync_external_store_shim_with_selector_js_specifier)
+    ) {
+        return use_sync_external_store_with_selector_shim_source;
     }
 
     return null;

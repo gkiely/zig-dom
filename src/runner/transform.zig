@@ -114,6 +114,14 @@ pub fn loaderForPath(path: []const u8) ?[]const u8 {
         return "js";
     }
 
+    if (std.mem.endsWith(u8, path, ".mjs")) {
+        return "js";
+    }
+
+    if (std.mem.endsWith(u8, path, ".cjs")) {
+        return "js";
+    }
+
     return null;
 }
 
