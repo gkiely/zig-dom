@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 
@@ -142,37 +142,63 @@ function resolveTestFiles(input: string): TestTargetGroup[] {
   return groupTargets(matches.map(targetForPath));
 }
 
-function run(args: string[], timeoutMs: number): number {
-  const result = spawnSync("zig", args, {
-    encoding: "utf8",
-    stdio: "inherit",
-    timeout: timeoutMs
+async function run(args: string[], timeoutMs: number, label: string): Promise<number> {
+  const child = spawn("zig", args, {
+    detached: true,
+    stdio: "inherit"
   });
 
-  if (result.error && 'code' in result.error && result.error.code === "ETIMEDOUT") {
-    console.error(`build:dev timed out after ${(timeoutMs / 1000).toFixed(1)}s. Increase with --timeout <seconds>.`);
-    return 124;
-  }
-  if (result.error) throw result.error;
-  return result.status ?? 1;
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        process.kill(-child.pid!, "SIGTERM");
+      } catch {}
+      setTimeout(() => {
+        try {
+          process.kill(-child.pid!, "SIGKILL");
+        } catch {}
+      }, 500).unref();
+      console.error(`build:dev timed out after ${(timeoutMs / 1000).toFixed(1)}s. Increase with --timeout <seconds>.`);
+      resolve(124);
+    }, timeoutMs);
+
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
+
+    child.on("exit", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(code ?? (signal ? 1 : 0));
+    });
+  });
 }
 
 const { input, runnerArgs, timeoutMs } = splitArgs();
-const testArgGroups = input
+const testArgGroups: { label: string; args: string[] }[] = input
   ? (() => {
       const groups = resolveTestFiles(input);
-      if (groups.length > 1) {
-        const matches = groups.flatMap((group) => group.files).map((file) => `- ${file}`).join("\n");
-        throw new Error(`Matched tests from multiple roots. Use a more specific token.\n${matches}`);
-      }
-      const group = groups[0]!;
-      return [group.root ? [...runnerArgs, "--root", group.root, ...group.files] : [...runnerArgs, ...group.files]];
+      return groups.map((group) => {
+        const label = group.root ? `${group.files.length} downstream test file${group.files.length === 1 ? "" : "s"}` : `${group.files.length} local test file${group.files.length === 1 ? "" : "s"}`;
+        return {
+          label,
+          args: group.root ? [...runnerArgs, "--root", group.root, ...group.files] : [...runnerArgs, ...group.files]
+        };
+      });
     })()
-  : [[...runnerArgs, ...defaultTests()]];
+  : [{ label: "default development validation", args: [...runnerArgs, ...defaultTests()] }];
 
 let exitCode = 0;
-for (const testArgs of testArgGroups) {
-  const result = run(["build", "test", "run", "-Doptimize=Debug", "--summary", "none", "--", "test", ...testArgs], timeoutMs);
+for (const group of testArgGroups) {
+  const result = await run(["build", "test", "run", "-Doptimize=Debug", "--summary", "none", "--", "test", ...group.args], timeoutMs, group.label);
+  if (result === 124) process.exit(124);
   if (result !== 0) exitCode = result;
 }
 process.exit(exitCode);

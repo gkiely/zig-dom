@@ -16,16 +16,15 @@ bun add zig-dom
 npm install zig-dom
 ```
 
-## Experimental Zig CLI
+## Development Commands
 
-The repository now includes an early standalone CLI skeleton for the runner rewrite.
+Use the package scripts for local development validation:
 
 ```sh
-zig build run -- help
-zig build run -- test tests/runner/basic.test.js
-zig build run -- wpt --manifest wpt/manifest/dom-core.json --expected wpt/expected/dom-core.json
-zig build run -- wpt-sync
-zig build run -- wpt-manifest --dir dom --out wpt/manifest/upstream-dom-smoke.json
+bun run build:dev
+bun run build:dev <test-file-token>
+bun run build:perf
+bun run build:perf <test-file-token>
 ```
 
 Current status:
@@ -35,21 +34,15 @@ Current status:
 - `wpt`, `wpt-sync`, and `wpt-manifest` bridge to existing scripts under `scripts/`.
 - The runtime abstraction files were added in `src/runtime/` for upcoming QuickJS embedding work.
 
-## Perf Guard (Edit.test.tsx)
+## Perf Build (Edit.test.tsx)
 
 Milestone work should run the ReleaseFast guard for `../youneedawiki/src/elements/Buttons/Edit.test.tsx`.
 
 ```sh
-bun run perf:edit-guard
+bun run build:perf
 ```
 
 The helper script builds with ReleaseFast first, then runs two timed test invocations so build time is not included in runtime timing.
-
-Optional strict timing mode fails the command when a run is slower than the current baseline windows:
-
-```sh
-bun run perf:edit-guard --strict-timing
-```
 
 ## Test Setup
 

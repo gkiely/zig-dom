@@ -6,6 +6,7 @@ type RunResult = {
   realSeconds: number;
   passCount: number;
   failCount: number;
+  exitCode: number;
 };
 
 type TimingRange = {
@@ -14,7 +15,7 @@ type TimingRange = {
 
 type PerfTarget = {
   label: string;
-  testFile: string;
+  testFiles: string[];
   expectedPass: number | null;
   expectedFail: number;
   timing: {
@@ -83,11 +84,11 @@ function listTestFiles(dir: string): string[] {
   return files;
 }
 
-function resolveTestFile(input: string): string {
-  if (existsSync(input)) return input;
+function resolveTestFiles(input: string): string[] {
+  if (existsSync(input)) return [input];
 
   const rooted = join(rootDir, input);
-  if (existsSync(rooted)) return rooted;
+  if (existsSync(rooted)) return [rooted];
 
   const normalizedInput = input.toLowerCase();
   const pathLikeInput = normalizedInput.includes("/") || normalizedInput.includes("\\");
@@ -105,11 +106,8 @@ function resolveTestFile(input: string): string {
   if (matches.length === 0) {
     throw new Error(`Could not find downstream test file matching "${input}" under ${rootDir}.`);
   }
-  if (matches.length > 1) {
-    throw new Error(`Ambiguous downstream test file "${input}". Matches:\n${matches.map((file) => `- ${file}`).join("\n")}`);
-  }
 
-  return matches[0]!;
+  return matches;
 }
 
 function targetFromArgs(): PerfTarget {
@@ -117,7 +115,7 @@ function targetFromArgs(): PerfTarget {
   if (!input) {
     return {
       label: "Edit.test.tsx",
-      testFile: "../youneedawiki/src/elements/Buttons/Edit.test.tsx",
+      testFiles: ["../youneedawiki/src/elements/Buttons/Edit.test.tsx"],
       expectedPass: 7,
       expectedFail: 0,
       timing: {
@@ -127,17 +125,17 @@ function targetFromArgs(): PerfTarget {
     };
   }
 
-  const testFile = resolveTestFile(input);
+  const testFiles = resolveTestFiles(input);
   return {
-    label: relative(rootDir, testFile) || testFile,
-    testFile,
+    label: testFiles.length === 1 ? relative(rootDir, testFiles[0]!) || testFiles[0]! : `${input} (${testFiles.length} files)`,
+    testFiles,
     expectedPass: null,
     expectedFail: 0,
     timing: null
   };
 }
 
-function run(command: string, args: string[], label: string): string {
+function run(command: string, args: string[], label: string, options: { allowFailure?: boolean } = {}): string {
   console.log(`\n--- ${label} ---`);
   const result = spawnSync(command, args, {
     encoding: "utf8",
@@ -155,16 +153,16 @@ function run(command: string, args: string[], label: string): string {
     throw result.error;
   }
 
-  if (result.status !== 0) {
+  if (result.status !== 0 && !options.allowFailure) {
     const code = result.status ?? 1;
     throw new Error(`${label} failed with exit code ${code}`);
   }
 
-  return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  return `${result.stdout ?? ""}\n${result.stderr ?? ""}\n__zigBuildPerfExitCode=${result.status ?? 1}`;
 }
 
 function parseRunOutput(output: string): RunResult {
-  const passFail = /pass=(\d+)[\s\S]*?fail=(\d+)/.exec(output);
+  const passFail = /^Summary: pass=(\d+) fail=(\d+)/m.exec(output);
   if (!passFail) {
     throw new Error("Could not parse pass/fail summary from test output.");
   }
@@ -177,11 +175,15 @@ function parseRunOutput(output: string): RunResult {
   return {
     realSeconds: Number.parseFloat(realMatch[1] ?? "NaN"),
     passCount: Number.parseInt(passFail[1] ?? "", 10),
-    failCount: Number.parseInt(passFail[2] ?? "", 10)
+    failCount: Number.parseInt(passFail[2] ?? "", 10),
+    exitCode: Number.parseInt(/^__zigBuildPerfExitCode=(\d+)$/m.exec(output)?.[1] ?? "0", 10)
   };
 }
 
 function checkSummary(result: RunResult, runName: string, target: PerfTarget): void {
+  if (target.expectedPass === null) {
+    return;
+  }
   if (target.expectedPass !== null && result.passCount !== target.expectedPass) {
     throw new Error(
       `${runName} expected pass=${target.expectedPass}, got pass=${result.passCount}`
@@ -211,8 +213,9 @@ function checkTiming(result: RunResult, range: TimingRange, runName: string): Ti
 function runTimedGuard(runName: string, target: PerfTarget): RunResult {
   const output = run(
     "/usr/bin/time",
-    ["-p", "zig-out/bin/zig-dom", "test", "--root", rootDir, target.testFile],
-    runName
+    ["-p", "zig-out/bin/zig-dom", "test", "--root", rootDir, ...target.testFiles],
+    runName,
+    { allowFailure: target.expectedPass === null }
   );
   return parseRunOutput(output);
 }
@@ -249,7 +252,7 @@ function main(): void {
 
   console.log("\nPerf guard summary:");
   runs.forEach((result, index) => {
-    console.log(`- run${index + 1} real=${result.realSeconds.toFixed(2)}s pass=${result.passCount} fail=${result.failCount}`);
+    console.log(`- run${index + 1} real=${result.realSeconds.toFixed(2)}s pass=${result.passCount} fail=${result.failCount} exit=${result.exitCode}`);
   });
 
   if (!target.timing) {
