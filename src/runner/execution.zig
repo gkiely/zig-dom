@@ -411,6 +411,12 @@ const ModuleLoaderState = struct {
     mock_module_sources: std.StringHashMap([]u8),
     path_alias_root: ?[]u8,
     path_aliases: std.ArrayList(PathAlias),
+    profile_enabled: bool,
+    profile_transform_ns: i128,
+    profile_onload_ns: i128,
+    profile_compile_ns: i128,
+    profile_transform_count: usize,
+    profile_module_count: usize,
 
     fn init(allocator: Allocator, io: std.Io) ModuleLoaderState {
         return .{
@@ -421,6 +427,12 @@ const ModuleLoaderState = struct {
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
             .path_alias_root = null,
             .path_aliases = .empty,
+            .profile_enabled = std.c.getenv("ZIG_DOM_PROFILE") != null,
+            .profile_transform_ns = 0,
+            .profile_onload_ns = 0,
+            .profile_compile_ns = 0,
+            .profile_transform_count = 0,
+            .profile_module_count = 0,
         };
     }
 
@@ -439,6 +451,10 @@ const ModuleLoaderState = struct {
             self.allocator.free(entry.key_ptr.*);
         }
         self.loaded_modules.deinit();
+    }
+
+    fn profileNow(self: *ModuleLoaderState) i128 {
+        return std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
     }
 
     fn normalizeSpecifier(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) ![]u8 {
@@ -474,6 +490,10 @@ const ModuleLoaderState = struct {
     }
 
     fn loadModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
+        if (std.c.getenv("ZIG_DOM_MODULE_DEBUG") != null) {
+            std.debug.print("[zig-dom module] {s}\n", .{module_id});
+        }
+
         if (builtInModuleSource(module_id)) |shim_source| {
             return self.allocator.dupe(u8, shim_source);
         }
@@ -526,7 +546,13 @@ const ModuleLoaderState = struct {
         if (std.c.getenv("ZIG_DOM_TRANSFORM_DEBUG") != null) {
             std.debug.print("[zig-dom transform] {s} {s}\n", .{ default_loader, module_id });
         }
-        return yuku_transform.transformFile(self.allocator, self.io, module_id, default_loader);
+        const start = if (self.profile_enabled) self.profileNow() else 0;
+        const transformed = try yuku_transform.transformFile(self.allocator, self.io, module_id, default_loader);
+        if (self.profile_enabled) {
+            self.profile_transform_ns += self.profileNow() - start;
+            self.profile_transform_count += 1;
+        }
+        return transformed;
     }
 
     fn loadCommonJsModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
@@ -704,11 +730,12 @@ const ModuleLoaderState = struct {
         }
 
         for (specifiers) |specifier| {
-            if (!isRelativeSpecifier(specifier)) continue;
+            if (!isRelativeSpecifier(specifier) and !isCommonJsReexportSpecifier(source, specifier)) continue;
 
             const resolved = self.normalizeSpecifier(module_id, specifier) catch continue;
             defer self.allocator.free(resolved);
             if (scanned.contains(resolved)) continue;
+            if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) continue;
 
             const child_source = std.Io.Dir.cwd().readFileAlloc(
                 self.io,
@@ -777,7 +804,12 @@ const ModuleLoaderState = struct {
         }
 
         const runtime = self.runtime orelse return null;
-        var hook_result = (try runtime.loadFromOnLoad(module_id)) orelse return null;
+        const start = if (self.profile_enabled) self.profileNow() else 0;
+        var hook_result = (try runtime.loadFromOnLoad(module_id)) orelse {
+            if (self.profile_enabled) self.profile_onload_ns += self.profileNow() - start;
+            return null;
+        };
+        if (self.profile_enabled) self.profile_onload_ns += self.profileNow() - start;
         defer hook_result.deinit(self.allocator);
 
         const effective_loader = hook_result.loader orelse default_loader;
@@ -815,7 +847,9 @@ const ModuleLoaderState = struct {
         else
             return error.UnsupportedTransformLoader;
         _ = extension;
-        return yuku_transform.transformSource(self.allocator, module_id, contents, loader);
+        const pruned = try pruneUnusedImports(self.allocator, contents);
+        defer self.allocator.free(pruned);
+        return yuku_transform.transformSource(self.allocator, module_id, pruned, loader);
     }
 
     fn clearMockModules(self: *ModuleLoaderState) void {
@@ -1793,6 +1827,19 @@ fn collectCommonJsExportNamesFromSource(
             }
         }
 
+        if (std.mem.startsWith(u8, source[cursor..], "Object.defineProperty(exports,")) {
+            var name_index = cursor + "Object.defineProperty(exports,".len;
+            skipTrivia(source, &name_index);
+            if (parseQuotedSpecifier(source, name_index)) |literal| {
+                const name = literal.specifier;
+                if (!std.mem.eql(u8, name, "default") and !std.mem.eql(u8, name, "__esModule")) {
+                    try appendSpecifier(allocator, names, dedup, name);
+                }
+                cursor = literal.next_index;
+                continue;
+            }
+        }
+
         cursor += 1;
     }
 }
@@ -1812,6 +1859,49 @@ fn appendSpecifier(
 
     try dedup.put(owned, {});
     try specifiers.append(allocator, owned);
+}
+
+fn isCommonJsReexportSpecifier(source: []const u8, specifier: []const u8) bool {
+    var cursor: usize = 0;
+    while (std.mem.indexOf(u8, source[cursor..], specifier)) |relative| {
+        const specifier_start = cursor + relative;
+        if (specifier_start == 0) return false;
+        const quote = source[specifier_start - 1];
+        if (quote != '\'' and quote != '"') {
+            cursor = specifier_start + specifier.len;
+            continue;
+        }
+        const after = specifier_start + specifier.len;
+        if (after >= source.len or source[after] != quote) {
+            cursor = after;
+            continue;
+        }
+
+        const before = source[0 .. specifier_start - 1];
+        const require_index = std.mem.lastIndexOf(u8, before, "require(") orelse {
+            cursor = after;
+            continue;
+        };
+        const var_index = std.mem.lastIndexOf(u8, before[0..require_index], "var ") orelse std.mem.lastIndexOf(u8, before[0..require_index], "const ") orelse std.mem.lastIndexOf(u8, before[0..require_index], "let ") orelse {
+            cursor = after;
+            continue;
+        };
+        var name_start = var_index;
+        while (name_start < before.len and before[name_start] != ' ') : (name_start += 1) {}
+        while (name_start < before.len and std.ascii.isWhitespace(before[name_start])) : (name_start += 1) {}
+        var name_end = name_start;
+        while (name_end < before.len and isIdentifierChar(before[name_end])) : (name_end += 1) {}
+        if (name_end <= name_start) {
+            cursor = after;
+            continue;
+        }
+        const name = before[name_start..name_end];
+        var pattern_buf: [128]u8 = undefined;
+        if (name.len + "Object.keys().forEach".len >= pattern_buf.len) return false;
+        const pattern = std.fmt.bufPrint(&pattern_buf, "Object.keys({s}).forEach", .{name}) catch return false;
+        return std.mem.indexOf(u8, source[after..], pattern) != null;
+    }
+    return false;
 }
 
 fn parseQuotedSpecifier(source: []const u8, start_index: usize) ?ParsedLiteral {
@@ -2194,6 +2284,19 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
     const failures_text = vm.getGlobalStringDup("__zigFailuresText") catch try allocator.dupe(u8, "");
     const collection_text = vm.getGlobalStringDup("__zigCollectionText") catch try allocator.dupe(u8, "");
 
+    if (module_loader_state.profile_enabled) {
+        std.debug.print(
+            "[zig-dom profile] modules={d} transforms={d} transform_ms={d:.3} onload_ms={d:.3} compile_ms={d:.3}\n",
+            .{
+                module_loader_state.profile_module_count,
+                module_loader_state.profile_transform_count,
+                @as(f64, @floatFromInt(module_loader_state.profile_transform_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_onload_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_compile_ns)) / 1_000_000.0,
+            },
+        );
+    }
+
     return .{
         .path = try allocator.dupe(u8, path),
         .passed = @intCast(@max(passed_i32, 0)),
@@ -2305,7 +2408,12 @@ fn moduleLoad(
     };
     defer state.allocator.free(source_z);
 
+    const compile_start = if (state.profile_enabled) state.profileNow() else 0;
     const compiled = ctx.eval(source_z[0..source.len], module_name, .{ .type = .module, .compile_only = true });
+    if (state.profile_enabled) {
+        state.profile_compile_ns += state.profileNow() - compile_start;
+        state.profile_module_count += 1;
+    }
     if (compiled.isException()) {
         return null;
     }
@@ -2458,6 +2566,74 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
 fn looksLikeJsxSource(source: []const u8) bool {
     return std.mem.indexOf(u8, source, "<") != null and
         (std.mem.indexOf(u8, source, "/>") != null or std.mem.indexOf(u8, source, "</") != null);
+}
+
+fn pruneUnusedImports(allocator: Allocator, source: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        const line_end = std.mem.indexOfScalarPos(u8, source, cursor, '\n') orelse source.len;
+        const line = source[cursor..line_end];
+        if (!isUnusedImportLine(source, line, line_end)) {
+            try out.appendSlice(allocator, line);
+            if (line_end < source.len) try out.append(allocator, '\n');
+        }
+        cursor = if (line_end < source.len) line_end + 1 else source.len;
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn isUnusedImportLine(source: []const u8, line: []const u8, line_end: usize) bool {
+    const trimmed = std.mem.trim(u8, line, " \t");
+    if (!std.mem.startsWith(u8, trimmed, "import ")) return false;
+    if (std.mem.indexOf(u8, trimmed, " from ") == null) return false;
+
+    const bindings_start = "import ".len;
+    const from_index = std.mem.indexOf(u8, trimmed, " from ") orelse return false;
+    const bindings = std.mem.trim(u8, trimmed[bindings_start..from_index], " \t");
+    if (bindings.len == 0 or std.mem.eql(u8, bindings, "type")) return true;
+    if (std.mem.startsWith(u8, bindings, "{") and std.mem.endsWith(u8, bindings, "}")) {
+        var inner = std.mem.tokenizeScalar(u8, bindings[1 .. bindings.len - 1], ',');
+        while (inner.next()) |raw_part| {
+            const part = std.mem.trim(u8, raw_part, " \t");
+            if (part.len == 0 or std.mem.startsWith(u8, part, "type ")) continue;
+            const as_index = std.mem.indexOf(u8, part, " as ");
+            const name = std.mem.trim(u8, if (as_index) |idx| part[idx + " as ".len ..] else part, " \t");
+            if (identifierUsedAfter(source, line_end, name)) return false;
+        }
+        return true;
+    }
+
+    if (std.mem.startsWith(u8, bindings, "* as ")) {
+        return !identifierUsedAfter(source, line_end, std.mem.trim(u8, bindings["* as ".len..], " \t"));
+    }
+
+    if (std.mem.indexOfScalar(u8, bindings, ',') == null) {
+        return !identifierUsedAfter(source, line_end, bindings);
+    }
+
+    return false;
+}
+
+fn identifierUsedAfter(source: []const u8, start: usize, identifier: []const u8) bool {
+    if (identifier.len == 0) return false;
+    var cursor = start;
+    while (std.mem.indexOf(u8, source[cursor..], identifier)) |relative| {
+        const index = cursor + relative;
+        const before_ok = index == 0 or !isIdentifierContinue(source[index - 1]);
+        const after = index + identifier.len;
+        const after_ok = after >= source.len or !isIdentifierContinue(source[after]);
+        if (before_ok and after_ok) return true;
+        cursor = after;
+    }
+    return false;
+}
+
+fn isIdentifierContinue(ch: u8) bool {
+    return std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '$';
 }
 
 fn onLoadTransformExtension(loader: []const u8) ?[]const u8 {
