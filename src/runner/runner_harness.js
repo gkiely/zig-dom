@@ -4,6 +4,7 @@
   const rootScope = createScope("<root>", null, false);
   let activeScope = rootScope;
   const collectionErrors = [];
+  let registeredTestCount = 0;
 
   function createScope(name, parent, skip) {
     return {
@@ -88,6 +89,7 @@
     };
 
     activeScope.entries.push({ kind: "test", value: testEntry });
+    registeredTestCount += 1;
   }
 
   function registerDescribe(name, fn, flags) {
@@ -686,6 +688,44 @@
   const testingLibrary = createTestingLibraryHelpers();
 
   if (typeof globalThis.URL !== "function") {
+    if (typeof globalThis.URLSearchParams !== "function") {
+      globalThis.URLSearchParams = class URLSearchParams {
+        constructor(input) {
+          const text = String(input || "");
+          const raw = text.startsWith("?") ? text.slice(1) : text;
+          this._pairs = [];
+          if (!raw) {
+            return;
+          }
+
+          const parts = raw.split("&");
+          for (const part of parts) {
+            if (!part) {
+              continue;
+            }
+
+            const eqIndex = part.indexOf("=");
+            const key = eqIndex >= 0 ? part.slice(0, eqIndex) : part;
+            const value = eqIndex >= 0 ? part.slice(eqIndex + 1) : "";
+            this._pairs.push([
+              decodeURIComponent(key.replace(/\+/g, " ")),
+              decodeURIComponent(value.replace(/\+/g, " "))
+            ]);
+          }
+        }
+
+        get(name) {
+          const expected = String(name);
+          for (const [key, value] of this._pairs) {
+            if (key === expected) {
+              return value;
+            }
+          }
+          return null;
+        }
+      };
+    }
+
     globalThis.URL = class URL {
       constructor(input) {
         const href = String(input || "");
@@ -702,12 +742,242 @@
         this.search = match[4] || "";
         this.hash = match[5] || "";
         this.origin = this.protocol && this.host ? `${this.protocol}//${this.host}` : "";
+          this.searchParams = new globalThis.URLSearchParams(this.search);
       }
 
       toString() {
         return this.href;
       }
     };
+  }
+
+  if (!globalThis.location || typeof globalThis.location !== "object") {
+    globalThis.location = {
+      href: "http://localhost/",
+      protocol: "http:",
+      host: "localhost",
+      hostname: "localhost",
+      port: "",
+      pathname: "/",
+      search: "",
+      hash: ""
+    };
+  }
+
+  if (typeof globalThis.location.hostname !== "string") {
+    globalThis.location.hostname = "localhost";
+  }
+  if (typeof globalThis.location.protocol !== "string") {
+    globalThis.location.protocol = "http:";
+  }
+  if (typeof globalThis.location.port !== "string") {
+    globalThis.location.port = "";
+  }
+  if (typeof globalThis.location.pathname !== "string") {
+    globalThis.location.pathname = "/";
+  }
+  if (typeof globalThis.location.search !== "string") {
+    globalThis.location.search = "";
+  }
+  if (typeof globalThis.location.hash !== "string") {
+    globalThis.location.hash = "";
+  }
+
+  if (!globalThis.navigator || typeof globalThis.navigator !== "object") {
+    globalThis.navigator = { userAgent: "zig-dom" };
+  } else if (typeof globalThis.navigator.userAgent !== "string") {
+    globalThis.navigator.userAgent = "zig-dom";
+  }
+
+  if (globalThis.window && typeof globalThis.window === "object") {
+    if (!globalThis.window.location) {
+      globalThis.window.location = globalThis.location;
+    }
+    if (!globalThis.window.navigator) {
+      globalThis.window.navigator = globalThis.navigator;
+    }
+  }
+
+  if (!globalThis.__zigImportMetaEnv || typeof globalThis.__zigImportMetaEnv !== "object") {
+    globalThis.__zigImportMetaEnv = {
+      DEV: false,
+      PROD: false,
+      VITE_LEGACY: "false",
+      VITE_PLAYWRIGHT_TEST: "false"
+    };
+  }
+
+  if (typeof globalThis.queueMicrotask !== "function") {
+    globalThis.queueMicrotask = function queueMicrotask(callback) {
+      Promise.resolve().then(() => {
+        if (typeof callback === "function") {
+          callback();
+        }
+      });
+    };
+  }
+
+  if (typeof globalThis.setTimeout !== "function") {
+    let timeoutIdCounter = 1;
+    const cancelledTimeouts = new Set();
+
+    globalThis.setTimeout = function setTimeout(callback, _delay, ...args) {
+      const id = timeoutIdCounter;
+      timeoutIdCounter += 1;
+
+      Promise.resolve().then(() => {
+        if (cancelledTimeouts.has(id)) {
+          cancelledTimeouts.delete(id);
+          return;
+        }
+
+        if (typeof callback === "function") {
+          callback(...args);
+          return;
+        }
+
+        if (typeof callback === "string") {
+          Function(callback)();
+        }
+      });
+
+      return id;
+    };
+
+    globalThis.clearTimeout = function clearTimeout(id) {
+      cancelledTimeouts.add(Number(id));
+    };
+  }
+
+  if (globalThis.window && typeof globalThis.window === "object") {
+    if (!globalThis.window.queueMicrotask) {
+      globalThis.window.queueMicrotask = globalThis.queueMicrotask;
+    }
+    if (!globalThis.window.setTimeout) {
+      globalThis.window.setTimeout = globalThis.setTimeout;
+    }
+    if (!globalThis.window.clearTimeout) {
+      globalThis.window.clearTimeout = globalThis.clearTimeout;
+    }
+  }
+
+  if (!globalThis.Intl || typeof globalThis.Intl !== "object") {
+    globalThis.Intl = {};
+  }
+
+  if (typeof globalThis.Intl.Collator !== "function") {
+    globalThis.Intl.Collator = class Collator {
+      compare(left, right) {
+        return String(left).localeCompare(String(right));
+      }
+    };
+  }
+
+  if (globalThis.window && typeof globalThis.window === "object" && !globalThis.window.Intl) {
+    globalThis.window.Intl = globalThis.Intl;
+  }
+
+  if (typeof globalThis.DOMParser !== "function") {
+    globalThis.DOMParser = class DOMParser {
+      parseFromString(input) {
+        const html = String(input ?? "");
+        return {
+          body: {
+            innerHTML: html,
+            textContent: html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
+          }
+        };
+      }
+    };
+  }
+
+  if (globalThis.window && typeof globalThis.window === "object" && !globalThis.window.DOMParser) {
+    globalThis.window.DOMParser = globalThis.DOMParser;
+  }
+
+  function createStorageFallback() {
+    const store = new Map();
+    return {
+      getItem(key) {
+        const lookup = String(key);
+        return store.has(lookup) ? store.get(lookup) : null;
+      },
+      setItem(key, value) {
+        store.set(String(key), String(value));
+      },
+      removeItem(key) {
+        store.delete(String(key));
+      },
+      clear() {
+        store.clear();
+      },
+      key(index) {
+        const keys = Array.from(store.keys());
+        return index >= 0 && index < keys.length ? keys[index] : null;
+      },
+      get length() {
+        return store.size;
+      }
+    };
+  }
+
+  if (!globalThis.localStorage || typeof globalThis.localStorage !== "object") {
+    globalThis.localStorage = createStorageFallback();
+  }
+
+  if (!globalThis.sessionStorage || typeof globalThis.sessionStorage !== "object") {
+    globalThis.sessionStorage = createStorageFallback();
+  }
+
+  if (globalThis.window && typeof globalThis.window === "object") {
+    if (!globalThis.window.localStorage) {
+      globalThis.window.localStorage = globalThis.localStorage;
+    }
+    if (!globalThis.window.sessionStorage) {
+      globalThis.window.sessionStorage = globalThis.sessionStorage;
+    }
+  }
+
+  if (typeof globalThis.matchMedia !== "function") {
+    globalThis.matchMedia = function matchMedia(query) {
+      return {
+        media: String(query ?? ""),
+        matches: false,
+        onchange: null,
+        addListener() {},
+        removeListener() {},
+        addEventListener() {},
+        removeEventListener() {},
+        dispatchEvent() {
+          return false;
+        }
+      };
+    };
+  }
+
+  if (globalThis.window && typeof globalThis.window === "object" && !globalThis.window.matchMedia) {
+    globalThis.window.matchMedia = globalThis.matchMedia;
+  }
+
+  function ensureStyleObject(node) {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    if (!node.style || typeof node.style.setProperty !== "function") {
+      node.style = {
+        setProperty() {},
+        removeProperty() {},
+        getPropertyValue() {
+          return "";
+        }
+      };
+    }
+  }
+
+  if (globalThis.document && typeof globalThis.document === "object") {
+    ensureStyleObject(globalThis.document.documentElement);
+    ensureStyleObject(globalThis.document.body);
   }
 
   function gatherScopeChain(scope) {
@@ -961,6 +1231,7 @@
     };
 
     const onlyMode = hasOnly(rootScope);
+    const hasRunnable = hasRunnableTest(rootScope, onlyMode);
     await runScope(rootScope, result, onlyMode);
 
     globalThis.__zigPassed = result.passed;
@@ -970,23 +1241,44 @@
     globalThis.__zigCollectionErrors = result.collectionErrors.length;
     globalThis.__zigFailuresText = buildReportLines(result.failures);
     globalThis.__zigCollectionText = result.collectionErrors.join("\n\n");
+    globalThis.__zigRegisteredTests = registeredTestCount;
+    globalThis.__zigOnlyMode = onlyMode;
+    globalThis.__zigHasRunnable = hasRunnable;
 
     return result;
   }
+
+  const bunTestApi = Object.freeze({
+    test,
+    it: test,
+    describe,
+    expect,
+    beforeAll,
+    beforeEach,
+    afterEach,
+    afterAll
+  });
+
+  Object.defineProperty(globalThis, "__zigBunTestApi", {
+    value: bunTestApi,
+    configurable: false,
+    enumerable: false,
+    writable: false
+  });
 
   globalThis.React = React;
   globalThis.ReactDOMClient = ReactDOMClient;
   globalThis.render = testingLibrary.render;
   globalThis.screen = testingLibrary.screen;
   globalThis.fireEvent = testingLibrary.fireEvent;
-  globalThis.expect = expect;
-  globalThis.test = test;
-  globalThis.it = test;
-  globalThis.describe = describe;
-  globalThis.beforeAll = beforeAll;
-  globalThis.beforeEach = beforeEach;
-  globalThis.afterEach = afterEach;
-  globalThis.afterAll = afterAll;
+  globalThis.expect = bunTestApi.expect;
+  globalThis.test = bunTestApi.test;
+  globalThis.it = bunTestApi.it;
+  globalThis.describe = bunTestApi.describe;
+  globalThis.beforeAll = bunTestApi.beforeAll;
+  globalThis.beforeEach = bunTestApi.beforeEach;
+  globalThis.afterEach = bunTestApi.afterEach;
+  globalThis.afterAll = bunTestApi.afterAll;
 
   globalThis.__zigRunner = {
     run: runCollectedTests

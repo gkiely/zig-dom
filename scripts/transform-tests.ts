@@ -85,10 +85,11 @@ const transpilers: Record<Loader, Bun.Transpiler> = {
 for (const entry of entries) {
   const source = await Bun.file(resolve(entry.file)).text();
   const transformed = transpilers[entry.loader].transformSync(source);
+  const normalized = transformed.replaceAll("import.meta.env", "globalThis.__zigImportMetaEnv");
   const outPath = resolve(entry.out);
 
   mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, transformed, "utf8");
+  writeFileSync(outPath, normalized, "utf8");
 }
 
 console.log(`Transformed ${entries.length} file(s).`);

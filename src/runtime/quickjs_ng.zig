@@ -97,6 +97,77 @@ pub const Runtime = struct {
         if (result.isException()) {
             return error.EvaluationFailed;
         }
+
+        if (result.isPromise()) {
+            var pump_iterations: usize = 0;
+            while (true) : (pump_iterations += 1) {
+                const state = result.promiseState(self.ctx);
+                switch (state) {
+                    .fulfilled => break,
+                    .rejected => {
+                        const rejection = result.promiseResult(self.ctx);
+                        defer rejection.deinit(self.ctx);
+
+                        var rejection_text: []const u8 = "<null rejection>";
+                        var rejection_text_owned: ?[]u8 = null;
+                        defer if (rejection_text_owned) |owned| self.allocator.free(owned);
+
+                        const text_value = rejection.toStringValue(self.ctx);
+                        defer text_value.deinit(self.ctx);
+
+                        if (text_value.isException()) {
+                            rejection_text = "<failed to stringify rejection>";
+                        } else if (text_value.toCStringLen(self.ctx)) |text_cstr| {
+                            defer self.ctx.freeCString(text_cstr.ptr);
+                            const owned = self.allocator.dupe(u8, text_cstr.ptr[0..text_cstr.len]) catch return error.OutOfMemory;
+                            rejection_text_owned = owned;
+                            rejection_text = owned;
+                        }
+
+                        const message_buf = std.fmt.allocPrint(
+                            self.allocator,
+                            "module evaluation rejected: {s} ({s})",
+                            .{ filename, rejection_text },
+                        ) catch return error.OutOfMemory;
+                        defer self.allocator.free(message_buf);
+                        const message = self.allocator.dupeZ(u8, message_buf) catch return error.OutOfMemory;
+                        defer self.allocator.free(message);
+                        _ = self.ctx.throwInternalError(message);
+                        return error.EvaluationFailed;
+                    },
+                    .pending => {
+                        if (!self.isJobPending()) {
+                            const message_buf = std.fmt.allocPrint(
+                                self.allocator,
+                                "module evaluation pending with no jobs: {s}",
+                                .{filename},
+                            ) catch return error.OutOfMemory;
+                            defer self.allocator.free(message_buf);
+                            const message = self.allocator.dupeZ(u8, message_buf) catch return error.OutOfMemory;
+                            defer self.allocator.free(message);
+                            _ = self.ctx.throwInternalError(message);
+                            return error.EvaluationFailed;
+                        }
+
+                        _ = self.executePendingJob() catch return error.EvaluationFailed;
+
+                        if (pump_iterations > 100_000) {
+                            const message_buf = std.fmt.allocPrint(
+                                self.allocator,
+                                "module evaluation promise pump limit exceeded: {s}",
+                                .{filename},
+                            ) catch return error.OutOfMemory;
+                            defer self.allocator.free(message_buf);
+                            const message = self.allocator.dupeZ(u8, message_buf) catch return error.OutOfMemory;
+                            defer self.allocator.free(message);
+                            _ = self.ctx.throwInternalError(message);
+                            return error.EvaluationFailed;
+                        }
+                    },
+                    else => break,
+                }
+            }
+        }
     }
 
     pub fn ModuleNormalizeFunc(comptime T: type) type {

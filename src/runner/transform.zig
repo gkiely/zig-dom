@@ -186,10 +186,10 @@ fn outputExists(io: std.Io, path: []const u8) bool {
 
 fn transformOptionsSignature(loader: []const u8) []const u8 {
     if (std.mem.eql(u8, loader, "tsx") or std.mem.eql(u8, loader, "jsx")) {
-        return "jsx-react-factory-v1";
+        return "jsx-react-factory-v2";
     }
 
-    return "esm-preserve-v1";
+    return "esm-preserve-v2";
 }
 
 fn runTransformProcess(allocator: Allocator, io: std.Io, entries: []const TransformEntry) !u8 {

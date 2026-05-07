@@ -25,6 +25,13 @@ const run_bootstrap_source =
     \\  });
 ;
 
+const collection_flush_source =
+    \\globalThis.__zigCollectionFlushDone = false;
+    \\Promise.resolve().then(() => {
+    \\  globalThis.__zigCollectionFlushDone = true;
+    \\});
+;
+
 const bun_test_specifier = "bun:test";
 const react_specifier = "react";
 const react_dom_client_specifier = "react-dom/client";
@@ -41,14 +48,15 @@ const use_sync_external_store_shim_with_selector_specifier = "use-sync-external-
 const use_sync_external_store_shim_with_selector_js_specifier = "use-sync-external-store/shim/with-selector.js";
 
 const bun_test_shim_source =
-    \\export const test = globalThis.test;
-    \\export const it = globalThis.it;
-    \\export const describe = globalThis.describe;
-    \\export const expect = globalThis.expect;
-    \\export const beforeAll = globalThis.beforeAll;
-    \\export const beforeEach = globalThis.beforeEach;
-    \\export const afterEach = globalThis.afterEach;
-    \\export const afterAll = globalThis.afterAll;
+    \\const api = globalThis.__zigBunTestApi;
+    \\export const test = api.test;
+    \\export const it = api.it;
+    \\export const describe = api.describe;
+    \\export const expect = api.expect;
+    \\export const beforeAll = api.beforeAll;
+    \\export const beforeEach = api.beforeEach;
+    \\export const afterEach = api.afterEach;
+    \\export const afterAll = api.afterAll;
     \\const bunTest = { test, it, describe, expect, beforeAll, beforeEach, afterEach, afterAll };
     \\export default bunTest;
 ;
@@ -1681,6 +1689,12 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         vm.evalModule(setup_module_id, setup_source) catch |err| {
             return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
         };
+
+        while (vm.isJobPending()) {
+            _ = vm.executePendingJob() catch |err| {
+                return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
+            };
+        }
     }
 
     const entry_source = module_loader_state.loadModuleSource(entry_module_id) catch |err| {
@@ -1690,6 +1704,46 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
     vm.evalModule(entry_module_id, entry_source) catch |err| {
         return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
     };
+
+    while (vm.isJobPending()) {
+        _ = vm.executePendingJob() catch |err| {
+            return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
+        };
+    }
+
+    vm.evalScript("<zig-collection-flush>", collection_flush_source) catch |err| {
+        return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
+    };
+
+    const flush_timeout_ms: i64 = 1_000;
+    const flush_start_ts = std.Io.Clock.Timestamp.now(io, .awake);
+    while (!(vm.getGlobalBool("__zigCollectionFlushDone") catch false)) {
+        const flush_elapsed_ms = flush_start_ts.untilNow(io).raw.toMilliseconds();
+        if (flush_elapsed_ms > flush_timeout_ms) {
+            return .{
+                .path = try allocator.dupe(u8, path),
+                .passed = 0,
+                .failed = 0,
+                .skipped = 0,
+                .timed_out = 0,
+                .collection_errors = 1,
+                .failure_report = null,
+                .collection_report = try allocator.dupe(u8, "collection failed: microtask flush timed out"),
+            };
+        }
+
+        if (vm.isJobPending()) {
+            _ = vm.executePendingJob() catch |err| {
+                return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
+            };
+        }
+    }
+
+    while (vm.isJobPending()) {
+        _ = vm.executePendingJob() catch |err| {
+            return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
+        };
+    }
 
     vm.evalScript("<zig-runner-bootstrap>", run_bootstrap_source) catch |err| {
         return failureFromRuntimeException(allocator, path, "failed to start file execution", err, &vm);
@@ -1751,6 +1805,33 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
     const skipped_i32 = vm.getGlobalInt32("__zigSkipped") catch 0;
     const timed_out_i32 = vm.getGlobalInt32("__zigTimedOut") catch 0;
     const collection_errors_i32 = vm.getGlobalInt32("__zigCollectionErrors") catch 0;
+    const registered_tests_i32 = vm.getGlobalInt32("__zigRegisteredTests") catch 0;
+    const only_mode = vm.getGlobalBool("__zigOnlyMode") catch false;
+    const has_runnable = vm.getGlobalBool("__zigHasRunnable") catch false;
+
+    if (
+        passed_i32 == 0 and
+        failed_i32 == 0 and
+        skipped_i32 == 0 and
+        timed_out_i32 == 0 and
+        collection_errors_i32 == 0
+    ) {
+        const diagnostic = try std.fmt.allocPrint(
+            allocator,
+            "collection failed: no tests executed (registered={d}, onlyMode={}, hasRunnable={})",
+            .{ registered_tests_i32, only_mode, has_runnable },
+        );
+        return .{
+            .path = try allocator.dupe(u8, path),
+            .passed = 0,
+            .failed = 0,
+            .skipped = 0,
+            .timed_out = 0,
+            .collection_errors = 1,
+            .failure_report = null,
+            .collection_report = diagnostic,
+        };
+    }
 
     const failures_text = vm.getGlobalStringDup("__zigFailuresText") catch try allocator.dupe(u8, "");
     const collection_text = vm.getGlobalStringDup("__zigCollectionText") catch try allocator.dupe(u8, "");
