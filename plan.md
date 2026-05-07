@@ -76,29 +76,43 @@ Use ReleaseFast only for the perf guard or performance comparisons.
 
 Anything in test execution over 30s should be treated as a likely hang, async timeout, or Zig/runtime error. Build time can exceed 30s.
 
-## Milestone 1: Lock In Current Perf Behavior
+## Milestone 1: Broaden Simple YouNeedAWiki Components
 
-Tasks:
+Start with smaller leaf component tests before the larger app-style suites. These usually expose focused DOM, Testing Library, module-loader, and platform gaps without pulling the whole app graph.
 
-- Add a local perf regression script or documented command for the `Edit.test.tsx` guard.
-- Ensure it is easy for future agents to run without including build time in the measured test runtime.
-- Keep this as a manual guard unless there is a stable low-noise automated benchmark path.
+Already passing simple baselines:
 
-Validation:
+- `../youneedawiki/src/elements/PoweredBy/PoweredBy.test.tsx`
+- `../youneedawiki/src/elements/Buttons/ViewInDrive.test.tsx`
+- `../youneedawiki/src/elements/Buttons/Edit.test.tsx`
+- `../youneedawiki/src/elements/Title/Title.test.tsx`
+- `../youneedawiki/src/elements/Icon/Icon.test.tsx`
+- `../youneedawiki/src/components/LastModified/LastModified.test.tsx`
 
-- Run the full perf guard above.
-- Run local runner/DOM regression commands.
+Suggested next simple targets:
 
-## Milestone 2: Broaden YouNeedAWiki Components
+- `../youneedawiki/src/components/Settings/WikiDomainSelector.test.tsx`
+- `../youneedawiki/src/components/ShareModal/ShareModal.legacy.test.tsx`
+- `../youneedawiki/src/components/AddMenu/AddMenu.test.tsx`
+- `../youneedawiki/src/components/AddMenuLegacy/AddMenuLegacy.test.tsx`
+- `../youneedawiki/src/components/AvatarMenu/AvatarMenu.test.tsx`
+- `../youneedawiki/src/components/PrevNext/PrevNext.test.tsx`
+- `../youneedawiki/src/elements/Breadcrumbs/Breadcrumbs.test.tsx`
+- `../youneedawiki/src/components/Outline/Outline.test.tsx`
 
-Work down `../youneedawiki` component tests by priority.
-
-Suggested next targets:
+Defer larger complex suites until after the WPT fast/core milestones:
 
 - `../youneedawiki/src/components/Search/Search.test.tsx`
 - `../youneedawiki/src/components/Page/Page.test.tsx`
 - `../youneedawiki/src/components/Header/Header.test.tsx`
 - `../youneedawiki/src/elements/OrderedListChecklistMacro.test.tsx`
+- `../youneedawiki/src/components/FileModal/FileModal.test.tsx`
+- `../youneedawiki/src/components/SupportAdmin/SupportAdmin.test.tsx`
+- `../youneedawiki/src/components/WikiSelector/WikiSelector.test.tsx`
+- `../youneedawiki/src/components/Create/Create.test.tsx`
+- `../youneedawiki/src/components/ShareModal/ShareModal.test.tsx`
+- `../youneedawiki/src/components/Invite/Invite.test.tsx`
+- `../youneedawiki/src/components/Tree/Tree.test.tsx`
 
 Rules:
 
@@ -128,7 +142,7 @@ zig-out/bin/zig-dom test --root ../youneedawiki <fixed-test-file>
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Milestone 3: Platform Globals
+## Milestone 2: Platform Globals
 
 Fill browser/node compatibility gaps generically as they are exposed by `../youneedawiki`.
 
@@ -153,7 +167,7 @@ zig-out/bin/zig-dom test tests/runner/native-dom-window-globals.test.js tests/ru
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Milestone 4: DOM Loading Configuration
+## Milestone 3: DOM Loading Configuration
 
 The runner should not always pay DOM startup cost for plain non-DOM tests.
 
@@ -190,7 +204,7 @@ zig-out/bin/zig-dom test --dom always tests/runner/native-dom-smoke.test.js
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Milestone 5: Fast WPT Iteration
+## Milestone 4: Fast WPT Iteration
 
 Before expanding WPT coverage, make WPT debugging fast enough for normal development.
 
@@ -242,7 +256,7 @@ zig-out/bin/zig-dom wpt --manifest wpt/manifest/fast-smoke.json --expected wpt/e
 
 Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
-## Milestone 6: Expand WPT DOM Core
+## Milestone 5: Expand WPT DOM Core
 
 Start with the smallest manifests and keep expected failures explicit.
 
@@ -272,6 +286,40 @@ Rules:
 - Add focused `tests/runner/native-dom-*.test.js` regressions for every WPT behavior fixed.
 
 Run the mandatory `Edit.test.tsx` ReleaseFast perf guard after each WPT slice.
+
+## Milestone 6: Broaden Complex YouNeedAWiki Components
+
+After simple downstream tests and WPT fast/core coverage are stable, move to the larger component suites that pull more of the app and dependency graph.
+
+Suggested order:
+
+1. `../youneedawiki/src/components/Search/Search.test.tsx`
+2. `../youneedawiki/src/components/Header/Header.test.tsx`
+3. `../youneedawiki/src/components/Page/Page.test.tsx`
+4. `../youneedawiki/src/elements/OrderedListChecklistMacro.test.tsx`
+5. `../youneedawiki/src/components/FileModal/FileModal.test.tsx`
+6. `../youneedawiki/src/components/SupportAdmin/SupportAdmin.test.tsx`
+7. `../youneedawiki/src/components/WikiSelector/WikiSelector.test.tsx`
+8. `../youneedawiki/src/components/Create/Create.test.tsx`
+9. `../youneedawiki/src/components/ShareModal/ShareModal.test.tsx`
+10. `../youneedawiki/src/components/Invite/Invite.test.tsx`
+11. `../youneedawiki/src/components/Tree/Tree.test.tsx`
+
+Rules:
+
+- If one of these exceeds 30s, treat it as a hang/async/runtime issue and profile first.
+- Prefer generic runner and native DOM fixes over downstream-specific patches.
+- Keep setup/onLoad, mock cleanup, user-event behavior, and QuickJS shutdown cleanup generic.
+- Do not edit downstream tests unless explicitly approved.
+
+Validation after each fixed file:
+
+```sh
+zig build --summary none
+zig-out/bin/zig-dom test --root ../youneedawiki <fixed-test-file>
+```
+
+Then run the mandatory `Edit.test.tsx` ReleaseFast perf guard.
 
 ## Milestone 7: Events And Forms Depth
 
