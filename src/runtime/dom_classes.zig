@@ -1716,11 +1716,22 @@ fn isKnownFastSelector(selector: []const u8) bool {
     return std.mem.eql(u8, selector, "a[href]") or
         std.mem.eql(u8, selector, "a[href]:not([href=\"\"])") or
         std.mem.eql(u8, selector, "button") or
+        std.mem.eql(u8, selector, "h1") or
+        std.mem.eql(u8, selector, "h2") or
+        std.mem.eql(u8, selector, "h3") or
+        std.mem.eql(u8, selector, "h4") or
+        std.mem.eql(u8, selector, "h5") or
+        std.mem.eql(u8, selector, "h6") or
+        std.mem.eql(u8, selector, "img") or
         std.mem.eql(u8, selector, "a") or
         std.mem.eql(u8, selector, "area") or
-        std.mem.eql(u8, selector, "*[role~=\"link\"]") or
+        isRoleTokenSelector(selector) or
         std.mem.eql(u8, selector, "[title]") or
         std.mem.eql(u8, selector, "svg > title");
+}
+
+fn isRoleTokenSelector(selector: []const u8) bool {
+    return std.mem.startsWith(u8, selector, "*[role~=\"") and std.mem.endsWith(u8, selector, "\"]");
 }
 
 fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, selector: []const u8) bool {
@@ -1729,6 +1740,16 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
     const local = local_value.toCStringLen(ctx) orelse return false;
     defer ctx.freeCString(local.ptr);
     if (std.mem.eql(u8, selector, "button")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "button");
+    if (std.mem.eql(u8, selector, "h1") or
+        std.mem.eql(u8, selector, "h2") or
+        std.mem.eql(u8, selector, "h3") or
+        std.mem.eql(u8, selector, "h4") or
+        std.mem.eql(u8, selector, "h5") or
+        std.mem.eql(u8, selector, "h6") or
+        std.mem.eql(u8, selector, "img"))
+    {
+        return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], selector);
+    }
     if (std.mem.eql(u8, selector, "a")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "a");
     if (std.mem.eql(u8, selector, "area")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "area");
     if (std.mem.eql(u8, selector, "[title]")) {
@@ -1753,15 +1774,69 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
         defer ctx.freeCString(href.ptr);
         return if (std.mem.eql(u8, selector, "a[href]:not([href=\"\"])")) href.len > 0 else true;
     }
-    if (std.mem.eql(u8, selector, "*[role~=\"link\"]")) {
+    if (matchesTagAttributeSelector(ctx, element, local.ptr[0..local.len], selector)) |matched| {
+        return matched;
+    }
+    if (isRoleTokenSelector(selector)) {
+        const expected_role = selector["*[role~=\"".len .. selector.len - "\"]".len];
         const role = elementAttributeString(ctx, element, "role") orelse return false;
         defer ctx.freeCString(role.ptr);
         var iter = std.mem.tokenizeScalar(u8, role.ptr[0..role.len], ' ');
         while (iter.next()) |token| {
-            if (std.mem.eql(u8, token, "link")) return true;
+            if (std.mem.eql(u8, token, expected_role)) return true;
         }
     }
     return false;
+}
+
+fn matchesTagAttributeSelector(ctx: *quickjs.Context, element: quickjs.Value, local: []const u8, selector: []const u8) ?bool {
+    if (std.mem.indexOf(u8, selector, ":not([")) |not_index| {
+        if (std.mem.indexOfScalar(u8, selector[0..not_index], '[') != null) {
+            // Combined selectors such as img[alt]:not([alt=""]) are handled below.
+        } else {
+        if (!std.mem.endsWith(u8, selector, "])")) return null;
+        const tag = selector[0..not_index];
+        if (tag.len == 0 or !std.ascii.eqlIgnoreCase(local, tag)) return false;
+        const attr = selector[not_index + ":not([".len .. selector.len - "])".len];
+        if (std.mem.indexOfScalar(u8, attr, '=') != null) return null;
+        const value = elementAttributeString(ctx, element, attr);
+        if (value) |owned| ctx.freeCString(owned.ptr);
+        return value == null;
+        }
+    }
+
+    const bracket = std.mem.indexOfScalar(u8, selector, '[') orelse return null;
+    if (bracket == 0) return null;
+    const tag = selector[0..bracket];
+    if (!std.ascii.eqlIgnoreCase(local, tag)) return false;
+
+    if (std.mem.indexOf(u8, selector[bracket..], "]:not([")) |relative_not| {
+        const first_attr = selector[bracket + 1 .. bracket + relative_not];
+        const not_start = bracket + relative_not + "]:not([".len;
+        if (!std.mem.endsWith(u8, selector, "])")) return null;
+        const inner = selector[not_start .. selector.len - "])".len];
+        if (std.mem.indexOf(u8, inner, "=\"")) |eq| {
+            const attr_name = inner[0..eq];
+            if (!std.mem.eql(u8, first_attr, attr_name)) return null;
+            const value_start = eq + "=\"".len;
+            if (inner.len < value_start + 1 or inner[inner.len - 1] != '"') return null;
+            const disallowed_value = inner[value_start .. inner.len - 1];
+            const attr = elementAttributeString(ctx, element, first_attr) orelse return false;
+            defer ctx.freeCString(attr.ptr);
+            return !std.mem.eql(u8, attr.ptr[0..attr.len], disallowed_value);
+        }
+        return null;
+    }
+
+    if (std.mem.startsWith(u8, selector[bracket..], "[") and std.mem.endsWith(u8, selector, "]")) {
+        const attr = selector[bracket + 1 .. selector.len - 1];
+        if (std.mem.indexOfScalar(u8, attr, '=') != null) return null;
+        const value = elementAttributeString(ctx, element, attr) orelse return false;
+        defer ctx.freeCString(value.ptr);
+        return true;
+    }
+
+    return null;
 }
 
 fn jsElementClosest(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {

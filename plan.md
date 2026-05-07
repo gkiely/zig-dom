@@ -550,3 +550,8 @@ Do not make upstream WPT sync part of the fast path.
 6. Add React, Testing Library, and `../youneedawiki` compatibility gates.
 7. Port the current WPT TypeScript harness into Zig.
 8. Only then expand WPT coverage.
+
+## Todo
+- WPT tests
+- Only load dom for jsx/tsx files by default, but allow me to pass a flag for specific file types to enable it.
+

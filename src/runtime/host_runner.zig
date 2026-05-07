@@ -157,6 +157,7 @@ pub const HostRunner = struct {
         global.setPropertyStr(ctx, "test", test_fn.dup(ctx)) catch return error.JSError;
         global.setPropertyStr(ctx, "it", test_fn) catch return error.JSError;
         global.setPropertyStr(ctx, "describe", describe_fn) catch return error.JSError;
+        try self.installEachHelpers();
         try setFunction(ctx, global, "beforeAll", jsBeforeAll, 1);
         try setFunction(ctx, global, "beforeEach", jsBeforeEach, 1);
         try setFunction(ctx, global, "afterEach", jsAfterEach, 1);
@@ -166,6 +167,41 @@ pub const HostRunner = struct {
         if (runner_obj.isException()) return error.JSError;
         try setFunction(ctx, runner_obj, "run", jsRun, 0);
         global.setPropertyStr(ctx, "__zigRunner", runner_obj) catch return error.JSError;
+    }
+
+    fn installEachHelpers(self: *HostRunner) HostRunnerError!void {
+        const source =
+            \\(() => {
+            \\  const formatName = (name, row, index) => {
+            \\    if (typeof name !== "string") return String(name);
+            \\    let out = name.replace(/%#/g, String(index));
+            \\    if (Array.isArray(row)) {
+            \\      for (const value of row) out = out.replace(/%[sdifoOj]/, String(value));
+            \\    } else {
+            \\      out = out.replace(/%[sdifoOj]/, String(row));
+            \\    }
+            \\    return out;
+            \\  };
+            \\  const install = (target) => {
+            \\    target.each = (table) => (name, callback, timeout) => {
+            \\      const rows = Array.from(table ?? []);
+            \\      for (let index = 0; index < rows.length; index++) {
+            \\        const row = rows[index];
+            \\        target(formatName(name, row, index), () => Array.isArray(row) ? callback(...row) : callback(row), timeout);
+            \\      }
+            \\    };
+            \\  };
+            \\  install(globalThis.test);
+            \\  install(globalThis.it);
+            \\  install(globalThis.test.skip);
+            \\  install(globalThis.test.only);
+            \\  install(globalThis.it.skip);
+            \\  install(globalThis.it.only);
+            \\})();
+        ;
+        const result = self.ctx.eval(source, "<zig-runner-each>", .{});
+        defer result.deinit(self.ctx);
+        if (result.isException()) return error.JSError;
     }
 
     fn currentScopeName(self: *HostRunner) ![]u8 {

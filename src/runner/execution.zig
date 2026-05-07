@@ -43,6 +43,19 @@ const cjs_runtime_helpers_source =
     \\    return {};
     \\  }
     \\};
+    \\globalThis.__zigEsmNamespaceToRequireValue = function __zigEsmNamespaceToRequireValue(ns) {
+    \\  const out = {};
+    \\  Object.defineProperty(out, "__esModule", { value: true });
+    \\  for (const key of Reflect.ownKeys(ns)) {
+    \\    if (key === Symbol.toStringTag) continue;
+    \\    Object.defineProperty(out, key, {
+    \\      enumerable: true,
+    \\      configurable: true,
+    \\      get: () => ns[key],
+    \\    });
+    \\  }
+    \\  return out;
+    \\};
     \\globalThis.__zigLoadCommonJS = function __zigLoadCommonJS(id, dirname, deps, factory) {
     \\  const registry = globalThis.__zigCjsRegistry || (globalThis.__zigCjsRegistry = new Map());
     \\  if (registry.has(id)) return registry.get(id).exports;
@@ -396,6 +409,18 @@ const CommonJsImport = struct {
     }
 };
 
+const NamedImportPart = struct {
+    imported: []u8,
+    local: []u8,
+    specifier: []u8,
+
+    fn deinit(self: *NamedImportPart, allocator: Allocator) void {
+        allocator.free(self.imported);
+        allocator.free(self.local);
+        allocator.free(self.specifier);
+    }
+};
+
 pub const FileResult = struct {
     path: []u8,
     passed: usize,
@@ -676,7 +701,10 @@ const ModuleLoaderState = struct {
             std.debug.print("[zig-dom transform] {s} {s}\n", .{ default_loader, module_id });
         }
         const start = if (self.profile_enabled) self.profileNow() else 0;
-        const transformed = try yuku_transform.transformFile(self.allocator, self.io, module_id, default_loader);
+        const raw_source = try self.readFileCached(module_id, max_module_source_bytes);
+        const linked_source = try self.rewriteBarePackageNamedImports(module_id, raw_source);
+        defer self.allocator.free(linked_source);
+        const transformed = try yuku_transform.transformSource(self.allocator, module_id, linked_source, default_loader);
         if (self.profile_enabled) {
             self.profile_transform_ns += self.profileNow() - start;
             self.profile_transform_count += 1;
@@ -696,10 +724,7 @@ const ModuleLoaderState = struct {
 
         try self.recordCommonJsRequirePropertyRequests(module_id, folded_source);
 
-        const pruned_source = if (self.requestedExportsFor(module_id)) |requested|
-            try pruneUnrequestedCommonJsExports(self.allocator, folded_source, requested)
-        else
-            try self.allocator.dupe(u8, folded_source);
+        const pruned_source = try self.allocator.dupe(u8, folded_source);
         defer self.allocator.free(pruned_source);
         const specifiers = try collectCommonJsSpecifiers(self.allocator, pruned_source);
         defer {
@@ -714,7 +739,7 @@ const ModuleLoaderState = struct {
         }
 
         for (specifiers, 0..) |specifier, index| {
-            const resolved = self.normalizeSpecifier(module_id, specifier) catch continue;
+            const resolved = self.normalizeRequireSpecifier(module_id, specifier) catch continue;
             errdefer self.allocator.free(resolved);
 
             const lazy = try self.shouldLazyLoadCommonJsDependency(resolved);
@@ -800,7 +825,7 @@ const ModuleLoaderState = struct {
             try appendFmt(self.allocator, &out, "export const {s} = __zigCommonJSExports == null ? undefined : __zigCommonJSExports.{s};\n", .{ name, name });
         }
 
-        return out.toOwnedSlice(self.allocator);
+        return try out.toOwnedSlice(self.allocator);
     }
 
     fn shouldLazyLoadCommonJsDependency(self: *ModuleLoaderState, resolved: []const u8) !bool {
@@ -860,7 +885,7 @@ const ModuleLoaderState = struct {
             \\});
             \\
         );
-        return out.toOwnedSlice(self.allocator);
+        return try out.toOwnedSlice(self.allocator);
     }
 
     fn loadCommonJsValue(self: *ModuleLoaderState, ctx: *ModuleContext, parent_id: []const u8, specifier: []const u8, resolved_hint: []const u8) !quickjs.Value {
@@ -876,6 +901,13 @@ const ModuleLoaderState = struct {
 
         if (std.mem.endsWith(u8, resolved, ".json")) {
             return self.loadCommonJsJsonValue(ctx, resolved);
+        }
+
+        if (transform.loaderForPath(resolved)) |default_loader| {
+            if (try self.loadModuleSourceFromOnLoad(resolved, default_loader)) |hook_source| {
+                defer self.allocator.free(hook_source);
+                return self.loadOnLoadModuleAsCommonJsValue(ctx, resolved, hook_source);
+            }
         }
 
         const source = blk: {
@@ -905,6 +937,50 @@ const ModuleLoaderState = struct {
         }
         if (value.isException()) return error.EvaluationFailed;
         return value;
+    }
+
+    fn loadOnLoadModuleAsCommonJsValue(self: *ModuleLoaderState, ctx: *ModuleContext, module_id: []const u8, source: []const u8) !quickjs.Value {
+        const source_z = try self.allocator.dupeZ(u8, source);
+        defer self.allocator.free(source_z);
+        const filename_z = try self.allocator.dupeZ(u8, module_id);
+        defer self.allocator.free(filename_z);
+
+        const compiled = ctx.eval(source_z[0..source.len], filename_z, .{ .type = .module, .compile_only = true });
+        if (compiled.isException()) return error.EvaluationFailed;
+
+        try compiled.resolveModule(ctx);
+
+        const result = ctx.evalFunction(compiled);
+        if (result.isException()) return error.EvaluationFailed;
+        defer result.deinit(ctx);
+
+        if (result.isPromise()) {
+            const runtime = self.runtime orelse return error.EvaluationFailed;
+            var iterations: usize = 0;
+            while (result.promiseState(ctx) == .pending) : (iterations += 1) {
+                if (iterations > 100_000) return error.EvaluationFailed;
+                _ = runtime.executePendingJob() catch return error.EvaluationFailed;
+            }
+            if (result.promiseState(ctx) == .rejected) return error.EvaluationFailed;
+        }
+
+        const module_ptr_any = quickjs.c.JS_VALUE_GET_PTR(compiled.cval()) orelse return error.EvaluationFailed;
+        const module_ptr: *ModuleDef = @ptrCast(@alignCast(module_ptr_any));
+        const namespace = module_ptr.getNamespace(ctx);
+        if (namespace.isException()) return error.EvaluationFailed;
+        defer namespace.deinit(ctx);
+
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const converter = global.getPropertyStr(ctx, "__zigEsmNamespaceToRequireValue");
+        defer converter.deinit(ctx);
+        if (!converter.isFunction(ctx)) return namespace.dup(ctx);
+
+        const args = [_]quickjs.Value{namespace.dup(ctx)};
+        const converted = converter.call(ctx, quickjs.Value.undefined, &args);
+        args[0].deinit(ctx);
+        if (converted.isException()) return error.EvaluationFailed;
+        return converted;
     }
 
     fn loadCommonJsJsonValue(self: *ModuleLoaderState, ctx: *ModuleContext, module_id: []const u8) !quickjs.Value {
@@ -1127,7 +1203,7 @@ const ModuleLoaderState = struct {
                 continue;
             };
 
-            const resolved = self.normalizeSpecifier(module_id, specifier) catch {
+            const resolved = self.normalizeRequireSpecifier(module_id, specifier) catch {
                 cursor = require_index + "require(".len;
                 continue;
             };
@@ -1214,7 +1290,7 @@ const ModuleLoaderState = struct {
         for (specifiers) |specifier| {
             if (!isRelativeSpecifier(specifier) and !isCommonJsReexportSpecifier(source, specifier)) continue;
 
-            const resolved = self.normalizeSpecifier(module_id, specifier) catch continue;
+            const resolved = self.normalizeRequireSpecifier(module_id, specifier) catch continue;
             defer self.allocator.free(resolved);
             if (scanned.contains(resolved)) continue;
             if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) continue;
@@ -1281,14 +1357,28 @@ const ModuleLoaderState = struct {
 
         const runtime = self.runtime orelse return null;
         const start = if (self.profile_enabled) self.profileNow() else 0;
+        const debug_onload = std.c.getenv("ZIG_DOM_ONLOAD_DEBUG") != null;
+        if (debug_onload) {
+            std.debug.print("[zig-dom onload] check {s} loader={s}\n", .{ module_id, default_loader });
+        }
         var hook_result = (try runtime.loadFromOnLoad(module_id)) orelse {
             if (self.profile_enabled) self.profile_onload_ns += self.profileNow() - start;
+            if (debug_onload) {
+                std.debug.print("[zig-dom onload] miss {s}\n", .{module_id});
+            }
             return null;
         };
         if (self.profile_enabled) self.profile_onload_ns += self.profileNow() - start;
         defer hook_result.deinit(self.allocator);
 
         const effective_loader = hook_result.loader orelse default_loader;
+        if (debug_onload) {
+            const requested_text = if (self.requestedExportsFor(module_id)) |requested|
+                if (requested.all) "all" else "some"
+            else
+                "none";
+            std.debug.print("[zig-dom onload] hit {s} loader={s} requested={s} bytes={d}\n", .{ module_id, effective_loader, requested_text, hook_result.contents.len });
+        }
         if (std.mem.eql(u8, effective_loader, "js")) {
             if (looksLikeJsxSource(hook_result.contents)) {
                 return try self.transformOnLoadContents(module_id, "jsx", hook_result.contents);
@@ -1323,20 +1413,107 @@ const ModuleLoaderState = struct {
         else
             return error.UnsupportedTransformLoader;
         _ = extension;
-        const can_tree_shake = std.mem.eql(u8, loader, "ts") or
-            std.mem.eql(u8, loader, "tsx") or
-            std.mem.eql(u8, loader, "jsx");
-        const source = if (can_tree_shake) blk: {
-            const requested = self.requestedExportsFor(module_id) orelse break :blk try self.allocator.dupe(u8, contents);
-            const export_pruned = try pruneUnrequestedTsExports(self.allocator, contents, requested);
-            defer self.allocator.free(export_pruned);
-            break :blk try pruneUnusedTsConstDeclarations(self.allocator, export_pruned);
-        } else try self.allocator.dupe(u8, contents);
+        const source = try self.rewriteBarePackageNamedImports(module_id, contents);
         defer self.allocator.free(source);
 
         const transformed = try yuku_transform.transformSource(self.allocator, module_id, source, loader);
         defer self.allocator.free(transformed);
         return pruneUnusedImports(self.allocator, transformed);
+    }
+
+    fn rewriteBarePackageNamedImports(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(self.allocator);
+
+        var cursor: usize = 0;
+        var rewrite_index: usize = 0;
+        while (std.mem.indexOfPos(u8, source, cursor, "import")) |start| {
+            if (!hasWordAt(source, start, "import")) {
+                try out.appendSlice(self.allocator, source[cursor .. start + "import".len]);
+                cursor = start + "import".len;
+                continue;
+            }
+
+            const end = findImportStatementEnd(source, start);
+            const statement = source[start..end];
+            const parsed = parseImportStatement(statement) orelse {
+                try out.appendSlice(self.allocator, source[cursor..end]);
+                cursor = end;
+                continue;
+            };
+
+            const replacement = try self.buildBareNamedImportReplacement(module_id, parsed, rewrite_index);
+            if (replacement) |owned| {
+                defer self.allocator.free(owned);
+                try out.appendSlice(self.allocator, source[cursor..start]);
+                try out.appendSlice(self.allocator, owned);
+                rewrite_index += 1;
+                cursor = end;
+                if (cursor < source.len and source[cursor] == ';') cursor += 1;
+                continue;
+            }
+
+            try out.appendSlice(self.allocator, source[cursor..end]);
+            cursor = end;
+        }
+
+        try out.appendSlice(self.allocator, source[cursor..]);
+        const owned = try out.toOwnedSlice(self.allocator);
+        return owned;
+    }
+
+    fn buildBareNamedImportReplacement(
+        self: *ModuleLoaderState,
+        module_id: []const u8,
+        parsed: ParsedImportStatement,
+        rewrite_index: usize,
+    ) !?[]u8 {
+        if (parsed.all or !isBarePackageRootSpecifier(parsed.specifier)) return null;
+        const bindings = std.mem.trim(u8, parsed.bindings, " \t\r\n");
+        if (!std.mem.startsWith(u8, bindings, "{") or !std.mem.endsWith(u8, bindings, "}")) return null;
+
+        var imports: std.ArrayList(NamedImportPart) = .empty;
+        defer {
+            for (imports.items) |*part| part.deinit(self.allocator);
+            imports.deinit(self.allocator);
+        }
+
+        var parts = std.mem.tokenizeScalar(u8, bindings[1 .. bindings.len - 1], ',');
+        while (parts.next()) |raw_part| {
+            const part = std.mem.trim(u8, raw_part, " \t\r\n");
+            if (part.len == 0 or std.mem.startsWith(u8, part, "type ")) continue;
+            const as_index = std.mem.indexOf(u8, part, " as ");
+            const imported = std.mem.trim(u8, if (as_index) |idx| part[0..idx] else part, " \t\r\n");
+            const local = std.mem.trim(u8, if (as_index) |idx| part[idx + " as ".len ..] else part, " \t\r\n");
+            if (!isValidIdentifier(imported) or !isValidIdentifier(local)) return null;
+
+            const subpath_specifier = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ parsed.specifier, imported });
+            errdefer self.allocator.free(subpath_specifier);
+            const resolved = self.normalizeSpecifier(module_id, subpath_specifier) catch {
+                self.allocator.free(subpath_specifier);
+                return null;
+            };
+            self.allocator.free(resolved);
+
+            try imports.append(self.allocator, .{
+                .imported = try self.allocator.dupe(u8, imported),
+                .local = try self.allocator.dupe(u8, local),
+                .specifier = subpath_specifier,
+            });
+        }
+
+        if (imports.items.len == 0) return null;
+
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(self.allocator);
+        for (imports.items, 0..) |part, index| {
+            const ns = try std.fmt.allocPrint(self.allocator, "__zig_pkg_{d}_{d}", .{ rewrite_index, index });
+            defer self.allocator.free(ns);
+            try appendFmt(self.allocator, &out, "import * as {s} from \"{s}\";\n", .{ ns, part.specifier });
+            try appendFmt(self.allocator, &out, "const {s} = ({s}.default && {s}.default.__esModule && \"default\" in {s}.default) ? {s}.default.default : ({s}.default ?? {s}.{s} ?? {s});\n", .{ part.local, ns, ns, ns, ns, ns, ns, part.imported, ns });
+        }
+        const owned = try out.toOwnedSlice(self.allocator);
+        return owned;
     }
 
     fn recordStaticImportRequests(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) !void {
@@ -3304,6 +3481,23 @@ fn isRelativeSpecifier(specifier: []const u8) bool {
     return std.mem.startsWith(u8, specifier, "./") or std.mem.startsWith(u8, specifier, "../");
 }
 
+fn isBarePackageRootSpecifier(specifier: []const u8) bool {
+    if (specifier.len == 0) return false;
+    if (isRelativeSpecifier(specifier) or std.fs.path.isAbsolute(specifier)) return false;
+    if (builtInModuleSource(specifier) != null) return false;
+    if (std.mem.indexOfScalar(u8, specifier, ':') != null) return false;
+
+    if (specifier[0] == '@') {
+        var slash_count: usize = 0;
+        for (specifier) |ch| {
+            if (ch == '/') slash_count += 1;
+        }
+        return slash_count == 1;
+    }
+
+    return std.mem.indexOfScalar(u8, specifier, '/') == null;
+}
+
 fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
     if (std.mem.endsWith(u8, module_id, ".cjs")) {
         return true;
@@ -3846,6 +4040,16 @@ fn identifierUsedAfter(source: []const u8, start: usize, identifier: []const u8)
 
 fn isIdentifierContinue(ch: u8) bool {
     return std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '$';
+}
+
+fn isValidIdentifier(name: []const u8) bool {
+    if (name.len == 0) return false;
+    const first = name[0];
+    if (!(std.ascii.isAlphabetic(first) or first == '_' or first == '$')) return false;
+    for (name[1..]) |ch| {
+        if (!isIdentifierContinue(ch)) return false;
+    }
+    return true;
 }
 
 fn onLoadTransformExtension(loader: []const u8) ?[]const u8 {
