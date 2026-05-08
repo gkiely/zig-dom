@@ -102,7 +102,11 @@ function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string)
 
 function extractBody(html: string): string {
   const explicitBody = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1];
-  if (explicitBody != null) return explicitBody;
+  if (explicitBody != null) {
+    return explicitBody
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+      .trim();
+  }
 
   // Some WPT files place test markup at top-level without a <body> wrapper.
   return html
@@ -179,6 +183,9 @@ function generateHtmlTest(entry: ManifestEntry, wptRootPath: string, variant?: s
 
 const pending = [];
 const source = ${JSON.stringify(scripts.join("\n;\n"))};
+const __zigWptFirstTestOffset = source.search(/\\b(?:test|async_test|promise_test)\\s*\\(/);
+const __zigWptPreface = source.slice(0, __zigWptFirstTestOffset >= 0 ? __zigWptFirstTestOffset : source.length);
+const __zigWptResetPerTest = !/^var\\s+[A-Za-z_$][\\w$]*\\s*=\\s*document\\.getElementById\\(/m.test(__zigWptPreface);
 
 ${nativeWindowSetupSource(JSON.stringify(entryUrl(entry.file, variant)))}
 
@@ -203,12 +210,34 @@ function runWptSetups() {
 
 function createWptCleanupContext() {
   const cleanups = [];
+  const runStep = (fn, args = [], thisArg = undefined) => {
+    if (typeof fn !== "function") {
+      return undefined;
+    }
+    return fn.apply(thisArg, args);
+  };
   return {
     context: {
       add_cleanup(fn) {
         if (typeof fn === "function") {
           cleanups.push(fn);
         }
+      },
+      step(fn) {
+        return runStep(fn, [], this);
+      },
+      step_func(fn) {
+        const self = this;
+        return (...args) => runStep(fn, args, self);
+      },
+      step_func_done(fn) {
+        const self = this;
+        return (...args) => runStep(fn, args, self);
+      },
+      unreached_func(message) {
+        return () => {
+          throw new Error(message || "unreached");
+        };
       }
     },
     runCleanups() {
@@ -230,13 +259,48 @@ function fail(message) {
   throw new Error(message);
 }
 
+function dispatchSyntheticWindowLoad() {
+  try {
+    if (document && typeof document.dispatchEvent === "function") {
+      let domReadyEvent;
+      if (typeof document.createEvent === "function") {
+        domReadyEvent = document.createEvent("Event");
+        if (domReadyEvent && typeof domReadyEvent.initEvent === "function") {
+          domReadyEvent.initEvent("DOMContentLoaded", true, false);
+        }
+      } else if (typeof Event === "function") {
+        domReadyEvent = new Event("DOMContentLoaded", { bubbles: true });
+      }
+      if (domReadyEvent) {
+        document.dispatchEvent(domReadyEvent);
+      }
+    }
+
+    if (!window || typeof window.dispatchEvent !== "function") return;
+    let event;
+    if (document && typeof document.createEvent === "function") {
+      event = document.createEvent("Event");
+      if (event && typeof event.initEvent === "function") {
+        event.initEvent("load", false, false);
+      }
+    } else if (typeof Event === "function") {
+      event = new Event("load");
+    }
+    if (event) {
+      window.dispatchEvent(event);
+    }
+  } catch {}
+}
+
 globalThis.test = (fn, name = "test") => {
   bunTest(${JSON.stringify(entry.file)} + " :: " + name, () => {
-    resetWptDomFixture();
-    runWptSetups();
+      if (__zigWptResetPerTest) {
+        resetWptDomFixture();
+        runWptSetups();
+      }
     const cleanup = createWptCleanupContext();
     try {
-      return fn.call(cleanup.context);
+      return fn.call(cleanup.context, cleanup.context);
     } finally {
       cleanup.runCleanups();
     }
@@ -244,8 +308,10 @@ globalThis.test = (fn, name = "test") => {
 };
 globalThis.promise_test = (fn, name = "promise_test") => {
   bunTest(${JSON.stringify(entry.file)} + " :: " + name, async () => {
-    resetWptDomFixture();
-    runWptSetups();
+      if (__zigWptResetPerTest) {
+        resetWptDomFixture();
+        runWptSetups();
+      }
     const cleanup = createWptCleanupContext();
     try {
       return await fn.call(cleanup.context, cleanup.context);
@@ -257,15 +323,19 @@ globalThis.promise_test = (fn, name = "promise_test") => {
 globalThis.async_test = (first = "async_test", second) => {
   const callback = typeof first === "function" ? first : undefined;
   const name = typeof first === "string" ? first : second ?? "async_test";
+  const cleanups = [];
   let resolveDone;
   let rejectDone;
   const done = new Promise((resolve, reject) => {
     resolveDone = resolve;
     rejectDone = reject;
   });
-  const runStep = (fn, args = []) => {
+  const runStep = (fn, args = [], thisArg = undefined) => {
     try {
-      return fn(...args);
+      if (typeof fn !== "function") {
+        return undefined;
+      }
+      return fn.apply(thisArg, args);
     } catch (err) {
       rejectDone(err);
       throw err;
@@ -273,7 +343,14 @@ globalThis.async_test = (first = "async_test", second) => {
   };
   const testObject = {
     done: () => resolveDone(),
-    step: (fn) => runStep(fn),
+    add_cleanup(fn) {
+      if (typeof fn === "function") {
+        cleanups.push(fn);
+      }
+    },
+    step(fn) {
+      return runStep(fn, [], this);
+    },
     step_timeout: (fn, delay = 0) => {
       const timeoutFn = typeof globalThis.setTimeout === "function"
         ? globalThis.setTimeout.bind(globalThis)
@@ -282,13 +359,19 @@ globalThis.async_test = (first = "async_test", second) => {
             return 0;
           });
       return timeoutFn(() => {
-        runStep(fn);
+        runStep(fn, [], testObject);
       }, Number(delay) || 0);
     },
-    step_func: (fn) => (...args) => runStep(fn, args),
-    step_func_done: (fn) => (...args) => {
-      runStep(fn, args);
-      resolveDone();
+    step_func(fn) {
+      const self = this;
+      return (...args) => runStep(fn, args, self);
+    },
+    step_func_done(fn) {
+      const self = this;
+      return (...args) => {
+        runStep(fn, args, self);
+        resolveDone();
+      };
     },
     unreached_func: (message) => () => {
       const error = new Error(message || "unreached");
@@ -296,17 +379,34 @@ globalThis.async_test = (first = "async_test", second) => {
       throw error;
     }
   };
+  const runCleanups = () => {
+    for (let i = cleanups.length - 1; i >= 0; i -= 1) {
+      try {
+        cleanups[i]();
+      } catch {}
+    }
+  };
   bunTest(${JSON.stringify(entry.file)} + " :: " + name, async () => {
-    resetWptDomFixture();
-    runWptSetups();
-    if (callback) callback(testObject);
-    await done;
+      if (__zigWptResetPerTest) {
+        resetWptDomFixture();
+        runWptSetups();
+      }
+    try {
+      if (callback) callback.call(testObject, testObject);
+      dispatchSyntheticWindowLoad();
+      await done;
+    } finally {
+      runCleanups();
+    }
   });
   return testObject;
 };
 globalThis.setup = (fnOrOptions) => {
   if (typeof fnOrOptions === "function") {
     __zigWptSetups.push(fnOrOptions);
+    try {
+      fnOrOptions.call({ add_cleanup() {} });
+    } catch {}
   }
 };
 globalThis.done = () => {};
@@ -324,8 +424,36 @@ globalThis.assert_unreached = (message = "Reached unreachable code") => fail(mes
 globalThis.promise_rejects_js = async (_t, ctor, promise) => expect(promise).rejects.toThrow(ctor);
 globalThis.add_cleanup = () => {};
 
-new Function(source)();
-await Promise.all(pending);
+const __zigWptTopLevelFunctionNames = Array.from(
+  source.matchAll(/(?:^|\\n)\\s*function\\s+([A-Za-z_$][\\w$]*)\\s*\\(/g),
+  (match) => match[1]
+);
+const __zigWptExportBindings = __zigWptTopLevelFunctionNames
+  .map((name) => JSON.stringify(name) + ": (typeof " + name + " !== 'undefined' ? " + name + " : undefined)")
+  .join(", ");
+const __zigWptRunner = new Function(source + "\\nreturn {" + __zigWptExportBindings + "};");
+const __zigWptExports = __zigWptRunner();
+const __zigWptMissingExport = Symbol("__zigWptMissingExport");
+const __zigWptPreviousExports = Object.create(null);
+if (__zigWptExports && typeof __zigWptExports === "object") {
+  for (const [name, value] of Object.entries(__zigWptExports)) {
+    if (typeof value === "function") {
+      __zigWptPreviousExports[name] = Object.prototype.hasOwnProperty.call(globalThis, name) ? globalThis[name] : __zigWptMissingExport;
+      globalThis[name] = value;
+    }
+  }
+}
+try {
+  await Promise.all(pending);
+} finally {
+  for (const [name, value] of Object.entries(__zigWptPreviousExports)) {
+    if (value === __zigWptMissingExport) {
+      delete globalThis[name];
+    } else {
+      globalThis[name] = value;
+    }
+  }
+}
 `;
 }
 

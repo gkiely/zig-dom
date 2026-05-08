@@ -1680,21 +1680,51 @@ pub export fn zig_dom_window_document(window: u64, out_document: *u64) u32 {
     return STATUS_OK;
 }
 
+fn findDocumentElementHandle(win: *Window) u64 {
+    const document = resolveNode(win, win.document_handle) orelse return 0;
+    var cursor = document.first_child;
+    while (cursor != 0) {
+        const node = resolveNode(win, cursor) orelse break;
+        if (node.kind == .element) {
+            if (std.ascii.eqlIgnoreCase(node.name, "html")) return cursor;
+            return cursor;
+        }
+        cursor = node.next_sibling;
+    }
+    return 0;
+}
+
+fn findNamedElementChild(win: *Window, parent_handle: u64, tag_name: []const u8) u64 {
+    if (parent_handle == 0) return 0;
+    const parent = resolveNode(win, parent_handle) orelse return 0;
+    var cursor = parent.first_child;
+    while (cursor != 0) {
+        const node = resolveNode(win, cursor) orelse break;
+        if (node.kind == .element and std.ascii.eqlIgnoreCase(node.name, tag_name)) {
+            return cursor;
+        }
+        cursor = node.next_sibling;
+    }
+    return 0;
+}
+
 pub export fn zig_dom_window_document_element(window: u64, out_element: *u64) u32 {
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
-    out_element.* = win.html_handle;
+    out_element.* = findDocumentElementHandle(win);
     return STATUS_OK;
 }
 
 pub export fn zig_dom_window_head(window: u64, out_head: *u64) u32 {
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
-    out_head.* = win.head_handle;
+    const document_element = findDocumentElementHandle(win);
+    out_head.* = findNamedElementChild(win, document_element, "head");
     return STATUS_OK;
 }
 
 pub export fn zig_dom_window_body(window: u64, out_body: *u64) u32 {
     const win = resolveWindow(window) orelse return STATUS_INVALID_HANDLE;
-    out_body.* = win.body_handle;
+    const document_element = findDocumentElementHandle(win);
+    out_body.* = findNamedElementChild(win, document_element, "body");
     return STATUS_OK;
 }
 

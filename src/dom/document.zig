@@ -16,6 +16,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "createComment", callbacks.createComment, 1);
     try bindings.installMethod(ctx, proto, "createDocumentFragment", callbacks.createDocumentFragment, 0);
     try bindings.installMethod(ctx, proto, "createDocumentType", callbacks.createDocumentType, 3);
+    try bindings.installMethod(ctx, proto, "createEvent", callbacks.createEvent, 1);
     try bindings.installMethod(ctx, proto, "createRange", callbacks.createRange, 0);
     try bindings.installMethod(ctx, proto, "getSelection", callbacks.getSelection, 0);
     try bindings.installMethod(ctx, proto, "importNode", callbacks.importNode, 2);
