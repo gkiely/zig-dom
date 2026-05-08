@@ -21,6 +21,19 @@ function parsePositiveSeconds(value: string | undefined): number | null {
   return parsed;
 }
 
+function hasSetupArg(args: string[]): boolean {
+  return args.some((arg) => arg === "--setup" || arg.startsWith("--setup="));
+}
+
+function defaultSetupArgsForRoot(root: string | null, runnerArgs: string[]): string[] {
+  if (!root || hasSetupArg(runnerArgs)) return [];
+
+  const setupPath = join(root, "bun.setup.ts");
+  if (!existsSync(setupPath)) return [];
+
+  return ["--setup", setupPath];
+}
+
 function splitArgs(): { input: string | null; runnerArgs: string[]; timeoutMs: number } {
   const args = process.argv.slice(2);
   const runnerArgs: string[] = [];
@@ -184,10 +197,11 @@ const testArgGroups: { label: string; args: string[] }[] = input
   ? (() => {
       const groups = resolveTestFiles(input);
       return groups.map((group) => {
+        const defaultSetupArgs = defaultSetupArgsForRoot(group.root, runnerArgs);
         const label = group.root ? `${group.files.length} downstream test file${group.files.length === 1 ? "" : "s"}` : `${group.files.length} local test file${group.files.length === 1 ? "" : "s"}`;
         return {
           label,
-          args: group.root ? [...runnerArgs, "--root", group.root, ...group.files] : [...runnerArgs, ...group.files]
+          args: group.root ? [...runnerArgs, ...defaultSetupArgs, "--root", group.root, ...group.files] : [...runnerArgs, ...group.files]
         };
       });
     })()
