@@ -22,90 +22,6 @@
       "status": "skip"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendChild.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendData.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-dataChange.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-deleteData.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertBefore.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertData.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-removeChild.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceChild.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceData.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-splitText.html",
-      "subtest": "__all__",
-      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-selectNode.html",
-      "subtest": "__all__",
-      "reason": "selectNode coverage depends on eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-set.html",
-      "subtest": "__all__",
-      "reason": "range setter coverage depends on eval-visible setup globals not yet provided by the native WPT runner",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/ranges/StaticRange-constructor.html",
       "subtest": "__all__",
       "reason": "StaticRange is not implemented in the native DOM surface yet",
@@ -267,24 +183,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-indexOf-1.html",
-      "subtest": "__timeout__",
-      "reason": "heavy static NodeList perf test under 1s timeout",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-indexOf-2.html",
-      "subtest": "__timeout__",
-      "reason": "heavy static NodeList perf test under 1s timeout",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-indexOf-3.html",
-      "subtest": "__timeout__",
-      "reason": "heavy static NodeList perf test under 1s timeout",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-querySelector-All.html",
       "subtest": "__timeout__",
       "reason": "selector-heavy case exceeds 1s timeout budget",
@@ -403,6 +301,18 @@
       "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-surroundContents.html",
       "subtest": "__timeout__",
       "reason": "1s timeout budget in keep-going loop",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-selectNode.html",
+      "subtest": "__all__",
+      "reason": "Range selectNode/selectNodeContents behavior is incomplete",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-set.html",
+      "subtest": "__all__",
+      "reason": "Range setter boundary validation behavior is incomplete",
       "owner": "compat"
     },
     {
@@ -1655,90 +1565,6 @@
       "status": "skip"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-cancelBubble.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-constants.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-defaultPrevented-after-dispatch.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-defaultPrevented.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-bubble-canceled.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-detached-click.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-propagation-stopped.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-propagation.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-returnValue.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-type.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/EventTarget-dispatchEvent-returnvalue.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/events/KeyEvent-initKeyEvent.html",
-      "subtest": "__all__",
-      "reason": "Legacy document.createEvent-dependent coverage is intentionally skipped",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches-namespaced-elements.html",
       "subtest": "empty string namespace, webkitMatchesSelector",
       "reason": "WebKit-prefixed selector API coverage is intentionally skipped",
@@ -1827,6 +1653,86 @@
       "file": ".wpt-cache/web-platform-tests/dom/nodes/ParentNode-prepend.html",
       "subtest": "If node is a doctype and parent is a document with another doctype, then throw a HierarchyRequestError DOMException.",
       "reason": "prepend pre-insertion validation over document, doctype, and fragment objects is incomplete",
+      "owner": "compat"
+    }
+  ],
+  "slow": [
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-indexOf-3.html",
+      "subtest": "__all__",
+      "reason": "Measured slow default WPT entry (~14s each) from native runner timing output; keep out of default test:wpt but include in test:wpt:all",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-indexOf-2.html",
+      "subtest": "__all__",
+      "reason": "Measured slow default WPT entry (~14s each) from native runner timing output; keep out of default test:wpt but include in test:wpt:all",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/NodeList-static-length-getter-tampered-indexOf-1.html",
+      "subtest": "__all__",
+      "reason": "Measured slow default WPT entry (~14s each) from native runner timing output; keep out of default test:wpt but include in test:wpt:all",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendChild.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendData.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-dataChange.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-deleteData.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertBefore.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertData.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-removeChild.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceChild.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceData.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
+      "owner": "compat"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-splitText.html",
+      "subtest": "__all__",
+      "reason": "Range-mutations test suite requires >120s to run (long test matrix with 70+ DOM operations per test); architecture blocker resolved but needs performance investigation",
       "owner": "compat"
     }
   ]

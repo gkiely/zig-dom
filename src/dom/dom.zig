@@ -1563,61 +1563,76 @@ fn matchesAnySelectorChain(window: *Window, node_handle: u64, chains: []const Se
     return false;
 }
 
-fn collectElements(window: *Window, root_handle: u64, chains: []const SelectorChain, output: *std.ArrayListUnmanaged(u64)) !void {
-    const node = resolveNode(window, root_handle) orelse return;
-
-    if (node.kind == .element and matchesAnySelectorChain(window, root_handle, chains)) {
-        try output.append(c_allocator, root_handle);
-    }
-
-    var cursor = node.first_child;
+fn pushChildrenReverse(window: *Window, node: *const Node, stack: *std.ArrayListUnmanaged(u64)) !void {
+    var cursor = node.last_child;
     while (cursor != 0) {
-        try collectElements(window, cursor, chains, output);
+        try stack.append(c_allocator, cursor);
         const child = resolveNode(window, cursor) orelse break;
-        cursor = child.next_sibling;
+        cursor = child.prev_sibling;
+    }
+}
+
+fn collectElements(window: *Window, root_handle: u64, chains: []const SelectorChain, output: *std.ArrayListUnmanaged(u64)) !void {
+    var stack: std.ArrayListUnmanaged(u64) = .empty;
+    defer stack.deinit(c_allocator);
+    try stack.append(c_allocator, root_handle);
+    while (stack.items.len > 0) {
+        const handle = stack.items[stack.items.len - 1];
+        stack.items.len -= 1;
+        const node = resolveNode(window, handle) orelse continue;
+        if (node.kind == .element and matchesAnySelectorChain(window, handle, chains)) {
+            try output.append(c_allocator, handle);
+        }
+        try pushChildrenReverse(window, node, &stack);
     }
 }
 
 fn collectDescendantElements(window: *Window, root_handle: u64, chains: []const SelectorChain, output: *std.ArrayListUnmanaged(u64)) !void {
     const root = resolveNode(window, root_handle) orelse return;
-    var cursor = root.first_child;
-    while (cursor != 0) {
-        try collectElements(window, cursor, chains, output);
-        const child = resolveNode(window, cursor) orelse break;
-        cursor = child.next_sibling;
+    var stack: std.ArrayListUnmanaged(u64) = .empty;
+    defer stack.deinit(c_allocator);
+    try pushChildrenReverse(window, root, &stack);
+    while (stack.items.len > 0) {
+        const handle = stack.items[stack.items.len - 1];
+        stack.items.len -= 1;
+        const node = resolveNode(window, handle) orelse continue;
+        if (node.kind == .element and matchesAnySelectorChain(window, handle, chains)) {
+            try output.append(c_allocator, handle);
+        }
+        try pushChildrenReverse(window, node, &stack);
     }
 }
 
 fn findFirstElement(window: *Window, root_handle: u64, chains: []const SelectorChain) ?u64 {
-    const node = resolveNode(window, root_handle) orelse return null;
-
-    if (node.kind == .element and matchesAnySelectorChain(window, root_handle, chains)) {
-        return root_handle;
-    }
-
-    var cursor = node.first_child;
-    while (cursor != 0) {
-        if (findFirstElement(window, cursor, chains)) |match| {
-            return match;
+    var stack: std.ArrayListUnmanaged(u64) = .empty;
+    defer stack.deinit(c_allocator);
+    stack.append(c_allocator, root_handle) catch return null;
+    while (stack.items.len > 0) {
+        const handle = stack.items[stack.items.len - 1];
+        stack.items.len -= 1;
+        const node = resolveNode(window, handle) orelse continue;
+        if (node.kind == .element and matchesAnySelectorChain(window, handle, chains)) {
+            return handle;
         }
-        const child = resolveNode(window, cursor) orelse break;
-        cursor = child.next_sibling;
+        pushChildrenReverse(window, node, &stack) catch return null;
     }
-
     return null;
 }
 
 fn findFirstDescendantElement(window: *Window, root_handle: u64, chains: []const SelectorChain) ?u64 {
     const root = resolveNode(window, root_handle) orelse return null;
-    var cursor = root.first_child;
-    while (cursor != 0) {
-        if (findFirstElement(window, cursor, chains)) |match| {
-            return match;
+    var stack: std.ArrayListUnmanaged(u64) = .empty;
+    defer stack.deinit(c_allocator);
+    pushChildrenReverse(window, root, &stack) catch return null;
+    while (stack.items.len > 0) {
+        const handle = stack.items[stack.items.len - 1];
+        stack.items.len -= 1;
+        const node = resolveNode(window, handle) orelse continue;
+        if (node.kind == .element and matchesAnySelectorChain(window, handle, chains)) {
+            return handle;
         }
-        const child = resolveNode(window, cursor) orelse break;
-        cursor = child.next_sibling;
+        pushChildrenReverse(window, node, &stack) catch return null;
     }
-
     return null;
 }
 

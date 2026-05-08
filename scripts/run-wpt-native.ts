@@ -25,6 +25,7 @@ type ExpectedFailure = {
 
 type ExpectedMap = {
   expectedFailures?: ExpectedFailure[];
+  slow?: ExpectedFailure[];
 };
 
 function dedent(strings: TemplateStringsArray, ...values: unknown[]): string {
@@ -86,23 +87,29 @@ function expandVariants(entry: ManifestEntry): Array<string | undefined> {
   return variants.length > 0 ? variants : [undefined];
 }
 
-function expectedFailureFiles(manifestPath: string): Set<string> {
+function expectedEntries(expected: ExpectedMap, includeSlow: boolean): ExpectedFailure[] {
+  return includeSlow
+    ? (expected.expectedFailures ?? [])
+    : [...(expected.expectedFailures ?? []), ...(expected.slow ?? [])];
+}
+
+function expectedFailureFiles(manifestPath: string, includeSlow: boolean): Set<string> {
   const expectedPath = resolve("wpt/expected", basename(manifestPath));
   if (!existsSync(expectedPath)) return new Set();
   const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
   return new Set(
-    (expected.expectedFailures ?? [])
+    expectedEntries(expected, includeSlow)
       .filter((failure) => failure.subtest === "__all__")
       .map((failure) => failure.file.replaceAll("\\", "/"))
   );
 }
 
-function expectedFailureSubtests(manifestPath: string): Map<string, Set<string>> {
+function expectedFailureSubtests(manifestPath: string, includeSlow: boolean): Map<string, Set<string>> {
   const expectedPath = resolve("wpt/expected", basename(manifestPath));
   const map = new Map<string, Set<string>>();
   if (!existsSync(expectedPath)) return map;
   const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
-  for (const failure of expected.expectedFailures ?? []) {
+  for (const failure of expectedEntries(expected, includeSlow)) {
     if (
       !failure.subtest ||
       failure.subtest === "__all__" ||
@@ -741,6 +748,7 @@ function generateHtmlTest(
       __zigWptSetups.push(fnOrOptions);
       try {
         fnOrOptions.call({ add_cleanup() {} });
+        __zigWptSyncEvalGlobalsToWindow();
       } catch {}
       return;
     }
@@ -808,10 +816,25 @@ function generateHtmlTest(
   globalThis.assert_unreached = (message = "Reached unreachable code") => fail(message);
   globalThis.promise_rejects_js = async (_t, ctor, promise) => expect(promise).rejects.toThrow(ctor);
   globalThis.add_cleanup = () => {};
+  function __zigWptSyncEvalGlobalsToWindow() {
+    if (!window || typeof window !== "object") return;
+    for (const name of Object.getOwnPropertyNames(globalThis)) {
+      if (name in window) continue;
+      try {
+        window[name] = globalThis[name];
+      } catch {}
+    }
+  }
 
   // Indirect eval runs scripts in the global scope, matching browser script tag semantics.
+  // Strip "use strict" directives: in a browser each <script> tag's var declarations land
+  // on window regardless of strict mode, but QuickJS indirect-eval in strict mode scopes
+  // vars to the eval block rather than globalThis, breaking eval("paras[0]") etc.
+  const __zigWptSource = source.replace(/^\s*["']use strict["'];?\s*/gm, "");
+  __zigWptSyncEvalGlobalsToWindow();
   try {
-    (0, eval)(source);
+    (0, eval)(__zigWptSource);
+    __zigWptSyncEvalGlobalsToWindow();
   } catch (err) {
     if (!__zigWptSingleTestMode) throw err;
     __zigWptSingleTestError = __zigWptSingleTestError ?? err;
@@ -841,12 +864,13 @@ const entryCount = optionalNumberArg("--entry-count");
 const batchSize = optionalNumberArg("--batch-size") ?? 1;
 const timeoutMs = optionalNumberArg("--timeout-ms");
 const optimizeMode = optionalArg("--optimize");
+const includeSlow = process.argv.includes("--include-slow");
 const defaultGeneratedDir = `wpt/.native-generated/${basename(manifestPath, ".json")}`;
 const outDir = resolve(optionalArg("--generated-dir") ?? defaultGeneratedDir);
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
-const skipExpectedFiles = expectedFailureFiles(manifestPath);
-const skipExpectedSubtests = expectedFailureSubtests(manifestPath);
+const skipExpectedFiles = expectedFailureFiles(manifestPath, includeSlow);
+const skipExpectedSubtests = expectedFailureSubtests(manifestPath, includeSlow);
 const expanded = manifest.tests.flatMap((entry) =>
   expandVariants(entry).map((variant) => ({ entry, variant }))
 );
@@ -859,6 +883,7 @@ rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
 const generatedFiles: string[] = [];
+const generatedEntries = new Map<string, string>();
 for (const [index, { entry, variant }] of selected.entries()) {
   if (skipExpectedFiles.has(entry.file.replaceAll("\\", "/"))) {
     console.warn(`NATIVE_WPT skipped=${entry.file} reason=expected_failure`);
@@ -876,6 +901,7 @@ for (const [index, { entry, variant }] of selected.entries()) {
     : generateAnyTest(outFile, entry, variant);
   writeFileSync(outFile, source);
   generatedFiles.push(outFile);
+  generatedEntries.set(outFile, entry.file.replaceAll("\\", "/"));
 }
 
 console.log(
@@ -905,11 +931,19 @@ for (let offset = 0; offset < generatedFiles.length; offset += batchSize) {
     }
     zigArgs.push("run", "--", "test", ...batch, "--dom");
 
+    const startedAt = performance.now();
     const result = spawnSync("zig", zigArgs, {
       encoding: "utf8",
       maxBuffer: 20 * 1024 * 1024,
       timeout: timeoutMs
     });
+    const elapsedMs = performance.now() - startedAt;
+    const batchNames = batch
+      .map((file) => generatedEntries.get(file) ?? file)
+      .join(",");
+    console.log(
+      `NATIVE_WPT timing batch=${batchIndex}/${batchTotal} ms=${elapsedMs.toFixed(1)} files=${batchNames}`
+    );
 
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);

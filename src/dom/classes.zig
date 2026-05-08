@@ -290,6 +290,23 @@ pub const DomClasses = struct {
                 global.setPropertyStr(ctx, name, bound.dup(ctx)) catch return error.PropertyAccessFailed;
             }
         }
+        // Bind window.getSelection as a global function so bare getSelection() calls work.
+        {
+            const gs_method = window.getPropertyStr(ctx, "getSelection");
+            defer gs_method.deinit(ctx);
+            if (!gs_method.isException() and !gs_method.isUndefined()) {
+                const bind = gs_method.getPropertyStr(ctx, "bind");
+                defer bind.deinit(ctx);
+                const bound = if (!bind.isException() and bind.isFunction(ctx))
+                    bind.call(ctx, gs_method, &.{window})
+                else
+                    gs_method.dup(ctx);
+                defer bound.deinit(ctx);
+                if (!bound.isException()) {
+                    global.setPropertyStr(ctx, "getSelection", bound.dup(ctx)) catch return error.PropertyAccessFailed;
+                }
+            }
+        }
     }
 
     fn installScaffold(self: *DomClasses, rt: *quickjs.Runtime, ctx: *quickjs.Context) DomClassesError!void {
@@ -1245,6 +1262,25 @@ fn jsDocumentGetSelection(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value,
     installMethod(ctx, selection, "toString", jsSelectionToString, 0) catch return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "__zigSelection", selection.dup(ctx)) catch return quickjs.Value.exception;
     return selection;
+}
+
+fn jsWindowGetSelection(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    // Delegate to document.getSelection() so all callers share the same Selection object.
+    const doc = this_value.getPropertyStr(ctx, "document");
+    defer doc.deinit(ctx);
+    if (doc.isException() or !doc.isObject()) {
+        // Fallback: use the global document
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const global_doc = global.getPropertyStr(ctx, "document");
+        defer global_doc.deinit(ctx);
+        if (!global_doc.isException() and global_doc.isObject()) {
+            return jsDocumentGetSelection(ctx_opt, global_doc, &.{});
+        }
+        return quickjs.Value.null;
+    }
+    return jsDocumentGetSelection(ctx_opt, doc, &.{});
 }
 
 fn jsConstructWindow(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
@@ -6401,7 +6437,7 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
 
     const document = createLightXmlDocument(ctx);
     if (document.isException() or !document.isObject()) return document;
-    
+
     const xml_document_ctor = global.getPropertyStr(ctx, "XMLDocument");
     defer xml_document_ctor.deinit(ctx);
     if (!xml_document_ctor.isException() and xml_document_ctor.isObject()) {
@@ -6411,7 +6447,7 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
             document.setPrototype(ctx, xml_document_proto) catch return quickjs.Value.exception;
         }
     }
-    
+
     const HTML_NS = "http://www.w3.org/1999/xhtml";
     const SVG_NS = "http://www.w3.org/2000/svg";
     const content_type = if (namespace_slice != null and std.mem.eql(u8, namespace_slice.?, HTML_NS))
@@ -9049,6 +9085,7 @@ fn createWindowObject(ctx: *quickjs.Context, window_handle: u64, document: quick
     }
     installFrameCharacterDataConstructor(ctx, obj, document, "Text", "createTextNode") catch return quickjs.Value.exception;
     installFrameCharacterDataConstructor(ctx, obj, document, "Comment", "createComment") catch return quickjs.Value.exception;
+    installMethod(ctx, obj, "getSelection", jsWindowGetSelection, 0) catch return quickjs.Value.exception;
     return obj;
 }
 
