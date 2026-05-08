@@ -123,6 +123,7 @@ const ElementCallbacks = struct {
 
 const DocumentCallbacks = struct {
     pub const documentElementGet = jsDocumentElementGet;
+    pub const doctypeGet = jsDocumentDoctypeGet;
     pub const headGet = jsDocumentHeadGet;
     pub const bodyGet = jsDocumentBodyGet;
     pub const defaultViewGet = jsDocumentDefaultViewGet;
@@ -385,6 +386,11 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     doctype_proto.setPrototype(ctx, node_proto) catch return error.PropertyAccessFailed;
     const document_proto = try installConstructor(ctx, global, "Document", jsConstructDocument);
     document_proto.setPrototype(ctx, node_proto) catch return error.PropertyAccessFailed;
+    const document_ctor_for_xml = global.getPropertyStr(ctx, "Document");
+    defer document_ctor_for_xml.deinit(ctx);
+    if (!document_ctor_for_xml.isException()) {
+        global.setPropertyStr(ctx, "XMLDocument", document_ctor_for_xml.dup(ctx)) catch return error.PropertyAccessFailed;
+    }
     const object_ctor = global.getPropertyStr(ctx, "Object");
     defer object_ctor.deinit(ctx);
     if (!object_ctor.isException()) {
@@ -1047,6 +1053,14 @@ fn jsConstructDocumentType(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_arg
     node.setPropertyStr(ctx, "_nodeTypeOverride", quickjs.Value.initInt64(10)) catch return quickjs.Value.exception;
     node.setPropertyStr(ctx, "_nodeNameOverride", quickjs.Value.initStringLen(ctx, text)) catch return quickjs.Value.exception;
     node.setPropertyStr(ctx, "name", quickjs.Value.initStringLen(ctx, text)) catch return quickjs.Value.exception;
+    const public_id = if (args.len >= 2) parseStringArg(ctx, args, 1, "DocumentType") else null;
+    defer if (public_id) |value| ctx.freeCString(value.ptr);
+    const public_text = if (public_id) |value| value.ptr[0..value.len] else "";
+    node.setPropertyStr(ctx, "publicId", quickjs.Value.initStringLen(ctx, public_text)) catch return quickjs.Value.exception;
+    const system_id = if (args.len >= 3) parseStringArg(ctx, args, 2, "DocumentType") else null;
+    defer if (system_id) |value| ctx.freeCString(value.ptr);
+    const system_text = if (system_id) |value| value.ptr[0..value.len] else "";
+    node.setPropertyStr(ctx, "systemId", quickjs.Value.initStringLen(ctx, system_text)) catch return quickjs.Value.exception;
     return node;
 }
 
@@ -2031,6 +2045,21 @@ fn jsNodeOwnerDocumentGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value)
     const this_handle = parseThisHandle(ctx, this_value, "ownerDocument") orelse return quickjs.Value.exception;
     if (zig_dom.zig_dom_node_type(this_handle) == 9) {
         return quickjs.Value.null;
+    }
+
+    const parent_handle = zig_dom.zig_dom_node_parent(this_handle);
+    if (parent_handle != 0) {
+        const parent = wrapNodeHandle(ctx, parent_handle);
+        if (parent.isObject()) {
+            const override = parent.getPropertyStr(ctx, "_nodeTypeOverride");
+            defer override.deinit(ctx);
+            if (!override.isException() and (override.toInt64(ctx) catch 0) == 9) {
+                return parent;
+            }
+            parent.deinit(ctx);
+        } else {
+            parent.deinit(ctx);
+        }
     }
 
     var document_handle: u64 = 0;
@@ -3991,7 +4020,26 @@ fn jsElementGetClientRects(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []co
 }
 
 fn jsDocumentElementGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if ((getIntProperty(ctx, this_value, "_nodeTypeOverride") orelse 0) == 9) {
+        const document_handle = parseThisHandle(ctx, this_value, "documentElement") orelse return quickjs.Value.exception;
+        var child = zig_dom.zig_dom_node_first_child(document_handle);
+        while (child != 0) : (child = zig_dom.zig_dom_node_next_sibling(child)) {
+            if (zig_dom.zig_dom_node_type(child) == 1) return wrapNodeHandle(ctx, child);
+        }
+        return quickjs.Value.null;
+    }
     return documentWindowNodeGet(ctx_opt, this_value, "documentElement", zig_dom.zig_dom_window_document_element);
+}
+
+fn jsDocumentDoctypeGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const document_handle = parseThisHandle(ctx, this_value, "doctype") orelse return quickjs.Value.exception;
+    var child = zig_dom.zig_dom_node_first_child(document_handle);
+    while (child != 0) : (child = zig_dom.zig_dom_node_next_sibling(child)) {
+        if (zig_dom.zig_dom_node_type(child) == 10) return wrapNodeHandle(ctx, child);
+    }
+    return quickjs.Value.null;
 }
 
 fn jsDocumentHeadGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
@@ -4866,29 +4914,163 @@ fn jsImplementationLightDocumentCreateElement(ctx_opt: ?*quickjs.Context, _: qui
     return jsDocumentCreateElement(ctx, document, raw_args);
 }
 
-fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+fn jsLightDocumentAppendChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len == 0 or !args[0].isObject()) return throwOperationMessage(ctx, "appendChild", "child must be a node");
+    const child_nodes = this_value.getPropertyStr(ctx, "childNodes");
+    defer child_nodes.deinit(ctx);
+    if (child_nodes.isException() or !child_nodes.isObject()) return quickjs.Value.exception;
+    const length_value = child_nodes.getPropertyStr(ctx, "length");
+    defer length_value.deinit(ctx);
+    const length = @as(u32, @intCast(length_value.toInt64(ctx) catch 0));
+    child_nodes.setPropertyUint32(ctx, length, args[0].dup(ctx)) catch return quickjs.Value.exception;
+    defineDataPropertyStr(ctx, args[0], "parentNode", this_value.dup(ctx)) catch return quickjs.Value.exception;
+    installMethod(ctx, args[0], "remove", jsLightChildRemove, 0) catch return quickjs.Value.exception;
+    return args[0].dup(ctx);
+}
+
+fn jsLightChildRemove(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const parent = this_value.getPropertyStr(ctx, "parentNode");
+    defer parent.deinit(ctx);
+    if (parent.isException() or !parent.isObject()) return quickjs.Value.undefined;
+    const child_nodes = parent.getPropertyStr(ctx, "childNodes");
+    defer child_nodes.deinit(ctx);
+    if (child_nodes.isException() or !child_nodes.isObject()) return quickjs.Value.undefined;
+
+    const next_child_nodes = quickjs.Value.initArray(ctx);
+    if (next_child_nodes.isException()) return next_child_nodes;
+    const length_value = child_nodes.getPropertyStr(ctx, "length");
+    defer length_value.deinit(ctx);
+    const length = @as(u32, @intCast(length_value.toInt64(ctx) catch 0));
+    const this_handle = parseThisHandle(ctx, this_value, "remove") orelse 0;
+    var next_index: u32 = 0;
+    var index: u32 = 0;
+    while (index < length) : (index += 1) {
+        const child = child_nodes.getPropertyUint32(ctx, index);
+        defer child.deinit(ctx);
+        if (child.isException()) continue;
+        const child_handle = parseThisHandle(ctx, child, "remove") orelse 0;
+        if (child_handle == this_handle) continue;
+        next_child_nodes.setPropertyUint32(ctx, next_index, child.dup(ctx)) catch return quickjs.Value.exception;
+        next_index += 1;
+    }
+    parent.setPropertyStr(ctx, "childNodes", next_child_nodes) catch return quickjs.Value.exception;
+    defineDataPropertyStr(ctx, this_value, "parentNode", quickjs.Value.null) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len < 2) {
+        _ = ctx.throwTypeError("createDocument requires namespace and qualifiedName");
+        return quickjs.Value.exception;
+    }
+
+    const namespace = if (args[0].isNull() or args[0].isUndefined()) null else parseStringArg(ctx, args, 0, "createDocument");
+    defer if (namespace) |value| ctx.freeCString(value.ptr);
+    const namespace_slice_raw = if (namespace) |value| value.ptr[0..value.len] else null;
+    const namespace_slice = if (namespace_slice_raw) |value| if (value.len == 0) null else value else null;
+
+    const qualified_name = if (args[1].isNull() or args[1].isUndefined()) null else parseStringArg(ctx, args, 1, "createDocument");
+    defer if (qualified_name) |value| ctx.freeCString(value.ptr);
+    const qualified_slice = if (qualified_name) |value| value.ptr[0..value.len] else null;
+    const omit_root = qualified_slice == null or qualified_slice.?.len == 0;
+    if (!omit_root) {
+        if (!isValidCreateElementNSQualifiedName(qualified_slice.?)) return throwOperationMessage(ctx, "createDocument", "INVALID_CHARACTER_ERR");
+        if (!isValidCreateElementNSNamespace(namespace_slice, qualified_slice.?)) return throwOperationMessage(ctx, "createDocument", "NAMESPACE_ERR");
+    }
+
+    if (args.len >= 3 and !args[2].isNull() and !args[2].isUndefined() and !args[2].isObject()) {
+        _ = ctx.throwTypeError("createDocument doctype must be a DocumentType or null");
+        return quickjs.Value.exception;
+    }
+
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
+    const has_doctype = args.len >= 3 and args[2].isObject();
+
+    if (omit_root and !has_doctype) {
+        const document = quickjs.Value.initObject(ctx);
+        if (document.isException()) return document;
+        const child_nodes = quickjs.Value.initArray(ctx);
+        if (child_nodes.isException()) return child_nodes;
+        document.setPropertyStr(ctx, "childNodes", child_nodes) catch return quickjs.Value.exception;
+        installMethod(ctx, document, "appendChild", jsLightDocumentAppendChild, 1) catch return quickjs.Value.exception;
+        installMethod(ctx, document, "createAttribute", jsDocumentCreateAttribute, 1) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "__zigIsXmlDocument", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "location", quickjs.Value.null) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "compatMode", quickjs.Value.initStringLen(ctx, "CSS1Compat")) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "characterSet", quickjs.Value.initStringLen(ctx, "UTF-8")) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "charset", quickjs.Value.initStringLen(ctx, "UTF-8")) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "inputEncoding", quickjs.Value.initStringLen(ctx, "UTF-8")) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "URL", quickjs.Value.initStringLen(ctx, "about:blank")) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "documentURI", quickjs.Value.initStringLen(ctx, "about:blank")) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "contentType", quickjs.Value.initStringLen(ctx, "application/xml")) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "documentElement", quickjs.Value.null) catch return quickjs.Value.exception;
+        document.setPropertyStr(ctx, "doctype", quickjs.Value.null) catch return quickjs.Value.exception;
+        return document;
+    }
+
     const main_document = global.getPropertyStr(ctx, "document");
     defer main_document.deinit(ctx);
     if (main_document.isException() or !main_document.isObject()) return quickjs.Value.exception;
 
     const document = jsDocumentCreateDocumentFragment(ctx, main_document, &.{});
     if (document.isException() or !document.isObject()) return document;
-    const document_ctor = global.getPropertyStr(ctx, "Document");
-    defer document_ctor.deinit(ctx);
-    if (!document_ctor.isException() and document_ctor.isObject()) {
-        const document_proto = document_ctor.getPropertyStr(ctx, "prototype");
-        defer document_proto.deinit(ctx);
-        if (!document_proto.isException() and document_proto.isObject()) {
-            document.setPrototype(ctx, document_proto) catch return quickjs.Value.exception;
+    const xml_document_ctor = global.getPropertyStr(ctx, "XMLDocument");
+    defer xml_document_ctor.deinit(ctx);
+    if (!xml_document_ctor.isException() and xml_document_ctor.isObject()) {
+        const xml_document_proto = xml_document_ctor.getPropertyStr(ctx, "prototype");
+        defer xml_document_proto.deinit(ctx);
+        if (!xml_document_proto.isException() and xml_document_proto.isObject()) {
+            document.setPrototype(ctx, xml_document_proto) catch return quickjs.Value.exception;
         }
     }
     document.setPropertyStr(ctx, "_nodeTypeOverride", quickjs.Value.initInt64(9)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "_nodeNameOverride", quickjs.Value.initStringLen(ctx, "#document")) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "__zigIsXmlDocument", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "location", quickjs.Value.null) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "compatMode", quickjs.Value.initStringLen(ctx, "CSS1Compat")) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "characterSet", quickjs.Value.initStringLen(ctx, "UTF-8")) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "charset", quickjs.Value.initStringLen(ctx, "UTF-8")) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "inputEncoding", quickjs.Value.initStringLen(ctx, "UTF-8")) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "URL", quickjs.Value.initStringLen(ctx, "about:blank")) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "documentURI", quickjs.Value.initStringLen(ctx, "about:blank")) catch return quickjs.Value.exception;
+    const HTML_NS = "http://www.w3.org/1999/xhtml";
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const content_type = if (namespace_slice != null and std.mem.eql(u8, namespace_slice.?, HTML_NS))
+        "application/xhtml+xml"
+    else if (namespace_slice != null and std.mem.eql(u8, namespace_slice.?, SVG_NS))
+        "image/svg+xml"
+    else
+        "application/xml";
+    document.setPropertyStr(ctx, "contentType", quickjs.Value.initStringLen(ctx, content_type)) catch return quickjs.Value.exception;
+
+    if (!omit_root) {
+        const namespace_value = if (namespace_slice) |value| quickjs.Value.initStringLen(ctx, value) else quickjs.Value.null;
+        defer namespace_value.deinit(ctx);
+        const qualified_value = quickjs.Value.initStringLen(ctx, qualified_slice.?);
+        defer qualified_value.deinit(ctx);
+        const root = jsDocumentCreateElementNS(ctx, document, @ptrCast(&[_]quickjs.Value{ namespace_value, qualified_value }));
+        if (root.isException()) return quickjs.Value.exception;
+        defer root.deinit(ctx);
+        const appended = jsNodeAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{root}));
+        defer appended.deinit(ctx);
+        if (appended.isException()) return quickjs.Value.exception;
+    }
+
+    const doctype = if (args.len >= 3 and args[2].isObject()) args[2].dup(ctx) else quickjs.Value.null;
+    defer doctype.deinit(ctx);
+    if (doctype.isObject()) {
+        const appended = jsNodeAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{doctype}));
+        defer appended.deinit(ctx);
+        if (appended.isException()) return quickjs.Value.exception;
+    }
     return document;
 }
 
@@ -6658,6 +6840,9 @@ fn elementConstructorName(ctx: *quickjs.Context, handle: u64) [*:0]const u8 {
     const local = cstr.ptr[0..cstr.len];
     if (std.ascii.eqlIgnoreCase(local, "input")) return "HTMLInputElement";
     if (std.ascii.eqlIgnoreCase(local, "body")) return "HTMLBodyElement";
+    if (std.ascii.eqlIgnoreCase(local, "html")) return "HTMLHtmlElement";
+    if (std.ascii.eqlIgnoreCase(local, "head")) return "HTMLHeadElement";
+    if (std.ascii.eqlIgnoreCase(local, "title")) return "HTMLTitleElement";
     if (std.ascii.eqlIgnoreCase(local, "frameset")) return "HTMLFrameSetElement";
     if (std.ascii.eqlIgnoreCase(local, "button")) return "HTMLButtonElement";
     if (std.ascii.eqlIgnoreCase(local, "form")) return "HTMLFormElement";

@@ -21,6 +21,9 @@ pub const node_constants = [_]NodeConstant{
 pub const html_element_constructors = [_][:0]const u8{
     "HTMLInputElement",
     "HTMLBodyElement",
+    "HTMLHtmlElement",
+    "HTMLHeadElement",
+    "HTMLTitleElement",
     "HTMLFrameSetElement",
     "HTMLButtonElement",
     "HTMLFormElement",
@@ -52,6 +55,7 @@ pub const window_constructor_exports = [_][*:0]const u8{
     "HTMLElement",
     "SVGElement",
     "Document",
+    "XMLDocument",
     "DOMImplementation",
     "DocumentFragment",
     "DocumentType",

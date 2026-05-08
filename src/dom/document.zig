@@ -5,6 +5,7 @@ const DomClassesError = bindings.DomClassesError;
 
 pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime callbacks: type) DomClassesError!void {
     try bindings.installGetter(ctx, proto, "documentElement", callbacks.documentElementGet);
+    try bindings.installGetter(ctx, proto, "doctype", callbacks.doctypeGet);
     try bindings.installGetter(ctx, proto, "head", callbacks.headGet);
     try bindings.installGetter(ctx, proto, "body", callbacks.bodyGet);
     try bindings.installGetter(ctx, proto, "defaultView", callbacks.defaultViewGet);
