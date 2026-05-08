@@ -15,6 +15,10 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "createComment", callbacks.createComment, 1);
     try bindings.installMethod(ctx, proto, "createDocumentFragment", callbacks.createDocumentFragment, 0);
     try bindings.installMethod(ctx, proto, "createDocumentType", callbacks.createDocumentType, 3);
+    try bindings.installMethod(ctx, proto, "createRange", callbacks.createRange, 0);
+    try bindings.installMethod(ctx, proto, "getSelection", callbacks.getSelection, 0);
+    try bindings.installMethod(ctx, proto, "importNode", callbacks.importNode, 2);
+    try bindings.installMethod(ctx, proto, "adoptNode", callbacks.adoptNode, 1);
     try bindings.installMethod(ctx, proto, "getElementById", callbacks.getElementById, 1);
     try bindings.installMethod(ctx, proto, "querySelector", callbacks.querySelector, 1);
     try bindings.installMethod(ctx, proto, "querySelectorAll", callbacks.querySelectorAll, 1);

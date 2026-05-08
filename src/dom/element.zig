@@ -9,6 +9,8 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installGetter(ctx, proto, "namespaceURI", callbacks.namespaceUriGet);
     try bindings.installAccessor(ctx, proto, "id", callbacks.idGet, callbacks.idSet);
     try bindings.installAccessor(ctx, proto, "className", callbacks.classNameGet, callbacks.classNameSet);
+    try bindings.installAccessor(ctx, proto, "title", callbacks.titleGet, callbacks.titleSet);
+    try bindings.installAccessor(ctx, proto, "htmlFor", callbacks.htmlForGet, callbacks.htmlForSet);
     try bindings.installAccessor(ctx, proto, "innerHTML", callbacks.innerHtmlGet, callbacks.innerHtmlSet);
     try bindings.installGetter(ctx, proto, "outerHTML", callbacks.outerHtmlGet);
     try bindings.installGetter(ctx, proto, "style", callbacks.styleGet);
@@ -29,6 +31,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "matches", callbacks.matches, 1);
     try bindings.installMethod(ctx, proto, "closest", callbacks.closest, 1);
     try bindings.installMethod(ctx, proto, "insertAdjacentHTML", callbacks.insertAdjacentHTML, 2);
+    try bindings.installMethod(ctx, proto, "attachShadow", callbacks.attachShadow, 1);
     try bindings.installMethod(ctx, proto, "getBoundingClientRect", callbacks.getBoundingClientRect, 0);
     try bindings.installMethod(ctx, proto, "getClientRects", callbacks.getClientRects, 0);
     try bindings.installMethod(ctx, proto, "focus", callbacks.focus, 0);

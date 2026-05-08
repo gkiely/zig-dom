@@ -47,6 +47,7 @@ pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
     try linkWindowProperty(ctx, global, window, "Response");
     try linkWindowProperty(ctx, global, window, "FormData");
     try linkWindowProperty(ctx, global, window, "Blob");
+    try linkWindowProperty(ctx, global, window, "File");
     try linkWindowProperty(ctx, global, window, "fetch");
     try linkWindowProperty(ctx, global, window, "Image");
     try linkWindowProperty(ctx, global, window, "Intl");
@@ -291,6 +292,11 @@ fn installFetchApi(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!v
         const ctor = quickjs.Value.initCFunction2(ctx, jsBlobCtor, "Blob", 1, .constructor_or_func, 0);
         if (ctor.isException()) return error.JSError;
         global.setPropertyStr(ctx, "Blob", ctor) catch return error.JSError;
+    }
+    if (isMissing(ctx, global, "File")) {
+        const ctor = quickjs.Value.initCFunction2(ctx, jsFileCtor, "File", 2, .constructor_or_func, 0);
+        if (ctor.isException()) return error.JSError;
+        global.setPropertyStr(ctx, "File", ctor) catch return error.JSError;
     }
     // Always install a runner-specific FormData to support new FormData(form) in DOM tests.
     const form_data_ctor = quickjs.Value.initCFunction2(ctx, jsFormDataCtor, "FormData", 1, .constructor_or_func, 0);
@@ -978,6 +984,16 @@ fn jsBlobCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quic
     return obj;
 }
 
+fn jsFileCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const obj = jsBlobCtor(ctx, quickjs.Value.undefined, args);
+    if (obj.isException()) return obj;
+    const name = if (args.len > 1) quickjs.Value.fromCVal(args[1]).toCStringLen(ctx) else null;
+    defer if (name) |text| ctx.freeCString(text.ptr);
+    obj.setPropertyStr(ctx, "name", quickjs.Value.initStringLen(ctx, if (name) |text| text.ptr[0..text.len] else "")) catch return quickjs.Value.exception;
+    return obj;
+}
+
 fn jsBodyText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const body = this_value.getPropertyStr(ctx, "__zigBody");
@@ -1017,9 +1033,18 @@ fn jsBodyArrayBuffer(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.
     return quickjs.Value.undefined;
 }
 
-fn jsFetch(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsFetch(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    return ctx.throwInternalError("fetch is not implemented in this runner; mock global.fetch in setup");
+    const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    defer if (input) |text| ctx.freeCString(text.ptr);
+    const url = if (input) |text| text.ptr[0..text.len] else "";
+    const body = if (std.mem.startsWith(u8, url, "data:")) blk: {
+        const comma = std.mem.indexOfScalar(u8, url, ',') orelse url.len;
+        break :blk url[@min(comma + 1, url.len)..];
+    } else "";
+    var response_args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, body)};
+    defer response_args[0].deinit(ctx);
+    return jsResponseCtor(ctx, quickjs.Value.undefined, @ptrCast(&response_args));
 }
 
 fn jsImageCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
@@ -1180,8 +1205,23 @@ fn jsStorageClear(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []
     return quickjs.Value.undefined;
 }
 
-fn jsStorageKey(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
-    return quickjs.Value.null;
+fn jsStorageKey(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const index = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toInt64(ctx) catch 0 else 0;
+    const data = this_value.getPropertyStr(ctx, "__zigStorageData");
+    defer data.deinit(ctx);
+    if (data.isException() or !data.isObject()) return quickjs.Value.null;
+    const keys_fn = getObjectKeys(ctx) catch return quickjs.Value.null;
+    defer keys_fn.deinit(ctx);
+    const keys = keys_fn.call(ctx, quickjs.Value.undefined, &.{data});
+    defer keys.deinit(ctx);
+    if (keys.isException() or index < 0 or index > std.math.maxInt(u32)) return quickjs.Value.null;
+    const key = keys.getPropertyUint32(ctx, @intCast(index));
+    if (key.isException() or key.isUndefined()) {
+        key.deinit(ctx);
+        return quickjs.Value.null;
+    }
+    return key;
 }
 
 fn pathBuiltin(ctx: *quickjs.Context) quickjs.Value {

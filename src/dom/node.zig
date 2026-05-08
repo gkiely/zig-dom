@@ -25,7 +25,10 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installAccessor(ctx, proto, "nodeValue", callbacks.nodeValueGet, callbacks.nodeValueSet);
     try bindings.installGetter(ctx, proto, "outerHTML", callbacks.outerHtmlGet);
     try bindings.installMethod(ctx, proto, "contains", callbacks.contains, 1);
+    try bindings.installMethod(ctx, proto, "getRootNode", callbacks.getRootNode, 0);
     try bindings.installMethod(ctx, proto, "compareDocumentPosition", callbacks.compareDocumentPosition, 1);
+    try bindings.installMethod(ctx, proto, "isEqualNode", callbacks.isEqualNode, 1);
+    try bindings.installMethod(ctx, proto, "normalize", callbacks.normalize, 0);
     try bindings.installMethod(ctx, proto, "appendChild", callbacks.appendChild, 1);
     try bindings.installMethod(ctx, proto, "append", callbacks.append, 1);
     try bindings.installMethod(ctx, proto, "prepend", callbacks.prepend, 1);

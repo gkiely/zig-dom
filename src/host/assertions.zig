@@ -20,6 +20,7 @@ const Matcher = enum(i32) {
     toBeDefined = 14,
     toBeUndefined = 15,
     toHaveLength = 16,
+    toBeTrue = 17,
 };
 
 pub fn install(ctx: *quickjs.Context) AssertionError!void {
@@ -219,6 +220,7 @@ fn installBuiltinMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted
     try installMatcher(ctx, object, "toHaveTextContent", .toHaveTextContent, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toHaveBeenNthCalledWith", .toHaveBeenNthCalledWith, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toBeTruthy", .toBeTruthy, inverted, received.dup(ctx));
+    try installMatcher(ctx, object, "toBeTrue", .toBeTrue, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toBeNull", .toBeNull, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toBeDefined", .toBeDefined, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toBeUndefined", .toBeUndefined, inverted, received.dup(ctx));
@@ -431,6 +433,7 @@ fn jsMatcher(
         .toHaveTextContent => matcherToHaveTextContent(ctx, received, args),
         .toHaveBeenNthCalledWith => matcherToHaveBeenNthCalledWith(ctx, received, args),
         .toBeTruthy => matcherToBeTruthy(ctx, received),
+        .toBeTrue => matcherToBeTrue(received),
         .toBeNull => matcherToBeNull(received),
         .toBeDefined => matcherToBeDefined(received),
         .toBeUndefined => matcherToBeUndefined(received),
@@ -837,6 +840,10 @@ fn matcherToBeTruthy(ctx: *quickjs.Context, received: quickjs.Value) !bool {
     return received.toBool(ctx) catch false;
 }
 
+fn matcherToBeTrue(received: quickjs.Value) !bool {
+    return received.isBool() and received.toBoolNoCtx();
+}
+
 fn matcherToBeNull(received: quickjs.Value) !bool {
     return received.isNull();
 }
@@ -1070,6 +1077,7 @@ fn throwMatcherError(ctx: *quickjs.Context, matcher: Matcher, inverted: bool) qu
         .toHaveTextContent => "toHaveTextContent",
         .toHaveBeenNthCalledWith => "toHaveBeenNthCalledWith",
         .toBeTruthy => "toBeTruthy",
+        .toBeTrue => "toBeTrue",
         .toBeNull => "toBeNull",
         .toBeDefined => "toBeDefined",
         .toBeUndefined => "toBeUndefined",

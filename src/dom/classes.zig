@@ -47,7 +47,10 @@ const NodeCallbacks = struct {
     pub const nodeValueSet = jsNodeValueSet;
     pub const outerHtmlGet = jsNodeOuterHtmlGet;
     pub const contains = jsNodeContains;
+    pub const getRootNode = jsNodeGetRootNode;
     pub const compareDocumentPosition = jsNodeCompareDocumentPosition;
+    pub const isEqualNode = jsNodeIsEqualNode;
+    pub const normalize = jsNodeNormalize;
     pub const appendChild = jsNodeAppendChild;
     pub const append = jsNodeAppend;
     pub const prepend = jsNodePrepend;
@@ -65,6 +68,10 @@ const ElementCallbacks = struct {
     pub const idSet = jsElementIdSet;
     pub const classNameGet = jsElementClassNameGet;
     pub const classNameSet = jsElementClassNameSet;
+    pub const titleGet = jsElementTitleGet;
+    pub const titleSet = jsElementTitleSet;
+    pub const htmlForGet = jsElementHtmlForGet;
+    pub const htmlForSet = jsElementHtmlForSet;
     pub const innerHtmlGet = jsElementInnerHtmlGet;
     pub const innerHtmlSet = jsElementInnerHtmlSet;
     pub const outerHtmlGet = jsElementOuterHtmlGet;
@@ -85,6 +92,7 @@ const ElementCallbacks = struct {
     pub const matches = jsElementMatches;
     pub const closest = jsElementClosest;
     pub const insertAdjacentHTML = jsElementInsertAdjacentHTML;
+    pub const attachShadow = jsElementAttachShadow;
     pub const getBoundingClientRect = jsElementGetBoundingClientRect;
     pub const getClientRects = jsElementGetClientRects;
     pub const focus = jsElementFocus;
@@ -117,6 +125,10 @@ const DocumentCallbacks = struct {
     pub const createComment = jsDocumentCreateComment;
     pub const createDocumentFragment = jsDocumentCreateDocumentFragment;
     pub const createDocumentType = jsDocumentCreateDocumentType;
+    pub const createRange = jsDocumentCreateRange;
+    pub const getSelection = jsDocumentGetSelection;
+    pub const importNode = jsDocumentImportNode;
+    pub const adoptNode = jsDocumentAdoptNode;
     pub const getElementById = jsDocumentGetElementById;
     pub const querySelector = jsDocumentQuerySelector;
     pub const querySelectorAll = jsDocumentQuerySelectorAll;
@@ -211,6 +223,8 @@ pub const DomClasses = struct {
         window.setPropertyStr(ctx, "window", window.dup(ctx)) catch return error.PropertyAccessFailed;
         window.setPropertyStr(ctx, "self", window.dup(ctx)) catch return error.PropertyAccessFailed;
         window.setPropertyStr(ctx, "document", document.dup(ctx)) catch return error.PropertyAccessFailed;
+        try installCustomElementsRegistry(ctx, global, window);
+        try installDocumentCookie(ctx, document);
         try self.installNodeSlice(ctx);
     }
 
@@ -318,6 +332,12 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     custom_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
     const mouse_event_proto = try installConstructor(ctx, global, "MouseEvent", jsConstructMouseEvent);
     mouse_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
+    const input_event_proto = try installConstructor(ctx, global, "InputEvent", jsConstructInputEvent);
+    input_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
+    const composition_event_proto = try installConstructor(ctx, global, "CompositionEvent", jsConstructCompositionEvent);
+    composition_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
+    const custom_elements_proto = try installConstructor(ctx, global, "CustomElementRegistry", jsConstructPlain);
+    defer custom_elements_proto.deinit(ctx);
     const dom_rect_proto = try installConstructor(ctx, global, "DOMRect", jsConstructDOMRect);
     defer dom_rect_proto.deinit(ctx);
     const mutation_observer_proto = try installConstructor(ctx, global, "MutationObserver", jsConstructObserver);
@@ -342,6 +362,8 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     event_proto.deinit(ctx);
     custom_event_proto.deinit(ctx);
     mouse_event_proto.deinit(ctx);
+    input_event_proto.deinit(ctx);
+    composition_event_proto.deinit(ctx);
 }
 
 fn setNodeConstants(ctx: *quickjs.Context, global: quickjs.Value) DomClassesError!void {
@@ -451,6 +473,25 @@ fn installDocumentDefaultView(ctx: *quickjs.Context, global: quickjs.Value) DomC
     }
 
     _ = document.definePropertyValueStr(ctx, "defaultView", window, .default) catch return error.PropertyAccessFailed;
+}
+
+fn installCustomElementsRegistry(ctx: *quickjs.Context, global: quickjs.Value, window: quickjs.Value) DomClassesError!void {
+    const registry = quickjs.Value.initObject(ctx);
+    if (registry.isException()) return error.OutOfMemory;
+    defer registry.deinit(ctx);
+    const definitions = quickjs.Value.initObject(ctx);
+    if (definitions.isException()) return error.OutOfMemory;
+    registry.setPropertyStr(ctx, "__zigDefinitions", definitions) catch return error.PropertyAccessFailed;
+    try installMethod(ctx, registry, "define", jsCustomElementsDefine, 2);
+    try installMethod(ctx, registry, "get", jsCustomElementsGet, 1);
+    try installMethod(ctx, registry, "whenDefined", jsCustomElementsWhenDefined, 1);
+    global.setPropertyStr(ctx, "customElements", registry.dup(ctx)) catch return error.PropertyAccessFailed;
+    window.setPropertyStr(ctx, "customElements", registry.dup(ctx)) catch return error.PropertyAccessFailed;
+}
+
+fn installDocumentCookie(ctx: *quickjs.Context, document: quickjs.Value) DomClassesError!void {
+    document.setPropertyStr(ctx, "__zigCookie", quickjs.Value.initStringLen(ctx, "")) catch return error.PropertyAccessFailed;
+    try installAccessor(ctx, document, "cookie", jsDocumentCookieGet, jsDocumentCookieSet);
 }
 
 fn jsNodeTypeGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
@@ -565,6 +606,57 @@ fn jsConstructDocumentType(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_arg
     return node;
 }
 
+fn jsDocumentImportNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len == 0 or !args[0].isObject()) return throwOperationMessage(ctx, "importNode", "node argument must be an object");
+    const deep = args.len > 1 and (args[1].toBool(ctx) catch false);
+    return cloneNodeForDocument(ctx, this_value, args[0], deep);
+}
+
+fn jsDocumentAdoptNode(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len == 0 or !args[0].isObject()) return throwOperationMessage(ctx, "adoptNode", "node argument must be an object");
+    const parent = jsNodeParentNodeGet(ctx, args[0]);
+    defer parent.deinit(ctx);
+    if (parent.isObject()) {
+        const removed = jsNodeRemoveChild(ctx, parent, @ptrCast(&[_]quickjs.Value{args[0]}));
+        defer removed.deinit(ctx);
+        if (removed.isException()) return quickjs.Value.exception;
+    }
+    return args[0].dup(ctx);
+}
+
+fn jsDocumentCreateRange(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const range = quickjs.Value.initObject(ctx);
+    if (range.isException()) return range;
+    installMethod(ctx, range, "setStart", jsRangeSetStart, 2) catch return quickjs.Value.exception;
+    installMethod(ctx, range, "setEnd", jsRangeSetEnd, 2) catch return quickjs.Value.exception;
+    installMethod(ctx, range, "selectNodeContents", jsRangeSelectNodeContents, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, range, "toString", jsRangeToString, 0) catch return quickjs.Value.exception;
+    range.setPropertyStr(ctx, "collapsed", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    return range;
+}
+
+fn jsDocumentGetSelection(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    var existing = this_value.getPropertyStr(ctx, "__zigSelection");
+    if (!existing.isException() and existing.isObject()) return existing;
+    existing.deinit(ctx);
+    const selection = quickjs.Value.initObject(ctx);
+    if (selection.isException()) return selection;
+    selection.setPropertyStr(ctx, "__zigRange", quickjs.Value.null) catch return quickjs.Value.exception;
+    selection.setPropertyStr(ctx, "rangeCount", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    installMethod(ctx, selection, "removeAllRanges", jsSelectionRemoveAllRanges, 0) catch return quickjs.Value.exception;
+    installMethod(ctx, selection, "addRange", jsSelectionAddRange, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, selection, "getRangeAt", jsSelectionGetRangeAt, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, selection, "toString", jsSelectionToString, 0) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "__zigSelection", selection.dup(ctx)) catch return quickjs.Value.exception;
+    return selection;
+}
+
 fn jsConstructWindow(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     var window_handle: u64 = 0;
@@ -595,6 +687,18 @@ fn jsConstructMouseEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     return createEventObject(ctx, this_value, args, .mouse);
 }
 
+fn jsConstructInputEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return createEventObject(ctx, this_value, args, .input);
+}
+
+fn jsConstructCompositionEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return createEventObject(ctx, this_value, args, .composition);
+}
+
 fn jsEventPreventDefault(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     if (boolProperty(ctx, this_value, "cancelable")) {
@@ -619,7 +723,7 @@ fn jsEventComposedPath(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _:
     return quickjs.Value.initArray(ctx);
 }
 
-const EventKind = enum { event, custom, mouse };
+const EventKind = enum { event, custom, mouse, input, composition };
 
 fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []const quickjs.Value, kind: EventKind) quickjs.Value {
     const proto = constructor.getPropertyStr(ctx, "prototype");
@@ -651,6 +755,14 @@ fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []
         obj.setPropertyStr(ctx, "clientY", quickjs.Value.initFloat64(optionNumber(ctx, args, "clientY"))) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "button", quickjs.Value.initFloat64(optionNumber(ctx, args, "button"))) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "buttons", quickjs.Value.initFloat64(optionNumber(ctx, args, "buttons"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "relatedTarget", optionValueOrNull(ctx, args, "relatedTarget")) catch return quickjs.Value.exception;
+    }
+    if (kind == .input) {
+        obj.setPropertyStr(ctx, "data", optionValueOrNull(ctx, args, "data")) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "inputType", optionString(ctx, args, "inputType", "")) catch return quickjs.Value.exception;
+    }
+    if (kind == .composition) {
+        obj.setPropertyStr(ctx, "data", optionString(ctx, args, "data", "")) catch return quickjs.Value.exception;
     }
     return obj;
 }
@@ -699,6 +811,34 @@ fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []c
 
 fn jsComputedStyleGetPropertyValue(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return quickjs.Value.initStringLen(ctx, "");
+}
+
+fn jsStyleGetPropertyValue(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const name = parseStringArg(ctx, args, 0, "style.getPropertyValue") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name.ptr);
+    const direct = this_value.getPropertyStr(ctx, name.ptr);
+    if (!direct.isException() and !direct.isUndefined() and !direct.isNull()) return direct;
+    direct.deinit(ctx);
+    const element = this_value.getPropertyStr(ctx, "__zigElement");
+    defer element.deinit(ctx);
+    if (element.isObject()) {
+        const attr = elementAttributeGet(ctx, element, "style", "");
+        defer attr.deinit(ctx);
+        const text = attr.toCStringLen(ctx) orelse return quickjs.Value.initStringLen(ctx, "");
+        defer ctx.freeCString(text.ptr);
+        var parts = std.mem.splitScalar(u8, text.ptr[0..text.len], ';');
+        while (parts.next()) |part_raw| {
+            const part = std.mem.trim(u8, part_raw, " \t\r\n");
+            const colon = std.mem.indexOfScalar(u8, part, ':') orelse continue;
+            if (std.mem.eql(u8, std.mem.trim(u8, part[0..colon], " \t\r\n"), name.ptr[0..name.len])) {
+                const value = std.mem.trim(u8, part[colon + 1 ..], " \t\r\n");
+                return quickjs.Value.initStringLen(ctx, value);
+            }
+        }
+    }
     return quickjs.Value.initStringLen(ctx, "");
 }
 
@@ -1159,6 +1299,28 @@ fn jsElementClassNameSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     return elementAttributeSet(ctx_opt, this_value, "class", next_value);
 }
 
+fn jsElementTitleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    return elementAttributeGet(ctx_opt, this_value, "title", "");
+}
+
+fn jsElementTitleSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    if (next_value.isUndefined() or next_value.isNull()) {
+        const ctx = ctx_opt orelse return quickjs.Value.exception;
+        var name = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, "title")};
+        defer name[0].deinit(ctx);
+        return jsElementRemoveAttribute(ctx, this_value, @ptrCast(&name));
+    }
+    return elementAttributeSet(ctx_opt, this_value, "title", next_value);
+}
+
+fn jsElementHtmlForGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    return elementAttributeGet(ctx_opt, this_value, "for", "");
+}
+
+fn jsElementHtmlForSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    return elementAttributeSet(ctx_opt, this_value, "for", next_value);
+}
+
 fn jsElementValueGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     return elementAttributeGet(ctx_opt, this_value, "value", "");
 }
@@ -1359,12 +1521,18 @@ fn jsElementStyleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quic
 
     const style = quickjs.Value.initObject(ctx);
     if (style.isException()) return style;
-    installMethod(ctx, style, "getPropertyValue", jsComputedStyleGetPropertyValue, 1) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "__zigElement", this_value.dup(ctx)) catch return quickjs.Value.exception;
+    installMethod(ctx, style, "getPropertyValue", jsStyleGetPropertyValue, 1) catch return quickjs.Value.exception;
     installMethod(ctx, style, "setProperty", jsStyleSetProperty, 2) catch return quickjs.Value.exception;
     installMethod(ctx, style, "removeProperty", jsStyleRemoveProperty, 1) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "cssText", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "animation", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "transition", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    const current_style = elementAttributeGet(ctx, this_value, "style", "");
+    defer current_style.deinit(ctx);
+    const current_text = current_style.toCStringLen(ctx) orelse null;
+    defer if (current_text) |text| ctx.freeCString(text.ptr);
+    if (current_text) |text| style.setPropertyStr(ctx, "cssText", quickjs.Value.initStringLen(ctx, text.ptr[0..text.len])) catch return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "__zigStyle", style.dup(ctx)) catch return quickjs.Value.exception;
     return style;
 }
@@ -1377,6 +1545,18 @@ fn jsStyleSetProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw
     const value = if (args.len > 1) args[1].toCStringLen(ctx) else null;
     defer if (value) |text| ctx.freeCString(text.ptr);
     this_value.setPropertyStr(ctx, name.ptr, quickjs.Value.initStringLen(ctx, if (value) |text| text.ptr[0..text.len] else "")) catch return quickjs.Value.exception;
+    const element = this_value.getPropertyStr(ctx, "__zigElement");
+    defer element.deinit(ctx);
+    if (element.isObject()) {
+        var buffer: [512]u8 = undefined;
+        const css_text = std.fmt.bufPrint(&buffer, "{s}: {s};", .{ name.ptr[0..name.len], if (value) |text| text.ptr[0..text.len] else "" }) catch return quickjs.Value.exception;
+        const css_value = quickjs.Value.initStringLen(ctx, css_text);
+        defer css_value.deinit(ctx);
+        const style_name = quickjs.Value.initStringLen(ctx, "style");
+        defer style_name.deinit(ctx);
+        const set_result = jsElementSetAttribute(ctx, element, @ptrCast(&[_]quickjs.Value{ style_name, css_value }));
+        defer set_result.deinit(ctx);
+    }
     return quickjs.Value.undefined;
 }
 
@@ -1458,8 +1638,21 @@ fn jsElementSetAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     defer ctx.freeCString(name.ptr);
     const value = parseStringArg(ctx, args, 1, "setAttribute") orelse return quickjs.Value.exception;
     defer ctx.freeCString(value.ptr);
+    const old_value = jsElementGetAttribute(ctx, this_value, @ptrCast(&[_]quickjs.Value{args[0]}));
+    defer old_value.deinit(ctx);
     const status = zig_dom.zig_dom_element_set_attribute(this_handle, name.ptr, name.len, value.ptr, value.len);
     if (status != 0) return throwStatus(ctx, "setAttribute", status);
+    const attr_changed = this_value.getPropertyStr(ctx, "attributeChangedCallback");
+    defer attr_changed.deinit(ctx);
+    if (attr_changed.isFunction(ctx)) {
+        const name_value = quickjs.Value.initStringLen(ctx, name.ptr[0..name.len]);
+        defer name_value.deinit(ctx);
+        const new_value = quickjs.Value.initStringLen(ctx, value.ptr[0..value.len]);
+        defer new_value.deinit(ctx);
+        const result = attr_changed.call(ctx, this_value, &.{ name_value, old_value, new_value });
+        defer result.deinit(ctx);
+        if (result.isException()) return quickjs.Value.exception;
+    }
     return quickjs.Value.undefined;
 }
 
@@ -1469,8 +1662,19 @@ fn jsElementRemoveAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Valu
     const this_handle = parseThisHandle(ctx, this_value, "removeAttribute") orelse return quickjs.Value.exception;
     const name = parseStringArg(ctx, args, 0, "removeAttribute") orelse return quickjs.Value.exception;
     defer ctx.freeCString(name.ptr);
+    const old_value = jsElementGetAttribute(ctx, this_value, @ptrCast(&[_]quickjs.Value{args[0]}));
+    defer old_value.deinit(ctx);
     const status = zig_dom.zig_dom_element_remove_attribute(this_handle, name.ptr, name.len);
     if (status != 0) return throwStatus(ctx, "removeAttribute", status);
+    const attr_changed = this_value.getPropertyStr(ctx, "attributeChangedCallback");
+    defer attr_changed.deinit(ctx);
+    if (attr_changed.isFunction(ctx)) {
+        const name_value = quickjs.Value.initStringLen(ctx, name.ptr[0..name.len]);
+        defer name_value.deinit(ctx);
+        const result = attr_changed.call(ctx, this_value, &.{ name_value, old_value, quickjs.Value.null });
+        defer result.deinit(ctx);
+        if (result.isException()) return quickjs.Value.exception;
+    }
     return quickjs.Value.undefined;
 }
 
@@ -1928,12 +2132,42 @@ fn jsElementInsertAdjacentHTML(ctx_opt: ?*quickjs.Context, this_value: quickjs.V
     return quickjs.Value.undefined;
 }
 
+fn jsElementAttachShadow(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const document = jsNodeOwnerDocumentGet(ctx, this_value);
+    defer document.deinit(ctx);
+    const root = jsDocumentCreateDocumentFragment(ctx, document, &.{});
+    if (root.isException()) return root;
+    root.setPropertyStr(ctx, "host", this_value.dup(ctx)) catch return quickjs.Value.exception;
+    const mode = if (args.len > 0 and args[0].isObject()) args[0].getPropertyStr(ctx, "mode") else quickjs.Value.undefined;
+    defer mode.deinit(ctx);
+    const mode_text = if (!mode.isUndefined() and !mode.isNull()) mode.toCStringLen(ctx) else null;
+    defer if (mode_text) |value| ctx.freeCString(value.ptr);
+    const is_open = if (mode_text) |value| std.mem.eql(u8, value.ptr[0..value.len], "open") else true;
+    const shadow_value = if (is_open) root.dup(ctx) else quickjs.Value.null;
+    this_value.setPropertyStr(ctx, "shadowRoot", shadow_value) catch return quickjs.Value.exception;
+    return root;
+}
+
 fn jsElementFocus(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const document = jsNodeOwnerDocumentGet(ctx, this_value);
     defer document.deinit(ctx);
     if (!document.isException() and document.isObject()) {
         document.setPropertyStr(ctx, "activeElement", this_value.dup(ctx)) catch return quickjs.Value.exception;
+    }
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const ctor = global.getPropertyStr(ctx, "Event");
+    defer ctor.deinit(ctx);
+    if (ctor.isObject()) {
+        const event_type = quickjs.Value.initStringLen(ctx, "focus");
+        defer event_type.deinit(ctx);
+        const event = createEventObject(ctx, ctor, &.{event_type}, .event);
+        defer event.deinit(ctx);
+        const dispatched = jsEventTargetDispatchEvent(ctx, this_value, @ptrCast(&[_]quickjs.Value{event}));
+        defer dispatched.deinit(ctx);
     }
     return quickjs.Value.undefined;
 }
@@ -1948,6 +2182,18 @@ fn jsElementBlur(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []con
         if (!body.isException() and body.isObject()) {
             document.setPropertyStr(ctx, "activeElement", body.dup(ctx)) catch return quickjs.Value.exception;
         }
+    }
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const ctor = global.getPropertyStr(ctx, "Event");
+    defer ctor.deinit(ctx);
+    if (ctor.isObject()) {
+        const event_type = quickjs.Value.initStringLen(ctx, "blur");
+        defer event_type.deinit(ctx);
+        const event = createEventObject(ctx, ctor, &.{event_type}, .event);
+        defer event.deinit(ctx);
+        const dispatched = jsEventTargetDispatchEvent(ctx, this_value, @ptrCast(&[_]quickjs.Value{event}));
+        defer dispatched.deinit(ctx);
     }
     return quickjs.Value.undefined;
 }
@@ -2007,7 +2253,24 @@ fn jsDocumentCreateElement(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value
     var out_handle: u64 = 0;
     const status = zig_dom.zig_dom_document_create_element(document_handle, name.ptr, name.len, &out_handle);
     if (status != 0) return throwStatus(ctx, "createElement", status);
-    return wrapNodeHandle(ctx, out_handle);
+    const node = wrapNodeHandle(ctx, out_handle);
+    if (node.isException()) return node;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const registry = global.getPropertyStr(ctx, "customElements");
+    defer registry.deinit(ctx);
+    if (registry.isObject()) {
+        const definitions = registry.getPropertyStr(ctx, "__zigDefinitions");
+        defer definitions.deinit(ctx);
+        if (definitions.isObject()) {
+            const ctor = definitions.getPropertyStr(ctx, name.ptr);
+            defer ctor.deinit(ctx);
+            if (!ctor.isException() and ctor.isObject()) {
+                upgradeCustomElement(ctx, node, ctor) catch return quickjs.Value.exception;
+            }
+        }
+    }
+    return node;
 }
 
 fn jsDocumentCreateElementNS(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -2168,6 +2431,232 @@ fn jsDocumentDefaultViewGet(ctx_opt: ?*quickjs.Context, _: quickjs.Value) quickj
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     return global.getPropertyStr(ctx, "window");
+}
+
+fn jsDocumentCookieGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const value = this_value.getPropertyStr(ctx, "__zigCookie");
+    if (value.isException() or value.isUndefined()) {
+        value.deinit(ctx);
+        return quickjs.Value.initStringLen(ctx, "");
+    }
+    return value;
+}
+
+fn jsDocumentCookieSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const text = next_value.toCStringLen(ctx) orelse return quickjs.Value.undefined;
+    defer ctx.freeCString(text.ptr);
+    const raw = text.ptr[0..text.len];
+    const pair_end = std.mem.indexOfScalar(u8, raw, ';') orelse raw.len;
+    const pair = std.mem.trim(u8, raw[0..pair_end], " \t\r\n");
+    const eq = std.mem.indexOfScalar(u8, pair, '=') orelse pair.len;
+    const name = pair[0..eq];
+    const current = jsDocumentCookieGet(ctx, this_value);
+    defer current.deinit(ctx);
+    const current_text = current.toCStringLen(ctx) orelse return quickjs.Value.exception;
+    defer ctx.freeCString(current_text.ptr);
+    var buffer: [1024]u8 = undefined;
+    var stream = std.Io.Writer.fixed(&buffer);
+    var first = true;
+    var it = std.mem.splitSequence(u8, current_text.ptr[0..current_text.len], "; ");
+    while (it.next()) |part| {
+        const part_eq = std.mem.indexOfScalar(u8, part, '=') orelse part.len;
+        if (std.mem.eql(u8, part[0..part_eq], name)) continue;
+        if (!first) stream.writeAll("; ") catch {};
+        stream.writeAll(part) catch {};
+        first = false;
+    }
+    if (std.mem.indexOf(u8, raw, "Max-Age=0") == null and std.mem.indexOf(u8, raw, "expires=Thu, 01 Jan 1970") == null and pair.len > 0) {
+        if (!first) stream.writeAll("; ") catch {};
+        stream.writeAll(pair) catch {};
+    }
+    this_value.setPropertyStr(ctx, "__zigCookie", quickjs.Value.initStringLen(ctx, stream.buffered())) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsCustomElementsDefine(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len < 2) return quickjs.Value.undefined;
+    const name = parseStringArg(ctx, args, 0, "customElements.define") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name.ptr);
+    const definitions = this_value.getPropertyStr(ctx, "__zigDefinitions");
+    defer definitions.deinit(ctx);
+    if (definitions.isObject()) definitions.setPropertyStr(ctx, name.ptr, args[1].dup(ctx)) catch return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    var selector_arg = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, name.ptr[0..name.len])};
+    defer selector_arg[0].deinit(ctx);
+    const nodes = jsDocumentQuerySelectorAll(ctx, document, @ptrCast(&selector_arg));
+    defer nodes.deinit(ctx);
+    const len = arrayLength(ctx, nodes);
+    for (0..len) |i_usize| {
+        const node = nodes.getPropertyUint32(ctx, @intCast(i_usize));
+        defer node.deinit(ctx);
+        upgradeCustomElement(ctx, node, args[1]) catch return quickjs.Value.exception;
+        callMethodNoArgs(ctx, node, "connectedCallback") catch return quickjs.Value.exception;
+    }
+    return quickjs.Value.undefined;
+}
+
+fn jsCustomElementsGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const name = parseStringArg(ctx, args, 0, "customElements.get") orelse return quickjs.Value.undefined;
+    defer ctx.freeCString(name.ptr);
+    const definitions = this_value.getPropertyStr(ctx, "__zigDefinitions");
+    defer definitions.deinit(ctx);
+    if (!definitions.isObject()) return quickjs.Value.undefined;
+    const value = definitions.getPropertyStr(ctx, name.ptr);
+    if (value.isException() or value.isUndefined()) {
+        value.deinit(ctx);
+        return quickjs.Value.undefined;
+    }
+    return value;
+}
+
+fn jsCustomElementsWhenDefined(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const value = jsCustomElementsGet(ctx, this_value, raw_args);
+    defer value.deinit(ctx);
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const promise = global.getPropertyStr(ctx, "Promise");
+    defer promise.deinit(ctx);
+    const resolve = promise.getPropertyStr(ctx, "resolve");
+    defer resolve.deinit(ctx);
+    if (!resolve.isFunction(ctx)) return quickjs.Value.undefined;
+    return resolve.call(ctx, promise, &.{value});
+}
+
+fn jsRangeSetStart(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len < 2) return quickjs.Value.undefined;
+    this_value.setPropertyStr(ctx, "startContainer", args[0].dup(ctx)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "startOffset", args[1].dup(ctx)) catch return quickjs.Value.exception;
+    updateRangeCollapsed(ctx, this_value) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsRangeSetEnd(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len < 2) return quickjs.Value.undefined;
+    this_value.setPropertyStr(ctx, "endContainer", args[0].dup(ctx)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "endOffset", args[1].dup(ctx)) catch return quickjs.Value.exception;
+    updateRangeCollapsed(ctx, this_value) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsRangeSelectNodeContents(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len == 0 or !args[0].isObject()) return quickjs.Value.undefined;
+    const text = jsNodeTextContentGet(ctx, args[0]);
+    defer text.deinit(ctx);
+    const cstr = text.toCStringLen(ctx) orelse return quickjs.Value.exception;
+    defer ctx.freeCString(cstr.ptr);
+    this_value.setPropertyStr(ctx, "startContainer", args[0].dup(ctx)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "startOffset", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "endContainer", args[0].dup(ctx)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "endOffset", quickjs.Value.initInt64(@intCast(cstr.len))) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "collapsed", quickjs.Value.initBool(cstr.len == 0)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsRangeToString(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const start = this_value.getPropertyStr(ctx, "startContainer");
+    defer start.deinit(ctx);
+    const end = this_value.getPropertyStr(ctx, "endContainer");
+    defer end.deinit(ctx);
+    const start_offset = getIntProperty(ctx, this_value, "startOffset") orelse 0;
+    const end_offset = getIntProperty(ctx, this_value, "endOffset") orelse std.math.maxInt(i64);
+    if (!start.isObject()) return quickjs.Value.initStringLen(ctx, "");
+    const start_text = jsNodeTextContentGet(ctx, start);
+    defer start_text.deinit(ctx);
+    const start_cstr = start_text.toCStringLen(ctx) orelse return quickjs.Value.exception;
+    defer ctx.freeCString(start_cstr.ptr);
+    const s: usize = @intCast(@max(0, @min(start_offset, @as(i64, @intCast(start_cstr.len)))));
+    if (start.isStrictEqual(ctx, end)) {
+        const e: usize = @intCast(@max(@as(i64, @intCast(s)), @min(end_offset, @as(i64, @intCast(start_cstr.len)))));
+        return quickjs.Value.initStringLen(ctx, start_cstr.ptr[s..e]);
+    }
+    if (!end.isObject()) return quickjs.Value.initStringLen(ctx, start_cstr.ptr[s..start_cstr.len]);
+    const end_text = jsNodeTextContentGet(ctx, end);
+    defer end_text.deinit(ctx);
+    const end_cstr = end_text.toCStringLen(ctx) orelse return quickjs.Value.exception;
+    defer ctx.freeCString(end_cstr.ptr);
+    const e: usize = @intCast(@max(0, @min(end_offset, @as(i64, @intCast(end_cstr.len)))));
+    var buffer: [4096]u8 = undefined;
+    const out = std.fmt.bufPrint(&buffer, "{s}{s}", .{ start_cstr.ptr[s..start_cstr.len], end_cstr.ptr[0..e] }) catch return quickjs.Value.exception;
+    return quickjs.Value.initStringLen(ctx, out);
+}
+
+fn updateRangeCollapsed(ctx: *quickjs.Context, range: quickjs.Value) !void {
+    const start = range.getPropertyStr(ctx, "startContainer");
+    defer start.deinit(ctx);
+    const end = range.getPropertyStr(ctx, "endContainer");
+    defer end.deinit(ctx);
+    const start_offset = getIntProperty(ctx, range, "startOffset") orelse -1;
+    const end_offset = getIntProperty(ctx, range, "endOffset") orelse -2;
+    try range.setPropertyStr(ctx, "collapsed", quickjs.Value.initBool(start.isStrictEqual(ctx, end) and start_offset == end_offset));
+}
+
+fn jsSelectionRemoveAllRanges(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "__zigRange", quickjs.Value.null) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "rangeCount", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsSelectionAddRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len > 0 and args[0].isObject()) {
+        this_value.setPropertyStr(ctx, "__zigRange", args[0].dup(ctx)) catch return quickjs.Value.exception;
+        this_value.setPropertyStr(ctx, "rangeCount", quickjs.Value.initInt64(1)) catch return quickjs.Value.exception;
+    }
+    return quickjs.Value.undefined;
+}
+
+fn jsSelectionGetRangeAt(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const index = if (args.len > 0) args[0].toInt64(ctx) catch 0 else 0;
+    const range = this_value.getPropertyStr(ctx, "__zigRange");
+    if (index == 0 and range.isObject()) return range;
+    range.deinit(ctx);
+    return throwOperationMessage(ctx, "getRangeAt", "range index out of bounds");
+}
+
+fn jsSelectionToString(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const range = this_value.getPropertyStr(ctx, "__zigRange");
+    defer range.deinit(ctx);
+    if (!range.isObject()) return quickjs.Value.initStringLen(ctx, "");
+    return jsRangeToString(ctx, range, &.{});
+}
+
+fn upgradeCustomElement(ctx: *quickjs.Context, node: quickjs.Value, ctor: quickjs.Value) !void {
+    const proto = ctor.getPropertyStr(ctx, "prototype");
+    defer proto.deinit(ctx);
+    if (!proto.isException() and proto.isObject()) {
+        try node.setPrototype(ctx, proto);
+    }
+}
+
+fn callMethodNoArgs(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]const u8) !void {
+    const method = object.getPropertyStr(ctx, name);
+    defer method.deinit(ctx);
+    if (!method.isFunction(ctx)) return;
+    const result = method.call(ctx, object, &.{});
+    defer result.deinit(ctx);
+    if (result.isException()) return error.JSError;
 }
 
 fn jsDocumentImplementationGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
@@ -2386,6 +2875,14 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     const type_arg = type_value.toCStringLen(ctx) orelse return throwOperationMessage(ctx, "dispatchEvent", "event type must be a string");
     defer ctx.freeCString(type_arg.ptr);
 
+    const is_disabled_click = std.mem.eql(u8, type_arg.ptr[0..type_arg.len], "click") and ((jsElementDisabledGet(ctx, this_value).toBool(ctx) catch false));
+    if (is_disabled_click) {
+        return quickjs.Value.initBool(true);
+    }
+    if (std.mem.eql(u8, type_arg.ptr[0..type_arg.len], "click")) {
+        applyPreClickState(ctx, this_value);
+    }
+
     event.setPropertyStr(ctx, "_target", this_value.dup(ctx)) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "target", this_value.dup(ctx)) catch return quickjs.Value.exception;
 
@@ -2417,6 +2914,7 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     }
     tryDispatchListeners(ctx, this_value, event, type_arg.ptr, true, 2) catch return quickjs.Value.exception;
     tryDispatchListeners(ctx, this_value, event, type_arg.ptr, false, 2) catch return quickjs.Value.exception;
+    tryDispatchPropertyListener(ctx, this_value, event, type_arg.ptr) catch return quickjs.Value.exception;
 
     const bubbles = boolProperty(ctx, event, "bubbles");
     if (bubbles) {
@@ -2469,7 +2967,32 @@ fn jsElementClick(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []co
     return quickjs.Value.undefined;
 }
 
+fn applyPreClickState(ctx: *quickjs.Context, target: quickjs.Value) void {
+    const local = jsElementLocalNameGet(ctx, target);
+    defer local.deinit(ctx);
+    const local_text = local.toCStringLen(ctx) orelse return;
+    defer ctx.freeCString(local_text.ptr);
+    if (!std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "input")) return;
+    const type_value_opt = elementAttributeString(ctx, target, "type");
+    defer if (type_value_opt) |value| ctx.freeCString(value.ptr);
+    const type_value = if (type_value_opt) |value| value.ptr[0..value.len] else "";
+    if (std.ascii.eqlIgnoreCase(type_value, "checkbox")) {
+        const checked = jsElementCheckedGet(ctx, target);
+        defer checked.deinit(ctx);
+        const next = quickjs.Value.initBool(!(checked.toBool(ctx) catch false));
+        const ignored = jsElementCheckedSet(ctx, target, next);
+        ignored.deinit(ctx);
+    } else if (std.ascii.eqlIgnoreCase(type_value, "radio")) {
+        const on = quickjs.Value.initBool(true);
+        const ignored = jsElementCheckedSet(ctx, target, on);
+        ignored.deinit(ctx);
+    }
+}
+
 fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs.Value {
+    const disabled = jsElementDisabledGet(ctx, target);
+    defer disabled.deinit(ctx);
+    if (disabled.toBool(ctx) catch false) return quickjs.Value.undefined;
     const local = jsElementLocalNameGet(ctx, target);
     defer local.deinit(ctx);
     const local_text = local.toCStringLen(ctx) orelse return quickjs.Value.undefined;
@@ -2477,6 +3000,28 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
 
     const is_button = std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "button");
     const is_input = std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "input");
+    const is_label = std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "label");
+    if (is_label) {
+        const html_for = elementAttributeString(ctx, target, "for");
+        defer if (html_for) |value| ctx.freeCString(value.ptr);
+        const control = if (html_for) |value| blk: {
+            const document = jsNodeOwnerDocumentGet(ctx, target);
+            defer document.deinit(ctx);
+            const id_value = quickjs.Value.initStringLen(ctx, value.ptr[0..value.len]);
+            defer id_value.deinit(ctx);
+            break :blk jsDocumentGetElementById(ctx, document, @ptrCast(&[_]quickjs.Value{id_value}));
+        } else blk: {
+            const selector = quickjs.Value.initStringLen(ctx, "input");
+            defer selector.deinit(ctx);
+            break :blk jsElementQuerySelector(ctx, target, @ptrCast(&[_]quickjs.Value{selector}));
+        };
+        defer control.deinit(ctx);
+        if (control.isObject()) {
+            const click = jsElementClick(ctx, control, &.{});
+            defer click.deinit(ctx);
+        }
+        return quickjs.Value.undefined;
+    }
     if (!is_button and !is_input) {
         return quickjs.Value.undefined;
     }
@@ -2484,6 +3029,37 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
     const type_value_opt = elementAttributeString(ctx, target, "type");
     defer if (type_value_opt) |value| ctx.freeCString(value.ptr);
     const type_value = if (type_value_opt) |value| value.ptr[0..value.len] else "";
+
+    if (is_input and (std.ascii.eqlIgnoreCase(type_value, "checkbox") or std.ascii.eqlIgnoreCase(type_value, "radio"))) {
+        if (std.ascii.eqlIgnoreCase(type_value, "radio")) {
+            const name = elementAttributeString(ctx, target, "name");
+            defer if (name) |value| ctx.freeCString(value.ptr);
+            if (name) |value| {
+                const document = jsNodeOwnerDocumentGet(ctx, target);
+                defer document.deinit(ctx);
+                var selector_buf: [256]u8 = undefined;
+                const selector_text = std.fmt.bufPrint(&selector_buf, "input[type=\"radio\"][name=\"{s}\"]", .{value.ptr[0..value.len]}) catch "";
+                const selector = quickjs.Value.initStringLen(ctx, selector_text);
+                defer selector.deinit(ctx);
+                const radios = jsDocumentQuerySelectorAll(ctx, document, @ptrCast(&[_]quickjs.Value{selector}));
+                defer radios.deinit(ctx);
+                const len = arrayLength(ctx, radios);
+                for (0..len) |i_usize| {
+                    const radio = radios.getPropertyUint32(ctx, @intCast(i_usize));
+                    defer radio.deinit(ctx);
+                    if (!radio.isStrictEqual(ctx, target)) {
+                        const off = quickjs.Value.initBool(false);
+                        const ignored = jsElementCheckedSet(ctx, radio, off);
+                        defer ignored.deinit(ctx);
+                    }
+                }
+            }
+            const on = quickjs.Value.initBool(true);
+            const ignored = jsElementCheckedSet(ctx, target, on);
+            defer ignored.deinit(ctx);
+        }
+        return quickjs.Value.undefined;
+    }
 
     const should_submit = if (is_button)
         (type_value.len == 0 or std.ascii.eqlIgnoreCase(type_value, "submit"))
@@ -2568,6 +3144,20 @@ fn jsNodeContains(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_arg
     return quickjs.Value.initBool(zig_dom.zig_dom_node_contains(this_handle, other_handle) == 1);
 }
 
+fn jsNodeGetRootNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    var cursor = this_value.dup(ctx);
+    while (true) {
+        const parent = jsNodeParentNodeGet(ctx, cursor);
+        if (parent.isNull() or parent.isUndefined() or parent.isException()) {
+            parent.deinit(ctx);
+            return cursor;
+        }
+        cursor.deinit(ctx);
+        cursor = parent;
+    }
+}
+
 fn jsNodeCompareDocumentPosition(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -2576,6 +3166,69 @@ fn jsNodeCompareDocumentPosition(ctx_opt: ?*quickjs.Context, this_value: quickjs
     const other_handle = parseRequiredNodeArgHandle(ctx, args, 0, "compareDocumentPosition") orelse return quickjs.Value.exception;
 
     return quickjs.Value.initInt32(@intCast(zig_dom.zig_dom_node_compare_document_position(this_handle, other_handle)));
+}
+
+fn jsNodeIsEqualNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len == 0 or args[0].isNull() or args[0].isUndefined()) return quickjs.Value.initBool(false);
+    const left = jsNodeOuterHtmlGet(ctx, this_value);
+    defer left.deinit(ctx);
+    const right = jsNodeOuterHtmlGet(ctx, args[0]);
+    defer right.deinit(ctx);
+    if (left.isException() or right.isException()) return quickjs.Value.initBool(false);
+    const left_text = left.toCStringLen(ctx) orelse return quickjs.Value.initBool(false);
+    defer ctx.freeCString(left_text.ptr);
+    const right_text = right.toCStringLen(ctx) orelse return quickjs.Value.initBool(false);
+    defer ctx.freeCString(right_text.ptr);
+    return quickjs.Value.initBool(std.mem.eql(u8, left_text.ptr[0..left_text.len], right_text.ptr[0..right_text.len]));
+}
+
+fn jsNodeNormalize(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    var previous_text: quickjs.Value = quickjs.Value.null;
+    defer previous_text.deinit(ctx);
+    var child = jsNodeFirstChildGet(ctx, this_value);
+    defer child.deinit(ctx);
+    while (child.isObject()) {
+        const next = jsNodeNextSiblingGet(ctx, child);
+        defer next.deinit(ctx);
+        const normalize_child = jsNodeNormalize(ctx, child, &.{});
+        defer normalize_child.deinit(ctx);
+        const child_type = zig_dom.zig_dom_node_type(parseThisHandle(ctx, child, "normalize") orelse return quickjs.Value.exception);
+        if (child_type == 3) {
+            const text = jsNodeTextContentGet(ctx, child);
+            defer text.deinit(ctx);
+            const cstr = text.toCStringLen(ctx) orelse return quickjs.Value.exception;
+            defer ctx.freeCString(cstr.ptr);
+            if (cstr.len == 0) {
+                const removed = jsNodeRemoveChild(ctx, this_value, @ptrCast(&[_]quickjs.Value{child}));
+                defer removed.deinit(ctx);
+            } else if (previous_text.isObject()) {
+                const prev_text = jsNodeTextContentGet(ctx, previous_text);
+                defer prev_text.deinit(ctx);
+                const prev_cstr = prev_text.toCStringLen(ctx) orelse return quickjs.Value.exception;
+                defer ctx.freeCString(prev_cstr.ptr);
+                var buffer: [4096]u8 = undefined;
+                const merged = std.fmt.bufPrint(&buffer, "{s}{s}", .{ prev_cstr.ptr[0..prev_cstr.len], cstr.ptr[0..cstr.len] }) catch return quickjs.Value.exception;
+                const merged_value = quickjs.Value.initStringLen(ctx, merged);
+                defer merged_value.deinit(ctx);
+                const set_result = jsNodeTextContentSet(ctx, previous_text, merged_value);
+                defer set_result.deinit(ctx);
+                const removed = jsNodeRemoveChild(ctx, this_value, @ptrCast(&[_]quickjs.Value{child}));
+                defer removed.deinit(ctx);
+            } else {
+                previous_text.deinit(ctx);
+                previous_text = child.dup(ctx);
+            }
+        } else {
+            previous_text.deinit(ctx);
+            previous_text = quickjs.Value.null;
+        }
+        child.deinit(ctx);
+        child = next.dup(ctx);
+    }
+    return quickjs.Value.undefined;
 }
 
 fn jsNodeAppendChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -2661,6 +3314,7 @@ fn jsNodeRemoveChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_
     if (status != 0) {
         return throwStatus(ctx, "removeChild", status);
     }
+    callMethodNoArgs(ctx, args[0], "disconnectedCallback") catch return quickjs.Value.exception;
 
     return args[0].dup(ctx);
 }
@@ -3184,6 +3838,24 @@ fn optionValue(ctx: *quickjs.Context, args: []const quickjs.Value, name: [*:0]co
     return value;
 }
 
+fn optionValueOrNull(ctx: *quickjs.Context, args: []const quickjs.Value, name: [*:0]const u8) quickjs.Value {
+    const value = optionValue(ctx, args, name);
+    if (value.isUndefined()) {
+        value.deinit(ctx);
+        return quickjs.Value.null;
+    }
+    return value;
+}
+
+fn optionString(ctx: *quickjs.Context, args: []const quickjs.Value, name: [*:0]const u8, fallback: []const u8) quickjs.Value {
+    const value = optionValue(ctx, args, name);
+    defer value.deinit(ctx);
+    if (value.isUndefined() or value.isNull()) return quickjs.Value.initStringLen(ctx, fallback);
+    const text = value.toCStringLen(ctx) orelse return quickjs.Value.initStringLen(ctx, fallback);
+    defer ctx.freeCString(text.ptr);
+    return quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]);
+}
+
 fn optionBool(ctx: *quickjs.Context, args: []const quickjs.Value, name: [*:0]const u8) bool {
     const value = optionValue(ctx, args, name);
     defer value.deinit(ctx);
@@ -3246,7 +3918,14 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
         if (!callback.isUndefined() and !callback.isNull()) {
             var call_args = [_]quickjs.Value{event.dup(ctx)};
             defer call_args[0].deinit(ctx);
-            const result = callback.call(ctx, target, &call_args);
+            const result = if (callback.isFunction(ctx))
+                callback.call(ctx, target, &call_args)
+            else blk: {
+                const handle_event = callback.getPropertyStr(ctx, "handleEvent");
+                defer handle_event.deinit(ctx);
+                if (!handle_event.isFunction(ctx)) break :blk quickjs.Value.undefined;
+                break :blk handle_event.call(ctx, callback, &call_args);
+            };
             defer result.deinit(ctx);
             if (result.isException()) return error.JSError;
         }
@@ -3256,6 +3935,19 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
         }
     }
     setArrayLength(ctx, list, write);
+}
+
+fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, event: quickjs.Value, event_type: [*:0]const u8) !void {
+    var name_buf: [128]u8 = undefined;
+    const name = std.fmt.bufPrintZ(&name_buf, "on{s}", .{std.mem.span(event_type)}) catch return;
+    const callback = target.getPropertyStr(ctx, name.ptr);
+    defer callback.deinit(ctx);
+    if (!callback.isFunction(ctx)) return;
+    var call_args = [_]quickjs.Value{event.dup(ctx)};
+    defer call_args[0].deinit(ctx);
+    const result = callback.call(ctx, target, &call_args);
+    defer result.deinit(ctx);
+    if (result.isException()) return error.JSError;
 }
 
 fn jsCollectionItem(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
