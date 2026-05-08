@@ -1,6 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 
 type ManifestEntry = {
   file: string;
@@ -203,7 +203,7 @@ function createNativeWindow() {
 
 function generateAnyTest(outFile: string, entry: ManifestEntry, variant?: string): string {
   const url = JSON.stringify(entryUrl(entry.file, variant));
-  return `import { expect, test } from "bun:test";
+  return /*js*/`import { expect, test } from "bun:test";
 import { tests } from ${JSON.stringify(toImportPath(outFile, entry.file))};
 
 ${nativeWindowSetupSource(url)}
@@ -239,7 +239,7 @@ function generateHtmlTest(entry: ManifestEntry, wptRootPath: string, variant?: s
     ...parseScriptBlocks(entry.file, html, wptRootPath)
   ];
   const iframeInitScripts = parseIframeInitScripts(entry.file, html, wptRootPath);
-  return `import { expect, test as bunTest } from "bun:test";
+  return /*js*/`import { expect, test as bunTest } from "bun:test";
 
 const pending = [];
 const source = ${JSON.stringify(scripts.join("\n;\n"))};
@@ -253,6 +253,8 @@ ${nativeWindowSetupSource(JSON.stringify(entryUrl(entry.file, variant)))}
 const __zigWptInitialBody = ${JSON.stringify(extractBody(html))};
 const __zigWptIFrameInitScripts = ${JSON.stringify(iframeInitScripts)};
 const __zigWptSetups = [];
+const __zigWptWindowLoadListeners = [];
+let __zigWptWindowLoadShimInstalled = false;
 let __zigWptSingleTestMode = false;
 let __zigWptSingleTestError = null;
 let __zigWptSingleTestDoneResolve;
@@ -402,6 +404,22 @@ function initializeFrameFixtures() {
 
     const rawSrc = typeof iframe.getAttribute === "function" ? iframe.getAttribute("src") : "";
     const frameSrc = normalizeFrameSrc(rawSrc || "");
+    if (frameSrc === "/common/dummy.xml" || frameSrc === "/common/dummy.xhtml") {
+      try {
+        const frameDocument = frameWindow.document;
+        if (frameDocument) {
+          frameDocument.__zigPreserveElementCase = true;
+          if (frameSrc === "/common/dummy.xml") {
+            frameDocument.__zigIsXmlDocument = true;
+          }
+          if (frameDocument.documentElement) {
+            frameDocument.documentElement.textContent = frameSrc === "/common/dummy.xml"
+              ? "Dummy XML document"
+              : "Dummy XHTML document";
+          }
+        }
+      } catch {}
+    }
     const scriptSource = __zigWptIFrameInitScripts[frameSrc];
     if (scriptSource && !iframe.__zigFrameScriptInitialized) {
       runFrameInitScript(frameWindow, scriptSource);
@@ -419,10 +437,35 @@ function initializeFrameFixtures() {
 function resetWptDomFixture() {
   document.body.innerHTML = __zigWptInitialBody;
   installIFrameLoadHooks();
+  installWindowLoadListenerShim();
   if (typeof globalThis.__zigDomSyncWindowNamedProperties === "function") {
     globalThis.__zigDomSyncWindowNamedProperties();
   }
   initializeFrameFixtures();
+}
+
+function installWindowLoadListenerShim() {
+  if (__zigWptWindowLoadShimInstalled || !window || typeof window.addEventListener !== "function") return;
+  __zigWptWindowLoadShimInstalled = true;
+  const nativeAddEventListener = window.addEventListener.bind(window);
+  const nativeRemoveEventListener = typeof window.removeEventListener === "function"
+    ? window.removeEventListener.bind(window)
+    : undefined;
+  window.addEventListener = function (type, listener, options) {
+    if (type === "load" && typeof listener === "function") {
+      __zigWptWindowLoadListeners.push(listener);
+      return undefined;
+    }
+    return nativeAddEventListener(type, listener, options);
+  };
+  window.removeEventListener = function (type, listener, options) {
+    if (type === "load" && typeof listener === "function") {
+      const index = __zigWptWindowLoadListeners.indexOf(listener);
+      if (index !== -1) __zigWptWindowLoadListeners.splice(index, 1);
+      return undefined;
+    }
+    return nativeRemoveEventListener ? nativeRemoveEventListener(type, listener, options) : undefined;
+  };
 }
 
 function runWptSetups() {
@@ -520,6 +563,12 @@ function dispatchSyntheticWindowLoad() {
       event = new Event("load");
     }
     if (event) {
+      for (const listener of __zigWptWindowLoadListeners.slice()) {
+        if (typeof listener !== "function") continue;
+        try {
+          listener.call(window, event);
+        } catch {}
+      }
       window.dispatchEvent(event);
     }
   } catch {}
@@ -562,6 +611,7 @@ globalThis.async_test = (first = "async_test", second) => {
   const callback = typeof first === "function" ? first : undefined;
   const name = typeof first === "string" ? first : second ?? "async_test";
   const cleanups = [];
+  let failure = null;
   let resolveDone;
   let rejectDone;
   const done = new Promise((resolve, reject) => {
@@ -575,8 +625,9 @@ globalThis.async_test = (first = "async_test", second) => {
       }
       return fn.apply(thisArg, args);
     } catch (err) {
-      rejectDone(err);
-      throw err;
+      failure = failure ?? err;
+      resolveDone();
+      return undefined;
     }
   };
   const testObject = {
@@ -613,8 +664,8 @@ globalThis.async_test = (first = "async_test", second) => {
     },
     unreached_func: (message) => () => {
       const error = new Error(message || "unreached");
-      rejectDone(error);
-      throw error;
+      failure = failure ?? error;
+      resolveDone();
     }
   };
   const runCleanups = () => {
@@ -624,17 +675,18 @@ globalThis.async_test = (first = "async_test", second) => {
       } catch {}
     }
   };
+  if (callback) callback.call(testObject, testObject);
   bunTest(${JSON.stringify(entry.file)} + " :: " + name, async () => {
       if (__zigWptResetPerTest) {
         resetWptDomFixture();
         runWptSetups();
       }
     try {
-      if (callback) callback.call(testObject, testObject);
-      if (!__zigWptRegistersTestsViaWindowOnload) {
+      if (!callback && !__zigWptRegistersTestsViaWindowOnload) {
         dispatchSyntheticWindowLoad();
       }
       await done;
+      if (failure) throw failure;
     } finally {
       runCleanups();
     }

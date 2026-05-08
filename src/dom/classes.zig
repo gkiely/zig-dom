@@ -65,6 +65,7 @@ const NodeCallbacks = struct {
 const ElementCallbacks = struct {
     pub const tagNameGet = jsElementTagNameGet;
     pub const localNameGet = jsElementLocalNameGet;
+    pub const prefixGet = jsElementPrefixGet;
     pub const namespaceUriGet = jsElementNamespaceUriGet;
     pub const idGet = jsElementIdGet;
     pub const idSet = jsElementIdSet;
@@ -1947,7 +1948,7 @@ fn jsNodeNameGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.
     }
     const this_handle = parseThisHandle(ctx, this_value, "nodeName") orelse return quickjs.Value.exception;
     if (zig_dom.zig_dom_node_type(this_handle) == 1) {
-        return elementNameToJs(ctx, this_handle, "nodeName", .upper);
+        return elementNameToJs(ctx, this_value, this_handle, "nodeName", .upper);
     }
     return nodeNameToJs(ctx, this_handle, "nodeName");
 }
@@ -2358,22 +2359,31 @@ fn replaceCharacterDataRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Val
 fn jsElementTagNameGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const this_handle = parseThisHandle(ctx, this_value, "tagName") orelse return quickjs.Value.exception;
-    return elementNameToJs(ctx, this_handle, "tagName", .upper);
+    return elementNameToJs(ctx, this_value, this_handle, "tagName", .upper);
 }
 
 fn jsElementLocalNameGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const this_handle = parseThisHandle(ctx, this_value, "localName") orelse return quickjs.Value.exception;
-    return elementNameToJs(ctx, this_handle, "localName", .lower);
+    return elementNameToJs(ctx, this_value, this_handle, "localName", .lower);
+}
+
+fn jsElementPrefixGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    _ = parseThisHandle(ctx, this_value, "prefix") orelse return quickjs.Value.exception;
+    return quickjs.Value.null;
 }
 
 const ElementNameCase = enum { upper, lower };
 
-fn elementNameToJs(ctx: *quickjs.Context, node_handle: u64, operation: []const u8, name_case: ElementNameCase) quickjs.Value {
+fn elementNameToJs(ctx: *quickjs.Context, element: quickjs.Value, node_handle: u64, operation: []const u8, name_case: ElementNameCase) quickjs.Value {
     const name = nodeNameToJs(ctx, node_handle, operation);
     defer name.deinit(ctx);
     const cstr = name.toCStringLen(ctx) orelse return quickjs.Value.exception;
     defer ctx.freeCString(cstr.ptr);
+    if (getBoolProperty(ctx, element, "__zigPreserveElementCase") orelse false) {
+        return quickjs.Value.initStringLen(ctx, cstr.ptr[0..cstr.len]);
+    }
     var buffer: [256]u8 = undefined;
     if (cstr.len > buffer.len) {
         return quickjs.Value.initStringLen(ctx, cstr.ptr[0..cstr.len]);
@@ -2393,19 +2403,15 @@ fn jsElementNamespaceUriGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Valu
 
     const explicit_namespace = this_value.getPropertyStr(ctx, "__zigNamespaceURI");
     defer explicit_namespace.deinit(ctx);
+    if (!explicit_namespace.isException() and explicit_namespace.isNull()) {
+        return quickjs.Value.null;
+    }
     if (!explicit_namespace.isException() and explicit_namespace.isString()) {
         const text = explicit_namespace.toCStringLen(ctx) orelse return quickjs.Value.exception;
         defer ctx.freeCString(text.ptr);
         return quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]);
     }
 
-    const local_name = jsElementLocalNameGet(ctx, this_value);
-    defer local_name.deinit(ctx);
-    const cstr = local_name.toCStringLen(ctx) orelse return quickjs.Value.initStringLen(ctx, "http://www.w3.org/1999/xhtml");
-    defer ctx.freeCString(cstr.ptr);
-    if (std.mem.eql(u8, cstr.ptr[0..cstr.len], "svg")) {
-        return quickjs.Value.initStringLen(ctx, "http://www.w3.org/2000/svg");
-    }
     return quickjs.Value.initStringLen(ctx, "http://www.w3.org/1999/xhtml");
 }
 
@@ -3949,15 +3955,36 @@ fn jsDocumentBodyGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quic
     return documentWindowNodeGet(ctx_opt, this_value, "body", zig_dom.zig_dom_window_body);
 }
 
+fn isValidCreateElementName(name: []const u8) bool {
+    if (name.len == 0) return false;
+    const first = name[0];
+    if (std.ascii.isDigit(first) or first == '-' or first == '.' or first == '<' or first == '}') return false;
+    for (name) |ch| {
+        if (std.ascii.isWhitespace(ch) or ch == '>') return false;
+    }
+    return true;
+}
+
 fn jsDocumentCreateElement(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
     const document_handle = parseThisHandle(ctx, this_value, "createElement") orelse return quickjs.Value.exception;
     const name = parseStringArg(ctx, args, 0, "createElement") orelse return quickjs.Value.exception;
     defer ctx.freeCString(name.ptr);
+    const raw_name = name.ptr[0..name.len];
+    if (!isValidCreateElementName(raw_name)) return throwOperationMessage(ctx, "createElement", "INVALID_CHARACTER_ERR");
+
+    var name_buffer: [256]u8 = undefined;
+    var element_name = raw_name;
+    const preserve_case = getBoolProperty(ctx, this_value, "__zigPreserveElementCase") orelse false;
+    const is_xml_document = getBoolProperty(ctx, this_value, "__zigIsXmlDocument") orelse false;
+    if (!preserve_case and raw_name.len <= name_buffer.len) {
+        for (raw_name, 0..) |ch, i| name_buffer[i] = std.ascii.toLower(ch);
+        element_name = name_buffer[0..raw_name.len];
+    }
 
     var out_handle: u64 = 0;
-    var status = zig_dom.zig_dom_document_create_element(document_handle, name.ptr, name.len, &out_handle);
+    var status = zig_dom.zig_dom_document_create_element(document_handle, element_name.ptr, element_name.len, &out_handle);
     if (status == 1) {
         const global_retry = ctx.getGlobalObject();
         defer global_retry.deinit(ctx);
@@ -3966,7 +3993,7 @@ fn jsDocumentCreateElement(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value
         if (!global_document.isException() and global_document.isObject()) {
             if (parseThisHandle(ctx, global_document, "createElement")) |global_document_handle| {
                 if (global_document_handle != document_handle) {
-                    status = zig_dom.zig_dom_document_create_element(global_document_handle, name.ptr, name.len, &out_handle);
+                    status = zig_dom.zig_dom_document_create_element(global_document_handle, element_name.ptr, element_name.len, &out_handle);
                 }
             }
         }
@@ -3974,6 +4001,18 @@ fn jsDocumentCreateElement(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value
     if (status != 0) return throwStatus(ctx, "createElement", status);
     const node = wrapNodeHandle(ctx, out_handle);
     if (node.isException()) return node;
+    if (preserve_case) {
+        node.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch {
+            node.deinit(ctx);
+            return quickjs.Value.exception;
+        };
+    }
+    if (is_xml_document) {
+        node.setPropertyStr(ctx, "__zigNamespaceURI", quickjs.Value.null) catch {
+            node.deinit(ctx);
+            return quickjs.Value.exception;
+        };
+    }
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const registry = global.getPropertyStr(ctx, "customElements");
@@ -4623,6 +4662,7 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
     const document = jsConstructDocument(ctx, quickjs.Value.undefined, &.{});
     if (document.isException() or !document.isObject()) return document;
     document.setPropertyStr(ctx, "__zigIsXmlDocument", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     return document;
 }
 
