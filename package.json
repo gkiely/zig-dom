@@ -5,12 +5,12 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "build:dev": "bun run scripts/build-dev.ts",
     "build:native": "bun run scripts/build-native.ts",
+    "build:perf": "bun run scripts/build-perf.ts",
     "build:packages": "bun run scripts/build-native-packages.ts",
     "build": "bun run build:packages",
     "test": "zig build run -- test --dom tests/runner/*.test.* tests/integration",
-    "test:dev": "bun run scripts/build-dev.ts",
-    "test:perf": "bun run scripts/build-perf.ts",
     "test:wpt": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests"
   },
   "devDependencies": {
