@@ -59,8 +59,7 @@ function expandVariants(entry: ManifestEntry): Array<string | undefined> {
 function shouldSkipEntry(entry: ManifestEntry): boolean {
   const normalized = entry.file.replaceAll("\\", "/").toLowerCase();
   // Temporary skips: these cases trigger Debug-only QuickJS GC assertions but pass in ReleaseFast.
-  return normalized.endsWith("/dom/events/event-dispatch-single-activation-behavior.html") ||
-    normalized.endsWith("/dom/events/event-subclasses-constructors.html") ||
+  return normalized.endsWith("/dom/events/event-subclasses-constructors.html") ||
     normalized.endsWith("/dom/ranges/range-clonerange.html") ||
     normalized.endsWith("/dom/ranges/range-collapse.html") ||
     normalized.endsWith("/dom/ranges/range-commonancestorcontainer.html") ||
@@ -79,6 +78,24 @@ function expectedFailureFiles(manifestPath: string): Set<string> {
       .filter((failure) => failure.subtest === "__all__")
       .map((failure) => failure.file.replaceAll("\\", "/"))
   );
+}
+
+function expectedFailureSubtests(manifestPath: string): Map<string, Set<string>> {
+  const expectedPath = resolve("wpt/expected", basename(manifestPath));
+  const map = new Map<string, Set<string>>();
+  if (!existsSync(expectedPath)) return map;
+  const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
+  for (const failure of expected.expectedFailures ?? []) {
+    if (!failure.subtest || failure.subtest === "__all__" || failure.subtest.startsWith("__")) continue;
+    const file = failure.file.replaceAll("\\", "/");
+    let subtests = map.get(file);
+    if (!subtests) {
+      subtests = new Set<string>();
+      map.set(file, subtests);
+    }
+    subtests.add(failure.subtest);
+  }
+  return map;
 }
 
 function scriptFileRef(scriptRef: string): string {
@@ -269,7 +286,7 @@ for (const testCase of tests) {
 `;
 }
 
-function generateHtmlTest(entry: ManifestEntry, wptRootPath: string, variant?: string): string {
+function generateHtmlTest(entry: ManifestEntry, wptRootPath: string, variant: string | undefined, expectedSubtests: string[] = []): string {
   const html = readFileSync(entry.file, "utf8");
   const scripts = [
     ...parseMetaScripts(html).map((script) => readFileSync(resolveScriptPath(entry.file, script, wptRootPath), "utf8")),
@@ -280,6 +297,7 @@ function generateHtmlTest(entry: ManifestEntry, wptRootPath: string, variant?: s
 
 const pending = [];
 const source = ${JSON.stringify(scripts.join("\n;\n"))};
+const __zigExpectedFailureSubtests = new Set(${JSON.stringify(expectedSubtests)});
 const __zigWptFirstTestOffset = source.search(/\\b(?:test|async_test|promise_test)\\s*\\(/);
 const __zigWptPreface = source.slice(0, __zigWptFirstTestOffset >= 0 ? __zigWptFirstTestOffset : source.length);
 const __zigWptResetPerTest = !/^(?:var|let|const)\\s+[A-Za-z_$][\\w$]*\\s*=\\s*document\\.getElementById\\(/m.test(__zigWptPreface);
@@ -524,6 +542,10 @@ function dispatchSyntheticWindowLoad() {
 }
 
 globalThis.test = (fn, name = "test") => {
+  if (__zigExpectedFailureSubtests.has(name)) {
+    bunTest(${JSON.stringify(entry.file)} + " :: " + name + " [expected failure]", () => {});
+    return;
+  }
   const cleanup = createWptCleanupContext();
   let failure = null;
   try {
@@ -543,6 +565,10 @@ globalThis.test = (fn, name = "test") => {
   });
 };
 globalThis.promise_test = (fn, name = "promise_test") => {
+  if (__zigExpectedFailureSubtests.has(name)) {
+    bunTest(${JSON.stringify(entry.file)} + " :: " + name + " [expected failure]", () => {});
+    return;
+  }
   bunTest(${JSON.stringify(entry.file)} + " :: " + name, async () => {
       if (__zigWptResetPerTest) {
         resetWptDomFixture();
@@ -559,6 +585,10 @@ globalThis.promise_test = (fn, name = "promise_test") => {
 globalThis.async_test = (first = "async_test", second) => {
   const callback = typeof first === "function" ? first : undefined;
   const name = typeof first === "string" ? first : second ?? "async_test";
+  if (__zigExpectedFailureSubtests.has(name)) {
+    bunTest(${JSON.stringify(entry.file)} + " :: " + name + " [expected failure]", () => {});
+    return {};
+  }
   const cleanups = [];
   let failure = null;
   let resolveDone;
@@ -749,6 +779,7 @@ const outDir = resolve(optionalArg("--generated-dir") ?? defaultGeneratedDir);
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
 const skipExpectedFiles = expectedFailureFiles(manifestPath);
+const skipExpectedSubtests = expectedFailureSubtests(manifestPath);
 const expanded = manifest.tests.flatMap((entry) => expandVariants(entry).map((variant) => ({ entry, variant })));
 const selected = entryCount == null ? expanded.slice(startEntry) : expanded.slice(startEntry, startEntry + entryCount);
 
@@ -766,8 +797,9 @@ for (const [index, { entry, variant }] of selected.entries()) {
     continue;
   }
   const outFile = resolve(outDir, `wpt-${String(startEntry + index).padStart(5, "0")}.test.js`);
+  const subtests = Array.from(skipExpectedSubtests.get(entry.file.replaceAll("\\", "/")) ?? []);
   const source = entry.file.toLowerCase().endsWith(".html")
-    ? generateHtmlTest(entry, wptRootPath, variant)
+    ? generateHtmlTest(entry, wptRootPath, variant, subtests)
     : generateAnyTest(outFile, entry, variant);
   writeFileSync(outFile, source);
   generatedFiles.push(outFile);

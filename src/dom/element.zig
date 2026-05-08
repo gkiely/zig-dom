@@ -29,7 +29,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "toggleAttribute", callbacks.toggleAttribute, 2);
     try bindings.installMethod(ctx, proto, "getAttributeNames", callbacks.getAttributeNames, 0);
     try bindings.installGetter(ctx, proto, "attributes", callbacks.attributesGet);
-    try bindings.installGetter(ctx, proto, "classList", callbacks.classListGet);
+    try bindings.installAccessor(ctx, proto, "classList", callbacks.classListGet, callbacks.classListSet);
     try bindings.installGetter(ctx, proto, "dataset", callbacks.datasetGet);
     try bindings.installMethod(ctx, proto, "querySelector", callbacks.querySelector, 1);
     try bindings.installMethod(ctx, proto, "querySelectorAll", callbacks.querySelectorAll, 1);
@@ -37,7 +37,6 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "getElementsByTagNameNS", callbacks.getElementsByTagNameNS, 2);
     try bindings.installMethod(ctx, proto, "getElementsByClassName", callbacks.getElementsByClassName, 1);
     try bindings.installMethod(ctx, proto, "matches", callbacks.matches, 1);
-    try bindings.installMethod(ctx, proto, "webkitMatchesSelector", callbacks.matches, 1);
     try bindings.installMethod(ctx, proto, "closest", callbacks.closest, 1);
     try bindings.installMethod(ctx, proto, "insertAdjacentElement", callbacks.insertAdjacentElement, 2);
     try bindings.installMethod(ctx, proto, "insertAdjacentHTML", callbacks.insertAdjacentHTML, 2);

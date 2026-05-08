@@ -95,6 +95,7 @@ const ElementCallbacks = struct {
     pub const getAttributeNames = jsElementGetAttributeNames;
     pub const attributesGet = jsElementAttributesGet;
     pub const classListGet = jsElementClassListGet;
+    pub const classListSet = jsReadonlySetter;
     pub const datasetGet = jsElementDatasetGet;
     pub const querySelector = jsElementQuerySelector;
     pub const querySelectorAll = jsElementQuerySelectorAll;
@@ -799,6 +800,9 @@ fn installElementSlice(ctx: *quickjs.Context, global: quickjs.Value) DomClassesE
     }
 
     try element_surface.installPrototype(ctx, element_proto, ElementCallbacks);
+    try installGetter(ctx, element_proto, "relList", jsElementRelListGet);
+    try installGetter(ctx, element_proto, "sandbox", jsElementSandboxTokenListGet);
+    try installGetter(ctx, element_proto, "sizes", jsElementSizesTokenListGet);
     try installElementUnscopables(ctx, global, element_proto);
     try installDocumentSlice(ctx, global);
 }
@@ -2086,6 +2090,10 @@ fn jsNoopMethod(_: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) qu
     return quickjs.Value.undefined;
 }
 
+fn jsReadonlySetter(_: ?*quickjs.Context, _: quickjs.Value, _: quickjs.Value) quickjs.Value {
+    return quickjs.Value.undefined;
+}
+
 fn jsNodeNameGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const override = this_value.getPropertyStr(ctx, "_nodeNameOverride");
@@ -2679,11 +2687,54 @@ fn jsElementTitleSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next
 }
 
 fn jsElementHtmlForGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (elementLocalNameIs(ctx, this_value, "output") and elementNamespaceIs(ctx, this_value, "http://www.w3.org/1999/xhtml")) {
+        return createDOMTokenList(ctx, this_value, "for", "__zigForTokenList");
+    }
+    if (!elementLocalNameIs(ctx, this_value, "label")) return quickjs.Value.undefined;
     return elementAttributeGet(ctx_opt, this_value, "for", "");
 }
 
 fn jsElementHtmlForSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
     return elementAttributeSet(ctx_opt, this_value, "for", next_value);
+}
+
+fn jsElementRelListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const is_html_rel = elementNamespaceIs(ctx, this_value, "http://www.w3.org/1999/xhtml") and
+        (elementLocalNameIs(ctx, this_value, "a") or elementLocalNameIs(ctx, this_value, "area") or elementLocalNameIs(ctx, this_value, "link"));
+    const is_svg_a = elementNamespaceIs(ctx, this_value, "http://www.w3.org/2000/svg") and elementLocalNameIs(ctx, this_value, "a");
+    if (!is_html_rel and !is_svg_a) return quickjs.Value.undefined;
+    return createDOMTokenList(ctx, this_value, "rel", "__zigRelList");
+}
+
+fn jsElementSandboxTokenListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (!elementNamespaceIs(ctx, this_value, "http://www.w3.org/1999/xhtml") or !elementLocalNameIs(ctx, this_value, "iframe")) return quickjs.Value.undefined;
+    return createDOMTokenList(ctx, this_value, "sandbox", "__zigSandboxTokenList");
+}
+
+fn jsElementSizesTokenListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (!elementNamespaceIs(ctx, this_value, "http://www.w3.org/1999/xhtml") or !elementLocalNameIs(ctx, this_value, "link")) return quickjs.Value.undefined;
+    return createDOMTokenList(ctx, this_value, "sizes", "__zigSizesTokenList");
+}
+
+fn elementLocalNameIs(ctx: *quickjs.Context, element: quickjs.Value, expected: []const u8) bool {
+    const value = jsElementLocalNameGet(ctx, element);
+    defer value.deinit(ctx);
+    const text = value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(text.ptr);
+    return std.ascii.eqlIgnoreCase(text.ptr[0..text.len], expected);
+}
+
+fn elementNamespaceIs(ctx: *quickjs.Context, element: quickjs.Value, expected: []const u8) bool {
+    const value = jsElementNamespaceUriGet(ctx, element);
+    defer value.deinit(ctx);
+    if (value.isNull() or value.isUndefined()) return expected.len == 0;
+    const text = value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(text.ptr);
+    return std.mem.eql(u8, text.ptr[0..text.len], expected);
 }
 
 fn isLabelableElement(ctx: *quickjs.Context, element: quickjs.Value) bool {
@@ -3185,17 +3236,32 @@ fn jsElementReset(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []co
 fn jsElementClassListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     _ = parseThisHandle(ctx, this_value, "classList") orelse return quickjs.Value.exception;
-    var existing = this_value.getPropertyStr(ctx, "__zigClassList");
-    if (!existing.isException() and existing.isObject()) return existing;
+    return createDOMTokenList(ctx, this_value, "class", "__zigClassList");
+}
+
+fn createDOMTokenList(ctx: *quickjs.Context, element: quickjs.Value, attr_name: []const u8, cache_name: [*:0]const u8) quickjs.Value {
+    var existing = element.getPropertyStr(ctx, cache_name);
+    if (!existing.isException() and existing.isObject()) {
+        classListSyncArray(ctx, existing) catch return quickjs.Value.exception;
+        return existing;
+    }
     existing.deinit(ctx);
 
     const list = quickjs.Value.initArray(ctx);
     if (list.isException()) return list;
-    list.setPropertyStr(ctx, "__zigElement", this_value.dup(ctx)) catch {
+    list.setPropertyStr(ctx, "__zigElement", element.dup(ctx)) catch {
+        list.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    list.setPropertyStr(ctx, "__zigTokenAttr", quickjs.Value.initStringLen(ctx, attr_name)) catch {
         list.deinit(ctx);
         return quickjs.Value.exception;
     };
     installMethod(ctx, list, "contains", jsClassListContains, 1) catch {
+        list.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    installMethod(ctx, list, "item", jsClassListItem, 1) catch {
         list.deinit(ctx);
         return quickjs.Value.exception;
     };
@@ -3204,6 +3270,18 @@ fn jsElementClassListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) 
         return quickjs.Value.exception;
     };
     installMethod(ctx, list, "remove", jsClassListRemove, 1) catch {
+        list.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    installMethod(ctx, list, "toggle", jsClassListToggle, 1) catch {
+        list.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    installMethod(ctx, list, "replace", jsClassListReplace, 2) catch {
+        list.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    installMethod(ctx, list, "supports", jsClassListSupports, 1) catch {
         list.deinit(ctx);
         return quickjs.Value.exception;
     };
@@ -3219,7 +3297,7 @@ fn jsElementClassListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) 
         list.deinit(ctx);
         return quickjs.Value.exception;
     };
-    this_value.setPropertyStr(ctx, "__zigClassList", list.dup(ctx)) catch {
+    element.setPropertyStr(ctx, cache_name, list.dup(ctx)) catch {
         list.deinit(ctx);
         return quickjs.Value.exception;
     };
@@ -6203,55 +6281,136 @@ fn jsClassListContains(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, ra
     defer ctx.freeCString(token.ptr);
     const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
     defer element.deinit(ctx);
-    return quickjs.Value.initBool(classListHasToken(ctx, element, token.ptr[0..token.len]));
+    const attr_name = classListAttributeName(ctx, this_value);
+    const tokens = classListNormalizedTokensForAttr(ctx, element, attr_name) orelse return quickjs.Value.exception;
+    defer tokens.deinit(ctx);
+    return quickjs.Value.initBool(classListArrayContains(ctx, tokens, arrayLength(ctx, tokens), token.ptr[0..token.len]));
+}
+
+fn jsClassListItem(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const raw_index = if (args.len > 0) args[0].toInt64(ctx) catch -1 else -1;
+    if (raw_index < 0 or raw_index > std.math.maxInt(u32)) return quickjs.Value.null;
+    classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
+    const item = this_value.getPropertyUint32(ctx, @intCast(raw_index));
+    if (item.isException() or item.isUndefined()) {
+        item.deinit(ctx);
+        return quickjs.Value.null;
+    }
+    return item;
 }
 
 fn jsClassListAdd(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
-    const token = parseStringArg(ctx, args, 0, "classList.add") orelse return quickjs.Value.exception;
-    defer ctx.freeCString(token.ptr);
     const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
     defer element.deinit(ctx);
-    if (!classListHasToken(ctx, element, token.ptr[0..token.len])) {
-        const current_opt = elementAttributeString(ctx, element, "class");
-        defer if (current_opt) |current| ctx.freeCString(current.ptr);
-        const current_len = if (current_opt) |current| current.len else 0;
-        const current_text = if (current_opt) |current| current.ptr[0..current.len] else "";
-        var buffer: [512]u8 = undefined;
-        const next = if (current_len == 0)
-            std.fmt.bufPrint(&buffer, "{s}", .{token.ptr[0..token.len]}) catch token.ptr[0..token.len]
-        else
-            std.fmt.bufPrint(&buffer, "{s} {s}", .{ current_text, token.ptr[0..token.len] }) catch current_text;
-        setElementStringAttribute(ctx, element, "class", next) catch return quickjs.Value.exception;
-        classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
+    const attr_name = classListAttributeName(ctx, this_value);
+    var tokens = classListNormalizedTokensForAttr(ctx, element, attr_name) orelse return quickjs.Value.exception;
+    var changed = false;
+    defer tokens.deinit(ctx);
+    for (args) |arg| {
+        const token = arg.toCStringLen(ctx) orelse return quickjs.Value.exception;
+        defer ctx.freeCString(token.ptr);
+        if (!validateDomToken(ctx, token.ptr[0..token.len], "classList.add")) return quickjs.Value.exception;
+        if (!classListArrayContains(ctx, tokens, arrayLength(ctx, tokens), token.ptr[0..token.len])) {
+            tokens.setPropertyUint32(ctx, arrayLength(ctx, tokens), quickjs.Value.initStringLen(ctx, token.ptr[0..token.len])) catch return quickjs.Value.exception;
+            changed = true;
+        }
     }
+    if (changed or args.len == 0 or classListHadDuplicateOrWhitespaceForAttr(ctx, element, attr_name)) classListApplyTokensForAttr(ctx, element, attr_name, tokens) catch return quickjs.Value.exception;
+    classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
     return quickjs.Value.undefined;
 }
 
 fn jsClassListRemove(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
-    const token = parseStringArg(ctx, args, 0, "classList.remove") orelse return quickjs.Value.exception;
-    defer ctx.freeCString(token.ptr);
     const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
     defer element.deinit(ctx);
-    const current_opt = elementAttributeString(ctx, element, "class");
-    defer if (current_opt) |current| ctx.freeCString(current.ptr);
-    const current_text = if (current_opt) |current| current.ptr[0..current.len] else "";
-    var out: [512]u8 = undefined;
-    var stream = std.Io.Writer.fixed(&out);
-    var iter = std.mem.tokenizeScalar(u8, current_text, ' ');
-    var first = true;
-    while (iter.next()) |part| {
-        if (std.mem.eql(u8, part, token.ptr[0..token.len])) continue;
-        if (!first) stream.writeAll(" ") catch {};
-        stream.writeAll(part) catch {};
-        first = false;
+    const attr_name = classListAttributeName(ctx, this_value);
+    var tokens = classListNormalizedTokensForAttr(ctx, element, attr_name) orelse return quickjs.Value.exception;
+    defer tokens.deinit(ctx);
+    for (args) |arg| {
+        const token = arg.toCStringLen(ctx) orelse return quickjs.Value.exception;
+        defer ctx.freeCString(token.ptr);
+        if (!validateDomToken(ctx, token.ptr[0..token.len], "classList.remove")) return quickjs.Value.exception;
+        classListRemoveToken(ctx, tokens, token.ptr[0..token.len]) catch return quickjs.Value.exception;
     }
-    setElementStringAttribute(ctx, element, "class", stream.buffered()) catch return quickjs.Value.exception;
+    if (args.len > 0 or classListHadDuplicateOrWhitespaceForAttr(ctx, element, attr_name)) classListApplyTokensForAttr(ctx, element, attr_name, tokens) catch return quickjs.Value.exception;
     classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
     return quickjs.Value.undefined;
+}
+
+fn jsClassListToggle(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const token = parseStringArg(ctx, args, 0, "classList.toggle") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(token.ptr);
+    if (!validateDomToken(ctx, token.ptr[0..token.len], "classList.toggle")) return quickjs.Value.exception;
+    const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
+    defer element.deinit(ctx);
+    const attr_name = classListAttributeName(ctx, this_value);
+    const force = if (args.len > 1 and !args[1].isUndefined()) args[1].toBool(ctx) catch false else null;
+    var tokens = classListNormalizedTokensForAttr(ctx, element, attr_name) orelse return quickjs.Value.exception;
+    defer tokens.deinit(ctx);
+    const has = classListArrayContains(ctx, tokens, arrayLength(ctx, tokens), token.ptr[0..token.len]);
+    if (force orelse !has) {
+        if (!has) tokens.setPropertyUint32(ctx, arrayLength(ctx, tokens), quickjs.Value.initStringLen(ctx, token.ptr[0..token.len])) catch return quickjs.Value.exception;
+        if (!has) classListApplyTokensForAttr(ctx, element, attr_name, tokens) catch return quickjs.Value.exception;
+        classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
+        return quickjs.Value.initBool(true);
+    }
+    if (!has) return quickjs.Value.initBool(false);
+    classListRemoveToken(ctx, tokens, token.ptr[0..token.len]) catch return quickjs.Value.exception;
+    classListApplyTokensForAttr(ctx, element, attr_name, tokens) catch return quickjs.Value.exception;
+    classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
+    return quickjs.Value.initBool(false);
+}
+
+fn jsClassListReplace(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const token = parseStringArg(ctx, args, 0, "classList.replace") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(token.ptr);
+    const new_token = parseStringArg(ctx, args, 1, "classList.replace") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(new_token.ptr);
+    if (!validateDomToken(ctx, token.ptr[0..token.len], "classList.replace")) return quickjs.Value.exception;
+    if (!validateDomToken(ctx, new_token.ptr[0..new_token.len], "classList.replace")) return quickjs.Value.exception;
+    const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
+    defer element.deinit(ctx);
+    const attr_name = classListAttributeName(ctx, this_value);
+    var tokens = classListNormalizedTokensForAttr(ctx, element, attr_name) orelse return quickjs.Value.exception;
+    defer tokens.deinit(ctx);
+    const len = arrayLength(ctx, tokens);
+    var found = false;
+    var out = quickjs.Value.initArray(ctx);
+    if (out.isException()) return out;
+    defer out.deinit(ctx);
+    for (0..len) |i_usize| {
+        const item = tokens.getPropertyUint32(ctx, @intCast(i_usize));
+        defer item.deinit(ctx);
+        const text = item.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(text.ptr);
+        const candidate = if (std.mem.eql(u8, text.ptr[0..text.len], token.ptr[0..token.len])) blk: {
+            found = true;
+            break :blk new_token.ptr[0..new_token.len];
+        } else text.ptr[0..text.len];
+        if (!classListArrayContains(ctx, out, arrayLength(ctx, out), candidate)) {
+            out.setPropertyUint32(ctx, arrayLength(ctx, out), quickjs.Value.initStringLen(ctx, candidate)) catch return quickjs.Value.exception;
+        }
+    }
+    if (!found) return quickjs.Value.initBool(false);
+    classListApplyTokensForAttr(ctx, element, attr_name, out) catch return quickjs.Value.exception;
+    classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
+    return quickjs.Value.initBool(true);
+}
+
+fn jsClassListSupports(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    _ = ctx.throwTypeError("DOMTokenList.supports is not supported for classList");
+    return quickjs.Value.exception;
 }
 
 fn jsClassListToString(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
@@ -6262,7 +6421,8 @@ fn jsClassListValueGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) qu
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
     defer element.deinit(ctx);
-    const value = elementAttributeString(ctx, element, "class") orelse return quickjs.Value.initStringLen(ctx, "");
+    const attr_name = classListAttributeName(ctx, this_value);
+    const value = elementAttributeString(ctx, element, attr_name) orelse return quickjs.Value.initStringLen(ctx, "");
     defer ctx.freeCString(value.ptr);
     return quickjs.Value.initStringLen(ctx, value.ptr[0..value.len]);
 }
@@ -6271,9 +6431,10 @@ fn jsClassListValueSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, ne
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
     defer element.deinit(ctx);
-    const applied = jsElementClassNameSet(ctx, element, next_value);
-    defer applied.deinit(ctx);
-    if (applied.isException()) return quickjs.Value.exception;
+    const attr_name = classListAttributeName(ctx, this_value);
+    const text = next_value.toCStringLen(ctx) orelse return quickjs.Value.exception;
+    defer ctx.freeCString(text.ptr);
+    setElementStringAttribute(ctx, element, attr_name, text.ptr[0..text.len]) catch return quickjs.Value.exception;
     classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
     return quickjs.Value.undefined;
 }
@@ -8053,6 +8214,20 @@ fn classListElement(ctx: *quickjs.Context, class_list: quickjs.Value) ?quickjs.V
     return element;
 }
 
+fn classListAttributeName(ctx: *quickjs.Context, class_list: quickjs.Value) []const u8 {
+    const attr = class_list.getPropertyStr(ctx, "__zigTokenAttr");
+    defer attr.deinit(ctx);
+    if (!attr.isException() and !attr.isUndefined() and !attr.isNull()) {
+        const text = attr.toCStringLen(ctx) orelse return "class";
+        defer ctx.freeCString(text.ptr);
+        if (std.mem.eql(u8, text.ptr[0..text.len], "rel")) return "rel";
+        if (std.mem.eql(u8, text.ptr[0..text.len], "for")) return "for";
+        if (std.mem.eql(u8, text.ptr[0..text.len], "sandbox")) return "sandbox";
+        if (std.mem.eql(u8, text.ptr[0..text.len], "sizes")) return "sizes";
+    }
+    return "class";
+}
+
 fn elementAttributeString(ctx: *quickjs.Context, element: quickjs.Value, name: []const u8) ?CStringArg {
     const handle = parseThisHandle(ctx, element, name) orelse return null;
     const value = elementAttributeValueToJs(ctx, handle, name, null, name);
@@ -8077,14 +8252,41 @@ fn elementHrefString(ctx: *quickjs.Context, element: quickjs.Value) ?CStringArg 
 
 fn setElementStringAttribute(ctx: *quickjs.Context, element: quickjs.Value, name: []const u8, value: []const u8) !void {
     const handle = parseThisHandle(ctx, element, name) orelse return error.JSError;
+    const old_value = elementAttributeValueToJs(ctx, handle, name, null, name);
+    defer old_value.deinit(ctx);
     const status = zig_dom.zig_dom_element_set_attribute(handle, name.ptr, name.len, value.ptr, value.len);
     if (status != 0) return error.JSError;
+    queueMutationRecord(ctx, element, .attributes, name, old_value);
+}
+
+fn removeElementAttribute(ctx: *quickjs.Context, element: quickjs.Value, name: []const u8) !void {
+    const handle = parseThisHandle(ctx, element, name) orelse return error.JSError;
+    const status = zig_dom.zig_dom_element_remove_attribute(handle, name.ptr, name.len);
+    if (status != 0) return error.JSError;
+}
+
+fn isAsciiWhitespaceByte(ch: u8) bool {
+    return ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r' or ch == 0x0c;
+}
+
+fn validateDomToken(ctx: *quickjs.Context, token: []const u8, operation: []const u8) bool {
+    if (token.len == 0) {
+        _ = throwOperationMessage(ctx, operation, "SyntaxError");
+        return false;
+    }
+    for (token) |ch| {
+        if (isAsciiWhitespaceByte(ch)) {
+            _ = throwOperationMessage(ctx, operation, "InvalidCharacterError");
+            return false;
+        }
+    }
+    return true;
 }
 
 fn classListHasToken(ctx: *quickjs.Context, element: quickjs.Value, token: []const u8) bool {
     const current = elementAttributeString(ctx, element, "class") orelse return false;
     defer ctx.freeCString(current.ptr);
-    var iter = std.mem.tokenizeScalar(u8, current.ptr[0..current.len], ' ');
+    var iter = std.mem.tokenizeAny(u8, current.ptr[0..current.len], " \t\n\r\x0c");
     while (iter.next()) |part| {
         if (std.mem.eql(u8, part, token)) return true;
     }
@@ -8094,11 +8296,12 @@ fn classListHasToken(ctx: *quickjs.Context, element: quickjs.Value, token: []con
 fn classListTokensArray(ctx: *quickjs.Context, class_list: quickjs.Value) quickjs.Value {
     const element = classListElement(ctx, class_list) orelse return quickjs.Value.exception;
     defer element.deinit(ctx);
+    const attr_name = classListAttributeName(ctx, class_list);
     const array = quickjs.Value.initArray(ctx);
     if (array.isException()) return array;
-    const current = elementAttributeString(ctx, element, "class") orelse return array;
+    const current = elementAttributeString(ctx, element, attr_name) orelse return array;
     defer ctx.freeCString(current.ptr);
-    var iter = std.mem.tokenizeScalar(u8, current.ptr[0..current.len], ' ');
+    var iter = std.mem.tokenizeAny(u8, current.ptr[0..current.len], " \t\n\r\x0c");
     var length: u32 = 0;
     while (iter.next()) |part| {
         if (classListArrayContains(ctx, array, length, part)) continue;
@@ -8109,6 +8312,90 @@ fn classListTokensArray(ctx: *quickjs.Context, class_list: quickjs.Value) quickj
         length += 1;
     }
     return array;
+}
+
+fn classListNormalizedTokensForAttr(ctx: *quickjs.Context, element: quickjs.Value, attr_name: []const u8) ?quickjs.Value {
+    const array = quickjs.Value.initArray(ctx);
+    if (array.isException()) return null;
+    const current = elementAttributeString(ctx, element, attr_name) orelse return array;
+    defer ctx.freeCString(current.ptr);
+    var iter = std.mem.tokenizeAny(u8, current.ptr[0..current.len], " \t\n\r\x0c");
+    while (iter.next()) |part| {
+        if (classListArrayContains(ctx, array, arrayLength(ctx, array), part)) continue;
+        array.setPropertyUint32(ctx, arrayLength(ctx, array), quickjs.Value.initStringLen(ctx, part)) catch {
+            array.deinit(ctx);
+            return null;
+        };
+    }
+    return array;
+}
+
+fn classListNormalizedTokens(ctx: *quickjs.Context, element: quickjs.Value) ?quickjs.Value {
+    return classListNormalizedTokensForAttr(ctx, element, "class");
+}
+
+fn classListHadDuplicateOrWhitespaceForAttr(ctx: *quickjs.Context, element: quickjs.Value, attr_name: []const u8) bool {
+    const current = elementAttributeString(ctx, element, attr_name) orelse return false;
+    defer ctx.freeCString(current.ptr);
+    if (current.len > 0 and (isAsciiWhitespaceByte(current.ptr[0]) or isAsciiWhitespaceByte(current.ptr[current.len - 1]))) return true;
+    for (current.ptr[0..current.len]) |ch| if (isAsciiWhitespaceByte(ch) and ch != ' ') return true;
+    if (std.mem.indexOf(u8, current.ptr[0..current.len], "  ") != null) return true;
+    var count: usize = 0;
+    var iter = std.mem.tokenizeAny(u8, current.ptr[0..current.len], " \t\n\r\x0c");
+    var seen = quickjs.Value.initArray(ctx);
+    if (seen.isException()) return false;
+    defer seen.deinit(ctx);
+    while (iter.next()) |part| {
+        count += 1;
+        if (classListArrayContains(ctx, seen, arrayLength(ctx, seen), part)) return true;
+        seen.setPropertyUint32(ctx, arrayLength(ctx, seen), quickjs.Value.initStringLen(ctx, part)) catch return true;
+    }
+    return count == 0 and current.len > 0;
+}
+
+fn classListHadDuplicateOrWhitespace(ctx: *quickjs.Context, element: quickjs.Value) bool {
+    return classListHadDuplicateOrWhitespaceForAttr(ctx, element, "class");
+}
+
+fn classListApplyTokensForAttr(ctx: *quickjs.Context, element: quickjs.Value, attr_name: []const u8, tokens: quickjs.Value) !void {
+    const len = arrayLength(ctx, tokens);
+    if (len == 0) {
+        if (elementAttributeString(ctx, element, attr_name)) |current| {
+            ctx.freeCString(current.ptr);
+            try setElementStringAttribute(ctx, element, attr_name, "");
+        }
+        return;
+    }
+    var buffer: [2048]u8 = undefined;
+    var stream = std.Io.Writer.fixed(&buffer);
+    for (0..len) |i_usize| {
+        if (i_usize != 0) stream.writeAll(" ") catch return error.JSError;
+        const item = tokens.getPropertyUint32(ctx, @intCast(i_usize));
+        defer item.deinit(ctx);
+        const text = item.toCStringLen(ctx) orelse return error.JSError;
+        defer ctx.freeCString(text.ptr);
+        stream.writeAll(text.ptr[0..text.len]) catch return error.JSError;
+    }
+    try setElementStringAttribute(ctx, element, attr_name, stream.buffered());
+}
+
+fn classListApplyTokens(ctx: *quickjs.Context, element: quickjs.Value, tokens: quickjs.Value) !void {
+    try classListApplyTokensForAttr(ctx, element, "class", tokens);
+}
+
+fn classListRemoveToken(ctx: *quickjs.Context, tokens: quickjs.Value, token: []const u8) !void {
+    const len = arrayLength(ctx, tokens);
+    var write: u32 = 0;
+    for (0..len) |i_usize| {
+        const item = tokens.getPropertyUint32(ctx, @intCast(i_usize));
+        defer item.deinit(ctx);
+        const text = item.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(text.ptr);
+        if (std.mem.eql(u8, text.ptr[0..text.len], token)) continue;
+        if (write != i_usize) tokens.setPropertyUint32(ctx, write, item.dup(ctx)) catch return error.JSError;
+        write += 1;
+    }
+    setArrayLength(ctx, tokens, write);
 }
 
 fn classListArrayContains(ctx: *quickjs.Context, array: quickjs.Value, length: u32, token: []const u8) bool {

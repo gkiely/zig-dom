@@ -36,13 +36,6 @@
       "status": "skip"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-classlist.html",
-      "subtest": "__all__",
-      "reason": "full DOMTokenList token validation/toggle semantics are incomplete",
-      "owner": "compat",
-      "status": "skip"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches.html",
       "subtest": "__all__",
       "reason": "full Selectors API matrix depends on populated iframe fixture documents and selector coverage beyond the current lightweight runner",
@@ -301,12 +294,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/querySelector-mixed-case.html",
-      "subtest": "Mixed HTML/SVG/MathML tree with various mixed-case attributes",
-      "reason": "namespace-aware attribute case matching is incomplete",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/svg-template-querySelector.html",
       "subtest": "__all__",
       "reason": "SVG template content/querySelector coverage is incomplete",
@@ -377,48 +364,6 @@
       "file": "__global__",
       "subtest": "__async__",
       "reason": "mutation-observer ordering mismatch in ParentNode.replaceChildren async assertions",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-next-sibling-during-replace-with.html",
-      "subtest": "test",
-      "reason": "script execution timing during replaceWith differs for template-cloned script",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
-      "subtest": "before() should be unscopable",
-      "reason": "inline handler scope mismatch under current runner globals model",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
-      "subtest": "after() should be unscopable",
-      "reason": "inline handler scope mismatch under current runner globals model",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
-      "subtest": "replaceWith() should be unscopable",
-      "reason": "inline handler scope mismatch under current runner globals model",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
-      "subtest": "remove() should be unscopable",
-      "reason": "inline handler scope mismatch under current runner globals model",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
-      "subtest": "prepend() should be unscopable",
-      "reason": "inline handler scope mismatch under current runner globals model",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/nodes/remove-unscopable.html",
-      "subtest": "append() should be unscopable",
-      "reason": "inline handler scope mismatch under current runner globals model",
       "owner": "compat"
     },
     {
@@ -876,12 +821,6 @@
       "owner": "compat"
     },
     {
-      "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-single-activation-behavior.html",
-      "subtest": "__all__",
-      "reason": "Event model and cross-realm event semantics remain incomplete",
-      "owner": "compat"
-    },
-    {
       "file": ".wpt-cache/web-platform-tests/dom/events/Event-dispatch-target-moved.html",
       "subtest": "__all__",
       "reason": "Event model and cross-realm event semantics remain incomplete",
@@ -932,7 +871,7 @@
     {
       "file": ".wpt-cache/web-platform-tests/dom/events/Event-subclasses-constructors.html",
       "subtest": "__all__",
-      "reason": "Event model and cross-realm event semantics remain incomplete",
+      "reason": "Event constructor subclassing still trips QuickJS Debug GC shutdown assertion",
       "owner": "compat"
     },
     {
@@ -1149,24 +1088,6 @@
       "file": ".wpt-cache/web-platform-tests/dom/interface-objects.html",
       "subtest": "__all__",
       "reason": "global interface-object property descriptors are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-coverage-for-attributes.html",
-      "subtest": "__all__",
-      "reason": "namespace-aware reflected DOMTokenList attributes are incomplete",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-iteration.html",
-      "subtest": "classList.forEach",
-      "reason": "DOMTokenList proxy identity differs from browser exotic object identity in forEach callback",
-      "owner": "compat"
-    },
-    {
-      "file": ".wpt-cache/web-platform-tests/dom/lists/DOMTokenList-iteration.html",
-      "subtest": "classList inheritance from Array.prototype",
-      "reason": "DOMTokenList iteration methods are compatible but not realm-identical to Array.prototype methods",
       "owner": "compat"
     },
     {
