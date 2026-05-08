@@ -4820,7 +4820,24 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     const implementation = createDOMImplementationObject(ctx);
     if (implementation.isException()) return quickjs.Value.exception;
     document.setPropertyStr(ctx, "implementation", implementation) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createElement", jsImplementationLightDocumentCreateElement, 1) catch return quickjs.Value.exception;
+
+    const body_name = quickjs.Value.initStringLen(ctx, "body");
+    defer body_name.deinit(ctx);
+    const body = jsImplementationLightDocumentCreateElement(ctx, document, @ptrCast(&[_]quickjs.Value{body_name}));
+    if (body.isException()) return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "body", body) catch return quickjs.Value.exception;
     return document;
+}
+
+fn jsImplementationLightDocumentCreateElement(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) return quickjs.Value.exception;
+    return jsDocumentCreateElement(ctx, document, raw_args);
 }
 
 fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
