@@ -20,6 +20,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "createDocumentType", callbacks.createDocumentType, 3);
     try bindings.installMethod(ctx, proto, "createEvent", callbacks.createEvent, 1);
     try bindings.installMethod(ctx, proto, "createRange", callbacks.createRange, 0);
+    try bindings.installMethod(ctx, proto, "createTreeWalker", callbacks.createTreeWalker, 1);
     try bindings.installMethod(ctx, proto, "getSelection", callbacks.getSelection, 0);
     try bindings.installMethod(ctx, proto, "importNode", callbacks.importNode, 2);
     try bindings.installMethod(ctx, proto, "adoptNode", callbacks.adoptNode, 1);
