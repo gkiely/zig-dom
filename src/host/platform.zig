@@ -1338,7 +1338,50 @@ fn jsDomParserParseFromString(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, ar
     body.setPropertyStr(ctx, "innerHTML", quickjs.Value.initStringLen(ctx, html)) catch return quickjs.Value.exception;
     body.setPropertyStr(ctx, "textContent", quickjs.Value.initStringLen(ctx, html)) catch return quickjs.Value.exception;
     parsed.setPropertyStr(ctx, "body", body) catch return quickjs.Value.exception;
+    if (domParserRootName(html)) |root_name| {
+        const namespace = domParserDefaultNamespace(html) orelse "";
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const document = global.getPropertyStr(ctx, "document");
+        defer document.deinit(ctx);
+        if (!document.isException() and document.isObject()) {
+            const create_element_ns = document.getPropertyStr(ctx, "createElementNS");
+            defer create_element_ns.deinit(ctx);
+            if (!create_element_ns.isException() and create_element_ns.isFunction(ctx)) {
+                const namespace_value = if (namespace.len == 0) quickjs.Value.null else quickjs.Value.initStringLen(ctx, namespace);
+                defer namespace_value.deinit(ctx);
+                const name_value = quickjs.Value.initStringLen(ctx, root_name);
+                defer name_value.deinit(ctx);
+                const element = create_element_ns.call(ctx, document, &.{ namespace_value, name_value });
+                defer element.deinit(ctx);
+                if (!element.isException() and element.isObject()) {
+                    element.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+                    parsed.setPropertyStr(ctx, "documentElement", element.dup(ctx)) catch return quickjs.Value.exception;
+                }
+            }
+        }
+    }
     return parsed;
+}
+
+fn domParserRootName(source: []const u8) ?[]const u8 {
+    const open = std.mem.indexOfScalar(u8, source, '<') orelse return null;
+    var start = open + 1;
+    if (start >= source.len or source[start] == '/' or source[start] == '!' or source[start] == '?') return null;
+    while (start < source.len and std.ascii.isWhitespace(source[start])) : (start += 1) {}
+    var end = start;
+    while (end < source.len and !std.ascii.isWhitespace(source[end]) and source[end] != '>' and source[end] != '/') : (end += 1) {}
+    if (end <= start) return null;
+    return source[start..end];
+}
+
+fn domParserDefaultNamespace(source: []const u8) ?[]const u8 {
+    const marker = "xmlns=\"";
+    const start_marker = std.mem.indexOf(u8, source, marker) orelse return null;
+    const start = start_marker + marker.len;
+    const rest = source[start..];
+    const end_offset = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
+    return rest[0..end_offset];
 }
 
 fn jsImportMetaRequire(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
