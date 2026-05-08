@@ -12,6 +12,7 @@
     "build": "bun run build:packages",
     "test": "zig build run -- test --dom tests/runner/*.test.* tests/integration",
     "test:wpt": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests",
+    "test:wpt:slow": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --only-slow --timeout-ms 180000",
     "test:wpt:all": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --include-slow --timeout-ms 180000",
     "test:perf": "zig-out/bin/zig-dom test --dom tests/runner/*.test.* tests/integration"
   },

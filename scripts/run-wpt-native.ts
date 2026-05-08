@@ -87,6 +87,12 @@ function expandVariants(entry: ManifestEntry): Array<string | undefined> {
   return variants.length > 0 ? variants : [undefined];
 }
 
+function expectedMap(manifestPath: string): ExpectedMap {
+  const expectedPath = resolve("wpt/expected", basename(manifestPath));
+  if (!existsSync(expectedPath)) return {};
+  return JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
+}
+
 function expectedEntries(expected: ExpectedMap, includeSlow: boolean): ExpectedFailure[] {
   return includeSlow
     ? (expected.expectedFailures ?? [])
@@ -94,9 +100,7 @@ function expectedEntries(expected: ExpectedMap, includeSlow: boolean): ExpectedF
 }
 
 function expectedFailureFiles(manifestPath: string, includeSlow: boolean): Set<string> {
-  const expectedPath = resolve("wpt/expected", basename(manifestPath));
-  if (!existsSync(expectedPath)) return new Set();
-  const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
+  const expected = expectedMap(manifestPath);
   return new Set(
     expectedEntries(expected, includeSlow)
       .filter((failure) => failure.subtest === "__all__")
@@ -105,10 +109,8 @@ function expectedFailureFiles(manifestPath: string, includeSlow: boolean): Set<s
 }
 
 function expectedFailureSubtests(manifestPath: string, includeSlow: boolean): Map<string, Set<string>> {
-  const expectedPath = resolve("wpt/expected", basename(manifestPath));
   const map = new Map<string, Set<string>>();
-  if (!existsSync(expectedPath)) return map;
-  const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
+  const expected = expectedMap(manifestPath);
   for (const failure of expectedEntries(expected, includeSlow)) {
     if (
       !failure.subtest ||
@@ -126,6 +128,15 @@ function expectedFailureSubtests(manifestPath: string, includeSlow: boolean): Ma
     subtests.add(failure.subtest);
   }
   return map;
+}
+
+function slowFailureFiles(manifestPath: string): Set<string> {
+  const expected = expectedMap(manifestPath);
+  return new Set(
+    (expected.slow ?? [])
+      .filter((failure) => failure.subtest === "__all__")
+      .map((failure) => failure.file.replaceAll("\\", "/"))
+  );
 }
 
 function scriptFileRef(scriptRef: string): string {
@@ -865,19 +876,25 @@ const batchSize = optionalNumberArg("--batch-size") ?? 1;
 const timeoutMs = optionalNumberArg("--timeout-ms");
 const optimizeMode = optionalArg("--optimize");
 const includeSlow = process.argv.includes("--include-slow");
+const onlySlow = process.argv.includes("--only-slow");
 const defaultGeneratedDir = `wpt/.native-generated/${basename(manifestPath, ".json")}`;
 const outDir = resolve(optionalArg("--generated-dir") ?? defaultGeneratedDir);
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
-const skipExpectedFiles = expectedFailureFiles(manifestPath, includeSlow);
-const skipExpectedSubtests = expectedFailureSubtests(manifestPath, includeSlow);
+const runSlow = includeSlow || onlySlow;
+const skipExpectedFiles = expectedFailureFiles(manifestPath, runSlow);
+const skipExpectedSubtests = expectedFailureSubtests(manifestPath, runSlow);
+const slowFiles = onlySlow ? slowFailureFiles(manifestPath) : undefined;
 const expanded = manifest.tests.flatMap((entry) =>
   expandVariants(entry).map((variant) => ({ entry, variant }))
 );
+const runnable = slowFiles
+  ? expanded.filter(({ entry }) => slowFiles.has(entry.file.replaceAll("\\", "/")))
+  : expanded;
 const selected =
   entryCount == null
-    ? expanded.slice(startEntry)
-    : expanded.slice(startEntry, startEntry + entryCount);
+    ? runnable.slice(startEntry)
+    : runnable.slice(startEntry, startEntry + entryCount);
 
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
@@ -905,7 +922,7 @@ for (const [index, { entry, variant }] of selected.entries()) {
 }
 
 console.log(
-  `NATIVE_WPT generated=${generatedFiles.length} start=${startEntry} total=${expanded.length}`
+  `NATIVE_WPT generated=${generatedFiles.length} start=${startEntry} total=${runnable.length}`
 );
 if (generatedFiles.length === 0) {
   process.exit(1);
