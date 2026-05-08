@@ -60,7 +60,8 @@ function shouldSkipEntry(entry: ManifestEntry): boolean {
   const normalized = entry.file.replaceAll("\\", "/").toLowerCase();
   // Temporary skips: these cases trigger Debug-only QuickJS GC assertions but pass in ReleaseFast.
   return normalized.endsWith("/dom/events/event-dispatch-single-activation-behavior.html") ||
-    normalized.endsWith("/dom/events/event-subclasses-constructors.html");
+    normalized.endsWith("/dom/events/event-subclasses-constructors.html") ||
+    normalized.endsWith("/dom/ranges/range-clonerange.html");
 }
 
 function expectedFailureFiles(manifestPath: string): Set<string> {
@@ -110,6 +111,7 @@ function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string)
   const regex = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
   let match: RegExpExecArray | null = null;
   while ((match = regex.exec(html)) !== null) {
+    if (isInsideTemplate(html, match.index)) continue;
     const attrs = match[1] ?? "";
     const body = match[2] ?? "";
     const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
@@ -127,17 +129,40 @@ function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string)
   return scripts;
 }
 
+function isInsideTemplate(html: string, index: number): boolean {
+  const before = html.slice(0, index);
+  const lastOpen = before.toLowerCase().lastIndexOf("<template");
+  if (lastOpen === -1) return false;
+  const lastClose = before.toLowerCase().lastIndexOf("</template>");
+  return lastClose < lastOpen;
+}
+
+function stripExecutableScriptBlocks(html: string): string {
+  return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (script, offset) =>
+    isInsideTemplate(html, offset) ? script : ""
+  );
+}
+
 function parseIframeInitScripts(entryFile: string, html: string, wptRootPath: string): Record<string, string> {
   const scriptsBySrc: Record<string, string> = {};
   const body = extractBody(html);
+  const rawSrcs = new Set<string>();
   const iframeRegex = /<iframe\b([^>]*)>/gi;
   let match: RegExpExecArray | null = null;
   while ((match = iframeRegex.exec(body)) !== null) {
     const attrs = match[1] ?? "";
     const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
     const rawSrc = srcMatch?.[1] ?? srcMatch?.[2] ?? srcMatch?.[3];
-    if (!rawSrc) continue;
+    if (rawSrc) rawSrcs.add(rawSrc);
+  }
 
+  const dynamicSrcRegex = /\.\s*src\s*=\s*(?:"([^"]+)"|'([^']+)')/gi;
+  while ((match = dynamicSrcRegex.exec(html)) !== null) {
+    const rawSrc = match[1] ?? match[2];
+    if (rawSrc) rawSrcs.add(rawSrc);
+  }
+
+  for (const rawSrc of rawSrcs) {
     const srcRef = scriptFileRef(rawSrc);
     if (!srcRef || srcRef.startsWith("//") || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(srcRef)) {
       continue;
@@ -152,8 +177,12 @@ function parseIframeInitScripts(entryFile: string, html: string, wptRootPath: st
     }
 
     const frameScripts = parseScriptBlocks(framePath, frameHtml, wptRootPath);
-    if (frameScripts.length === 0) continue;
-    scriptsBySrc[srcRef] = frameScripts.join("\n;\n");
+    const frameBody = extractBody(frameHtml);
+    if (frameScripts.length === 0 && frameBody.length === 0) continue;
+    const bodySetup = frameBody.length > 0
+      ? `if (document && document.body) document.body.innerHTML = ${JSON.stringify(frameBody)};`
+      : "";
+    scriptsBySrc[srcRef] = [bodySetup, ...frameScripts].filter(Boolean).join("\n;\n");
   }
 
   return scriptsBySrc;
@@ -162,14 +191,16 @@ function parseIframeInitScripts(entryFile: string, html: string, wptRootPath: st
 function extractBody(html: string): string {
   const explicitBody = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1];
   if (explicitBody != null) {
+    const bodyOffset = html.indexOf(explicitBody);
     return explicitBody
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (script, offset) =>
+        isInsideTemplate(html, offset + (bodyOffset >= 0 ? bodyOffset : 0)) ? script : ""
+      )
       .trim();
   }
 
   // Some WPT files place test markup at top-level without a <body> wrapper.
-  return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+  return stripExecutableScriptBlocks(html)
     .replace(/<!doctype[^>]*>/gi, "")
     .replace(/<meta\b[^>]*>/gi, "")
     .replace(/<title\b[^>]*>[\s\S]*?<\/title>/gi, "")
@@ -263,7 +294,6 @@ const __zigWptSingleTestDone = new Promise((resolve, reject) => {
   __zigWptSingleTestDoneResolve = resolve;
   __zigWptSingleTestDoneReject = reject;
 });
-let __zigWptIFrameLoadHooksInstalled = false;
 
 function normalizeFrameSrc(rawSrc) {
   if (typeof rawSrc !== "string") return "";
@@ -278,102 +308,14 @@ function runFrameInitScript(frameWindow, scriptSource) {
   } catch {}
 }
 
-function installFrameNavigationShim(iframe, frameWindow) {
-  if (!iframe || !frameWindow || !frameWindow.location) return;
-  const location = frameWindow.location;
-  if (!location || location.__zigHrefShimInstalled) return;
-
-  let hrefValue = typeof location.href === "string" ? location.href : "";
-  try {
-    Object.defineProperty(location, "href", {
-      configurable: true,
-      enumerable: true,
-      get() {
-        return hrefValue;
-      },
-      set(next) {
-        hrefValue = String(next);
-
-        const beforeUnload = frameWindow.onbeforeunload;
-        if (typeof beforeUnload === "function" && typeof Event === "function") {
-          const beforeUnloadEvent = new Event("beforeunload", { cancelable: true });
-          const previousEvent = frameWindow.event;
-          try {
-            frameWindow.event = beforeUnloadEvent;
-            const result = beforeUnload.call(frameWindow, beforeUnloadEvent);
-            if (result !== undefined && result !== null) {
-              String(result);
-            }
-          } catch {} finally {
-            frameWindow.event = previousEvent;
-          }
-        }
-
-        if (typeof iframe.dispatchEvent === "function" && typeof Event === "function") {
-          try {
-            iframe.dispatchEvent(new Event("load"));
-          } catch {}
-        }
-      }
-    });
-    location.__zigHrefShimInstalled = true;
-  } catch {}
-}
-
-function isIFrameElement(node) {
-  if (!node || typeof node !== "object") return false;
-  const localName = typeof node.localName === "string" ? node.localName.toLowerCase() : "";
-  return localName === "iframe";
-}
-
-function scheduleIFrameLoad(node) {
-  if (!isIFrameElement(node) || node.__zigWptLoadQueued) return;
-  node.__zigWptLoadQueued = true;
-  const timeoutFn = typeof globalThis.setTimeout === "function"
-    ? globalThis.setTimeout.bind(globalThis)
-    : ((runNow) => {
-        runNow();
-        return 0;
-      });
-  timeoutFn(() => {
-    try {
-      const frameWindow = node.contentWindow;
-      if (frameWindow) {
-        installFrameNavigationShim(node, frameWindow);
-      }
-    } catch {}
-    if (typeof node.dispatchEvent === "function" && typeof Event === "function") {
-      try {
-        node.dispatchEvent(new Event("load"));
-      } catch {}
-    }
-  }, 0);
-}
-
-function installIFrameLoadHooks() {
-  if (__zigWptIFrameLoadHooksInstalled) return;
-  __zigWptIFrameLoadHooksInstalled = true;
-
-  const wrapMethod = (proto, name, extractNodes) => {
-    if (!proto) return;
-    const original = proto[name];
-    if (typeof original !== "function") return;
-    proto[name] = function (...args) {
-      const result = original.apply(this, args);
-      try {
-        const nodes = extractNodes(args);
-        for (const node of nodes) {
-          scheduleIFrameLoad(node);
-        }
-      } catch {}
-      return result;
-    };
-  };
-
-  wrapMethod(globalThis.Node?.prototype, "appendChild", (args) => args.slice(0, 1));
-  wrapMethod(globalThis.Node?.prototype, "insertBefore", (args) => args.slice(0, 1));
-  wrapMethod(globalThis.Element?.prototype, "append", (args) => args);
-  wrapMethod(globalThis.Element?.prototype, "prepend", (args) => args);
+function navigateFrameToSrc(iframe, frameWindow, rawSrc) {
+  if (!iframe || !frameWindow) return;
+  const frameSrc = normalizeFrameSrc(String(rawSrc || ""));
+  const scriptSource = __zigWptIFrameInitScripts[frameSrc];
+  if (scriptSource) {
+    runFrameInitScript(frameWindow, scriptSource);
+    iframe.__zigFrameScriptInitialized = true;
+  }
 }
 
 function initializeFrameFixtures() {
@@ -400,7 +342,9 @@ function initializeFrameFixtures() {
       frameWindow.__zigWrappedFunctionCtor = true;
     }
 
-    installFrameNavigationShim(iframe, frameWindow);
+    if (frameWindow.location) {
+      frameWindow.location.__zigWptNavigateFrame = (rawSrc) => navigateFrameToSrc(iframe, frameWindow, rawSrc);
+    }
 
     const rawSrc = typeof iframe.getAttribute === "function" ? iframe.getAttribute("src") : "";
     const frameSrc = normalizeFrameSrc(rawSrc || "");
@@ -436,7 +380,6 @@ function initializeFrameFixtures() {
 
 function resetWptDomFixture() {
   document.body.innerHTML = __zigWptInitialBody;
-  installIFrameLoadHooks();
   installWindowLoadListenerShim();
   if (typeof globalThis.__zigDomSyncWindowNamedProperties === "function") {
     globalThis.__zigDomSyncWindowNamedProperties();

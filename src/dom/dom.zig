@@ -31,6 +31,7 @@ const Node = struct {
     kind: NodeKind,
     name: []u8,
     data: []u8,
+    namespace_uri: []u8,
     owner_document: u64,
     parent: u64,
     first_child: u64,
@@ -42,6 +43,7 @@ const Node = struct {
     fn deinit(self: *Node) void {
         freeOwned(self.name);
         freeOwned(self.data);
+        freeOwned(self.namespace_uri);
         for (self.attributes.items) |attr| {
             freeOwned(attr.name);
             freeOwned(attr.value);
@@ -196,6 +198,7 @@ fn createNode(window: *Window, kind: NodeKind, name: []const u8, data: []const u
         .kind = kind,
         .name = owned_name,
         .data = try makeOwned(data),
+        .namespace_uri = EMPTY_U8_SLICE,
         .owner_document = owner_document,
         .parent = 0,
         .first_child = 0,
@@ -466,7 +469,11 @@ fn setNodeData(node: *Node, data: []const u8) !void {
 
 fn attributeIndex(node: *Node, name: []const u8) ?usize {
     for (node.attributes.items, 0..) |attr, idx| {
-        if (std.ascii.eqlIgnoreCase(attr.name, name)) {
+        const matches = if (namespaceUsesCaseSensitiveAttributes(node))
+            std.mem.eql(u8, attr.name, name)
+        else
+            std.ascii.eqlIgnoreCase(attr.name, name);
+        if (matches) {
             return idx;
         }
     }
@@ -481,7 +488,7 @@ fn setAttribute(node: *Node, name: []const u8, value: []const u8) !void {
     }
 
     try node.attributes.append(c_allocator, .{
-        .name = try makeOwnedLower(name),
+        .name = if (namespaceUsesCaseSensitiveAttributes(node)) try makeOwned(name) else try makeOwnedLower(name),
         .value = try makeOwned(value),
     });
 }
@@ -1266,16 +1273,61 @@ fn containsTopLevelCombinatorOrComma(input: []const u8) bool {
 }
 
 fn attributeMatches(node: *Node, name: []const u8, op: AttrOperator, expected: []const u8) bool {
-    const actual = getAttribute(node, name) orelse return false;
+    return attributeMatchesWithValueFlag(node, name, op, expected, false);
+}
+
+fn namespaceUsesCaseSensitiveAttributes(node: *Node) bool {
+    return std.mem.eql(u8, node.namespace_uri, "http://www.w3.org/2000/svg") or
+        std.mem.eql(u8, node.namespace_uri, "http://www.w3.org/1998/Math/MathML");
+}
+
+fn getSelectorAttribute(node: *Node, name: []const u8) ?[]u8 {
+    for (node.attributes.items) |attr| {
+        const name_matches = if (namespaceUsesCaseSensitiveAttributes(node))
+            std.mem.eql(u8, attr.name, name)
+        else
+            std.ascii.eqlIgnoreCase(attr.name, name);
+        if (name_matches) return attr.value;
+    }
+    return null;
+}
+
+fn selectorValueEql(actual: []const u8, expected: []const u8, ignore_case: bool) bool {
+    return if (ignore_case) std.ascii.eqlIgnoreCase(actual, expected) else std.mem.eql(u8, actual, expected);
+}
+
+fn selectorValueStartsWith(actual: []const u8, expected: []const u8, ignore_case: bool) bool {
+    if (!ignore_case) return std.mem.startsWith(u8, actual, expected);
+    return expected.len <= actual.len and std.ascii.eqlIgnoreCase(actual[0..expected.len], expected);
+}
+
+fn selectorValueEndsWith(actual: []const u8, expected: []const u8, ignore_case: bool) bool {
+    if (!ignore_case) return std.mem.endsWith(u8, actual, expected);
+    return expected.len <= actual.len and std.ascii.eqlIgnoreCase(actual[actual.len - expected.len ..], expected);
+}
+
+fn selectorValueContains(actual: []const u8, expected: []const u8, ignore_case: bool) bool {
+    if (!ignore_case) return std.mem.indexOf(u8, actual, expected) != null;
+    if (expected.len == 0) return true;
+    if (expected.len > actual.len) return false;
+    var index: usize = 0;
+    while (index + expected.len <= actual.len) : (index += 1) {
+        if (std.ascii.eqlIgnoreCase(actual[index .. index + expected.len], expected)) return true;
+    }
+    return false;
+}
+
+fn attributeMatchesWithValueFlag(node: *Node, name: []const u8, op: AttrOperator, expected: []const u8, ignore_case_value: bool) bool {
+    const actual = getSelectorAttribute(node, name) orelse return false;
     return switch (op) {
         .exists => true,
-        .equals => std.mem.eql(u8, actual, expected),
+        .equals => selectorValueEql(actual, expected, ignore_case_value),
         .includes => classContains(actual, expected),
-        .dash_match => std.mem.eql(u8, actual, expected) or
-            (actual.len > expected.len and std.mem.startsWith(u8, actual, expected) and actual[expected.len] == '-'),
-        .prefix => std.mem.startsWith(u8, actual, expected),
-        .suffix => std.mem.endsWith(u8, actual, expected),
-        .substring => std.mem.indexOf(u8, actual, expected) != null,
+        .dash_match => selectorValueEql(actual, expected, ignore_case_value) or
+            (actual.len > expected.len and selectorValueStartsWith(actual, expected, ignore_case_value) and actual[expected.len] == '-'),
+        .prefix => selectorValueStartsWith(actual, expected, ignore_case_value),
+        .suffix => selectorValueEndsWith(actual, expected, ignore_case_value),
+        .substring => selectorValueContains(actual, expected, ignore_case_value),
     };
 }
 
@@ -1345,6 +1397,7 @@ fn matchesCompoundSelector(window: *Window, node_handle: u64, compound_raw: []co
                 _ = consumeSelectorWhitespace(attr_expr, &attr_i);
                 var op: AttrOperator = .exists;
                 var value: []const u8 = "";
+                var ignore_case_value = false;
                 if (attr_i < attr_expr.len) {
                     if (attr_expr[attr_i] == '=') {
                         op = .equals;
@@ -1384,10 +1437,19 @@ fn matchesCompoundSelector(window: *Window, node_handle: u64, compound_raw: []co
                     }
 
                     _ = consumeSelectorWhitespace(attr_expr, &attr_i);
+                    if (attr_i < attr_expr.len) {
+                        const flag = attr_expr[attr_i];
+                        if ((flag == 'i' or flag == 'I') and attr_i + 1 == attr_expr.len) {
+                            ignore_case_value = true;
+                            attr_i += 1;
+                        } else if ((flag == 's' or flag == 'S') and attr_i + 1 == attr_expr.len) {
+                            attr_i += 1;
+                        }
+                    }
                     if (attr_i != attr_expr.len) return false;
                 }
 
-                if (!attributeMatches(node, attr_name, op, value)) return false;
+                if (!attributeMatchesWithValueFlag(node, attr_name, op, value, ignore_case_value)) return false;
                 i = end + 1;
             },
             ':' => {
@@ -1890,6 +1952,15 @@ pub export fn zig_dom_document_create_element(document: u64, name_ptr: [*]const 
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
 
     out_handle.* = createNode(window, .element, name_ptr[0..name_len], "", document, false) catch return STATUS_OOM;
+    return STATUS_OK;
+}
+
+pub export fn zig_dom_element_set_namespace(element: u64, namespace_ptr: [*]const u8, namespace_len: usize) u32 {
+    const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
+    const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
+    if (node.kind != .element) return STATUS_INVALID_ARGUMENT;
+    freeOwned(node.namespace_uri);
+    node.namespace_uri = makeOwned(namespace_ptr[0..namespace_len]) catch return STATUS_OOM;
     return STATUS_OK;
 }
 
