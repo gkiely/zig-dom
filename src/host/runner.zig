@@ -455,7 +455,11 @@ pub const HostRunner = struct {
     }
 
     fn collectAfterEach(self: *HostRunner, scope: *Scope, out: *std.ArrayList(Hook)) !void {
-        try out.appendSlice(self.allocator, scope.after_each.items);
+        var index = scope.after_each.items.len;
+        while (index > 0) {
+            index -= 1;
+            try out.append(self.allocator, scope.after_each.items[index]);
+        }
         if (scope.parent) |parent| try self.collectAfterEach(parent, out);
     }
 

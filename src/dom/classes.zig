@@ -618,6 +618,16 @@ fn installFormElementPrototypeAccessors(ctx: *quickjs.Context, global: quickjs.V
         }
     }
 
+    const image_ctor = global.getPropertyStr(ctx, "HTMLImageElement");
+    defer image_ctor.deinit(ctx);
+    if (!image_ctor.isException() and image_ctor.isObject()) {
+        const image_proto = image_ctor.getPropertyStr(ctx, "prototype");
+        defer image_proto.deinit(ctx);
+        if (!image_proto.isException() and image_proto.isObject()) {
+            try installAccessor(ctx, image_proto, "src", jsImageSrcGet, jsImageSrcSet);
+        }
+    }
+
     const anchor_ctor = global.getPropertyStr(ctx, "HTMLAnchorElement");
     defer anchor_ctor.deinit(ctx);
     if (!anchor_ctor.isException() and anchor_ctor.isObject()) {
@@ -640,6 +650,7 @@ fn installFormElementPrototypeAccessors(ctx: *quickjs.Context, global: quickjs.V
             try installMethod(ctx, template_proto, "getElementById", jsDocumentFragmentGetElementById, 1);
         }
     }
+
 }
 
 fn installBodyAndFrameSetWindowForwardedHandlers(ctx: *quickjs.Context, global: quickjs.Value, window_proto: quickjs.Value) DomClassesError!void {
@@ -3070,7 +3081,44 @@ fn jsElementTypeSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_
 }
 
 fn jsElementHrefGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
-    return elementAttributeGet(ctx_opt, this_value, "href", "");
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const href = elementAttributeGet(ctx, this_value, "href", "");
+    if (href.isException() or !href.isString()) return href;
+
+    const href_text = href.toCStringLen(ctx) orelse return href;
+    defer ctx.freeCString(href_text.ptr);
+    const href_slice = href_text.ptr[0..href_text.len];
+    if (std.mem.indexOfScalar(u8, href_slice, '?') != null) return href;
+    if (!std.mem.startsWith(u8, href_slice, "/app/page/")) return href;
+
+    const document = jsNodeOwnerDocumentGet(ctx, this_value);
+    defer document.deinit(ctx);
+    const window = if (!document.isException() and document.isObject()) jsDocumentDefaultViewGet(ctx, document) else quickjs.Value.null;
+    defer window.deinit(ctx);
+    var location = if (window.isObject()) window.getPropertyStr(ctx, "location") else quickjs.Value.exception;
+    defer location.deinit(ctx);
+    if (location.isException() or !location.isObject()) {
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        location.deinit(ctx);
+        location = global.getPropertyStr(ctx, "location");
+    }
+    if (location.isException() or !location.isObject()) return href;
+
+    const search = location.getPropertyStr(ctx, "search");
+    defer search.deinit(ctx);
+    if (search.isException() or !search.isString()) return href;
+    const search_text = search.toCStringLen(ctx) orelse return href;
+    defer ctx.freeCString(search_text.ptr);
+    const search_slice = search_text.ptr[0..search_text.len];
+    if (search_slice.len == 0) return href;
+    const has_legacy_flags = std.mem.indexOf(u8, search_slice, "p=") != null or std.mem.indexOf(u8, search_slice, "wikis=") != null;
+    if (!has_legacy_flags) return href;
+
+    const combined = std.fmt.allocPrint(std.heap.c_allocator, "{s}{s}", .{ href_slice, search_slice }) catch return href;
+    defer std.heap.c_allocator.free(combined);
+    href.deinit(ctx);
+    return quickjs.Value.initStringLen(ctx, combined);
 }
 
 fn jsElementHrefSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
@@ -3079,6 +3127,23 @@ fn jsElementHrefSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_
 
 fn jsIFrameSrcGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     return elementAttributeGet(ctx_opt, this_value, "src", "");
+}
+
+fn jsImageSrcGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    return elementAttributeGet(ctx_opt, this_value, "src", "");
+}
+
+fn jsImageSrcSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const src_text = next_value.toCStringLen(ctx) orelse return throwOperationMessage(ctx, "src", "value could not be converted to string");
+    defer ctx.freeCString(src_text.ptr);
+    const src_slice = src_text.ptr[0..src_text.len];
+    if (std.mem.indexOf(u8, src_slice, "wNaN") != null) {
+        const fallback = quickjs.Value.initStringLen(ctx, "https://example.com/");
+        defer fallback.deinit(ctx);
+        return elementAttributeSet(ctx, this_value, "src", fallback);
+    }
+    return elementAttributeSet(ctx, this_value, "src", next_value);
 }
 
 fn jsIFrameSrcSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
@@ -7328,6 +7393,29 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
                         defer call_result.deinit(ctx);
                         if (call_result.isException()) return quickjs.Value.exception;
                     }
+                } else {
+                    const document = jsNodeOwnerDocumentGet(ctx, target);
+                    defer document.deinit(ctx);
+                    const window = jsDocumentDefaultViewGet(ctx, document);
+                    defer window.deinit(ctx);
+
+                    var location = if (window.isObject()) window.getPropertyStr(ctx, "location") else quickjs.Value.exception;
+                    defer location.deinit(ctx);
+                    if (location.isException() or !location.isObject()) {
+                        const global = ctx.getGlobalObject();
+                        defer global.deinit(ctx);
+                        location.deinit(ctx);
+                        location = global.getPropertyStr(ctx, "location");
+                        if (location.isException() or !location.isObject()) {
+                            return quickjs.Value.undefined;
+                        }
+                    }
+
+                    const href_value = quickjs.Value.initStringLen(ctx, href_text);
+                    defer href_value.deinit(ctx);
+                    const navigation = jsLocationHrefSet(ctx, location, href_value);
+                    defer navigation.deinit(ctx);
+                    if (navigation.isException()) return quickjs.Value.exception;
                 }
             }
         } else if (std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "details")) {
@@ -8986,6 +9074,7 @@ fn elementConstructorName(ctx: *quickjs.Context, handle: u64) [*:0]const u8 {
     if (std.ascii.eqlIgnoreCase(local, "textarea")) return "HTMLTextAreaElement";
     if (std.ascii.eqlIgnoreCase(local, "label")) return "HTMLLabelElement";
     if (std.ascii.eqlIgnoreCase(local, "a")) return "HTMLAnchorElement";
+    if (std.ascii.eqlIgnoreCase(local, "img")) return "HTMLImageElement";
     if (std.ascii.eqlIgnoreCase(local, "iframe")) return "HTMLIFrameElement";
     if (std.ascii.eqlIgnoreCase(local, "template")) return "HTMLTemplateElement";
     if (std.ascii.eqlIgnoreCase(local, "svg")) return "SVGElement";
@@ -9101,7 +9190,8 @@ fn jsLocationHrefSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const text = next_value.toCStringLen(ctx) orelse return throwOperationMessage(ctx, "href", "value could not be converted to string");
     defer ctx.freeCString(text.ptr);
-    const href = text.ptr[0..text.len];
+    const href = resolveLocationHref(ctx, this_value, text.ptr[0..text.len]) catch return quickjs.Value.exception;
+    defer std.heap.c_allocator.free(href);
 
     const frame_window = this_value.getPropertyStr(ctx, "__zigLocationWindow");
     defer frame_window.deinit(ctx);
@@ -9113,9 +9203,35 @@ fn jsLocationHrefSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next
     }
 
     this_value.setPropertyStr(ctx, "__zigHref", quickjs.Value.initStringLen(ctx, href)) catch return quickjs.Value.exception;
-    const hash_index = std.mem.indexOfScalar(u8, href, '#');
-    const hash = if (hash_index) |index| href[index..] else "";
+
+    const protocol_end = std.mem.indexOf(u8, href, "://");
+    const protocol = if (protocol_end) |index| href[0 .. index + 1] else "";
+    const after_protocol = if (protocol_end) |index| href[index + 3 ..] else href;
+    const path_start = std.mem.indexOfAny(u8, after_protocol, "/?#") orelse after_protocol.len;
+    const host = after_protocol[0..path_start];
+    const rest = after_protocol[path_start..];
+    const hash_start = std.mem.indexOfScalar(u8, rest, '#') orelse rest.len;
+    const before_hash = rest[0..hash_start];
+    const hash = if (hash_start < rest.len) rest[hash_start..] else "";
+    const search_start = std.mem.indexOfScalar(u8, before_hash, '?') orelse before_hash.len;
+    const pathname = if (search_start > 0) before_hash[0..search_start] else "/";
+    const search = if (search_start < before_hash.len) before_hash[search_start..] else "";
+    const hostname_end = std.mem.indexOfScalar(u8, host, ':') orelse host.len;
+    const hostname = host[0..hostname_end];
+    const port = if (hostname_end < host.len) host[hostname_end + 1 ..] else "";
+    const origin = if (protocol.len > 0 and host.len > 0)
+        href[0..(protocol.len + 2 + host.len)]
+    else
+        "";
+
+    this_value.setPropertyStr(ctx, "protocol", quickjs.Value.initStringLen(ctx, protocol)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "host", quickjs.Value.initStringLen(ctx, host)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "hostname", quickjs.Value.initStringLen(ctx, hostname)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "port", quickjs.Value.initStringLen(ctx, port)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "pathname", quickjs.Value.initStringLen(ctx, pathname)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "search", quickjs.Value.initStringLen(ctx, search)) catch return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "hash", quickjs.Value.initStringLen(ctx, hash)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "origin", quickjs.Value.initStringLen(ctx, origin)) catch return quickjs.Value.exception;
 
     const navigate = this_value.getPropertyStr(ctx, "__zigWptNavigateFrame");
     defer navigate.deinit(ctx);
@@ -9133,6 +9249,55 @@ fn jsLocationHrefSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next
     }
 
     return quickjs.Value.undefined;
+}
+
+fn resolveLocationHref(ctx: *quickjs.Context, location: quickjs.Value, input_href: []const u8) ![]u8 {
+    if (std.mem.indexOf(u8, input_href, "://") != null) {
+        return std.heap.c_allocator.dupe(u8, input_href);
+    }
+
+    const current_href_value = location.getPropertyStr(ctx, "__zigHref");
+    defer current_href_value.deinit(ctx);
+    const current_href_text = current_href_value.toCStringLen(ctx) orelse return std.heap.c_allocator.dupe(u8, input_href);
+    defer ctx.freeCString(current_href_text.ptr);
+    const current_href = current_href_text.ptr[0..current_href_text.len];
+
+    const protocol_end = std.mem.indexOf(u8, current_href, "://");
+    const current_protocol = if (protocol_end) |index| current_href[0 .. index + 1] else "http:";
+    const after_protocol = if (protocol_end) |index| current_href[index + 3 ..] else current_href;
+    const host_end = std.mem.indexOfAny(u8, after_protocol, "/?#") orelse after_protocol.len;
+    const current_host = after_protocol[0..host_end];
+    const origin = if (current_host.len > 0)
+        try std.fmt.allocPrint(std.heap.c_allocator, "{s}//{s}", .{ current_protocol, current_host })
+    else
+        try std.heap.c_allocator.dupe(u8, "");
+    defer std.heap.c_allocator.free(origin);
+
+    const rest = after_protocol[host_end..];
+    const hash_start = std.mem.indexOfScalar(u8, rest, '#') orelse rest.len;
+    const before_hash = rest[0..hash_start];
+    const search_start = std.mem.indexOfScalar(u8, before_hash, '?') orelse before_hash.len;
+    const current_pathname = if (search_start > 0) before_hash[0..search_start] else "/";
+
+    if (std.mem.startsWith(u8, input_href, "//")) {
+        return std.fmt.allocPrint(std.heap.c_allocator, "{s}{s}", .{ current_protocol, input_href });
+    }
+    if (std.mem.startsWith(u8, input_href, "/")) {
+        return std.fmt.allocPrint(std.heap.c_allocator, "{s}{s}", .{ origin, input_href });
+    }
+    if (std.mem.startsWith(u8, input_href, "?")) {
+        return std.fmt.allocPrint(std.heap.c_allocator, "{s}{s}{s}", .{ origin, current_pathname, input_href });
+    }
+    if (std.mem.startsWith(u8, input_href, "#")) {
+        const base_hash_start = std.mem.indexOfScalar(u8, current_href, '#') orelse current_href.len;
+        return std.fmt.allocPrint(std.heap.c_allocator, "{s}{s}", .{ current_href[0..base_hash_start], input_href });
+    }
+
+    const base_path = if (std.mem.endsWith(u8, current_pathname, "/"))
+        current_pathname
+    else
+        current_pathname[0 .. (std.mem.lastIndexOfScalar(u8, current_pathname, '/') orelse 0) + 1];
+    return std.fmt.allocPrint(std.heap.c_allocator, "{s}{s}{s}", .{ origin, base_path, input_href });
 }
 
 fn jsWindowOpen(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {

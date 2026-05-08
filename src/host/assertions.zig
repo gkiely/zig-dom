@@ -21,6 +21,7 @@ const Matcher = enum(i32) {
     toBeUndefined = 15,
     toHaveLength = 16,
     toBeTrue = 17,
+    toEndWith = 18,
 };
 
 pub fn install(ctx: *quickjs.Context) AssertionError!void {
@@ -225,6 +226,7 @@ fn installBuiltinMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted
     try installMatcher(ctx, object, "toBeDefined", .toBeDefined, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toBeUndefined", .toBeUndefined, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toHaveLength", .toHaveLength, inverted, received.dup(ctx));
+    try installMatcher(ctx, object, "toEndWith", .toEndWith, inverted, received.dup(ctx));
 }
 
 fn installCustomMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted: bool, received: quickjs.Value) AssertionError!void {
@@ -438,6 +440,7 @@ fn jsMatcher(
         .toBeDefined => matcherToBeDefined(received),
         .toBeUndefined => matcherToBeUndefined(received),
         .toHaveLength => matcherToHaveLength(ctx, received, args),
+        .toEndWith => matcherToEndWith(ctx, received, args),
     } catch return quickjs.Value.exception;
 
     if (pass != inverted) return quickjs.Value.undefined;
@@ -863,6 +866,23 @@ fn matcherToHaveLength(ctx: *quickjs.Context, received: quickjs.Value, args: []c
     return getLength(ctx, received) == expected;
 }
 
+fn matcherToEndWith(ctx: *quickjs.Context, received: quickjs.Value, args: []const quickjs.c.JSValue) !bool {
+    if (args.len == 0) return false;
+
+    const received_value = received.toStringValue(ctx);
+    defer received_value.deinit(ctx);
+    const received_text = received_value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(received_text.ptr);
+
+    const expected = quickjs.Value.fromCVal(args[0]);
+    const expected_value = expected.toStringValue(ctx);
+    defer expected_value.deinit(ctx);
+    const expected_text = expected_value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(expected_text.ptr);
+
+    return std.mem.endsWith(u8, received_text.ptr[0..received_text.len], expected_text.ptr[0..expected_text.len]);
+}
+
 fn isRegExp(ctx: *quickjs.Context, value: quickjs.Value) bool {
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
@@ -1082,6 +1102,7 @@ fn throwMatcherError(ctx: *quickjs.Context, matcher: Matcher, inverted: bool) qu
         .toBeDefined => "toBeDefined",
         .toBeUndefined => "toBeUndefined",
         .toHaveLength => "toHaveLength",
+        .toEndWith => "toEndWith",
     };
 
     const prefix = if (inverted) "Expected matcher not to pass: " else "Expected matcher to pass: ";
