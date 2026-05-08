@@ -161,7 +161,7 @@ const DocumentCallbacks = struct {
 
 const CharacterDataCallbacks = struct {
     pub const dataGet = jsNodeTextContentGet;
-    pub const dataSet = jsNodeTextContentSet;
+    pub const dataSet = jsCharacterDataDataSet;
     pub const lengthGet = jsCharacterDataLengthGet;
     pub const appendData = jsCharacterDataAppendData;
     pub const deleteData = jsCharacterDataDeleteData;
@@ -2370,6 +2370,19 @@ fn jsNodeTextContentSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, n
     return quickjs.Value.undefined;
 }
 
+fn jsCharacterDataDataSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const text_value = if (next_value.isNull())
+        null
+    else
+        next_value.toCStringLen(ctx) orelse return throwOperationMessage(ctx, "data", "value could not be converted to string");
+    defer if (text_value) |value| ctx.freeCString(value.ptr);
+    const text = if (text_value) |value| value.ptr[0..value.len] else "";
+    const value = quickjs.Value.initStringLen(ctx, text);
+    defer value.deinit(ctx);
+    return jsNodeTextContentSet(ctx, this_value, value);
+}
+
 fn jsNodeValueGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const node_handle = parseThisHandle(ctx, this_value, "nodeValue") orelse return quickjs.Value.exception;
@@ -2637,6 +2650,13 @@ fn replaceCharacterDataRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Val
 fn jsElementTagNameGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const this_handle = parseThisHandle(ctx, this_value, "tagName") orelse return quickjs.Value.exception;
+    const explicit_tag = this_value.getPropertyStr(ctx, "__zigTagName");
+    defer explicit_tag.deinit(ctx);
+    if (!explicit_tag.isException() and explicit_tag.isString()) {
+        const text = explicit_tag.toCStringLen(ctx) orelse return quickjs.Value.exception;
+        defer ctx.freeCString(text.ptr);
+        return quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]);
+    }
     return elementNameToJs(ctx, this_value, this_handle, "tagName", .upper);
 }
 
@@ -4910,6 +4930,14 @@ fn jsDocumentCreateElement(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value
             node.deinit(ctx);
             return quickjs.Value.exception;
         };
+        node.setPropertyStr(ctx, "__zigLocalName", quickjs.Value.initStringLen(ctx, raw_name)) catch {
+            node.deinit(ctx);
+            return quickjs.Value.exception;
+        };
+        node.setPropertyStr(ctx, "__zigTagName", quickjs.Value.initStringLen(ctx, raw_name)) catch {
+            node.deinit(ctx);
+            return quickjs.Value.exception;
+        };
     }
     if (is_xml_document) {
         node.setPropertyStr(ctx, "__zigNamespaceURI", quickjs.Value.null) catch {
@@ -6017,6 +6045,8 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     installMethod(ctx, document, "isSameNode", jsNodeIsSameNode, 1) catch return quickjs.Value.exception;
     installMethod(ctx, document, "isEqualNode", jsNodeIsEqualNode, 1) catch return quickjs.Value.exception;
     installAccessor(ctx, document, "textContent", jsNullGetter, jsReadonlySetter) catch return quickjs.Value.exception;
+    installAccessor(ctx, document, "documentElement", jsLightDocumentElementGet, jsReadonlySetter) catch return quickjs.Value.exception;
+    installAccessor(ctx, document, "doctype", jsLightDocumentDoctypeGet, jsReadonlySetter) catch return quickjs.Value.exception;
 
     const doctype_name = quickjs.Value.initStringLen(ctx, "html");
     defer doctype_name.deinit(ctx);
@@ -6028,7 +6058,6 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     const appended_doctype = jsLightDocumentAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{doctype}));
     defer appended_doctype.deinit(ctx);
     if (appended_doctype.isException()) return quickjs.Value.exception;
-    document.setPropertyStr(ctx, "doctype", doctype.dup(ctx)) catch return quickjs.Value.exception;
 
     const html_name = quickjs.Value.initStringLen(ctx, "html");
     defer html_name.deinit(ctx);
@@ -6057,7 +6086,6 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     const appended_html = jsLightDocumentAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{html}));
     defer appended_html.deinit(ctx);
     if (appended_html.isException()) return quickjs.Value.exception;
-    document.setPropertyStr(ctx, "documentElement", html.dup(ctx)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "head", head.dup(ctx)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "body", body.dup(ctx)) catch return quickjs.Value.exception;
     return document;
@@ -6074,6 +6102,11 @@ fn jsImplementationLightDocumentCreateElement(ctx_opt: ?*quickjs.Context, this_v
     if (element.isObject()) {
         if (getBoolProperty(ctx, this_value, "__zigPreserveElementCase") orelse false) {
             element.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+            const args: []const quickjs.Value = @ptrCast(raw_args);
+            if (args.len > 0) {
+                element.setPropertyStr(ctx, "__zigLocalName", args[0].dup(ctx)) catch return quickjs.Value.exception;
+                element.setPropertyStr(ctx, "__zigTagName", args[0].dup(ctx)) catch return quickjs.Value.exception;
+            }
         }
         setOwnerDocumentOverrideRecursive(ctx, element, this_value);
     }
@@ -6204,6 +6237,38 @@ fn jsLightDocumentPrepend(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value,
     return quickjs.Value.undefined;
 }
 
+fn jsLightDocumentElementGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const child_nodes = this_value.getPropertyStr(ctx, "childNodes");
+    defer child_nodes.deinit(ctx);
+    if (!child_nodes.isObject()) return quickjs.Value.null;
+    const length = arrayLength(ctx, child_nodes);
+    for (0..length) |index| {
+        const child = child_nodes.getPropertyUint32(ctx, @intCast(index));
+        if (child.isException()) continue;
+        const node_type = getIntProperty(ctx, child, "nodeType") orelse 0;
+        if (node_type == 1) return child;
+        child.deinit(ctx);
+    }
+    return quickjs.Value.null;
+}
+
+fn jsLightDocumentDoctypeGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const child_nodes = this_value.getPropertyStr(ctx, "childNodes");
+    defer child_nodes.deinit(ctx);
+    if (!child_nodes.isObject()) return quickjs.Value.null;
+    const length = arrayLength(ctx, child_nodes);
+    for (0..length) |index| {
+        const child = child_nodes.getPropertyUint32(ctx, @intCast(index));
+        if (child.isException()) continue;
+        const node_type = getIntProperty(ctx, child, "nodeType") orelse 0;
+        if (node_type == 10) return child;
+        child.deinit(ctx);
+    }
+    return quickjs.Value.null;
+}
+
 fn jsLightDocumentCloneNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -6315,7 +6380,7 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
     const namespace_slice_raw = if (namespace) |value| value.ptr[0..value.len] else null;
     const namespace_slice = if (namespace_slice_raw) |value| if (value.len == 0) null else value else null;
 
-    const qualified_name = if (args[1].isNull() or args[1].isUndefined()) null else parseStringArg(ctx, args, 1, "createDocument");
+    const qualified_name = if (args[1].isNull()) null else parseStringArg(ctx, args, 1, "createDocument");
     defer if (qualified_name) |value| ctx.freeCString(value.ptr);
     const qualified_slice = if (qualified_name) |value| value.ptr[0..value.len] else null;
     const omit_root = qualified_slice == null or qualified_slice.?.len == 0;
@@ -6333,20 +6398,10 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
     defer global.deinit(ctx);
 
     const has_doctype = args.len >= 3 and args[2].isObject();
-    if (omit_root) {
-        const document = createLightXmlDocument(ctx);
-        if (document.isException() or !document.isObject()) return document;
-        if (has_doctype) {
-            const appended = jsLightDocumentAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{args[2]}));
-            defer appended.deinit(ctx);
-            if (appended.isException()) return quickjs.Value.exception;
-            document.setPropertyStr(ctx, "doctype", args[2].dup(ctx)) catch return quickjs.Value.exception;
-        }
-        return document;
-    }
 
     const document = createLightXmlDocument(ctx);
     if (document.isException() or !document.isObject()) return document;
+    
     const xml_document_ctor = global.getPropertyStr(ctx, "XMLDocument");
     defer xml_document_ctor.deinit(ctx);
     if (!xml_document_ctor.isException() and xml_document_ctor.isObject()) {
@@ -6356,6 +6411,7 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
             document.setPrototype(ctx, xml_document_proto) catch return quickjs.Value.exception;
         }
     }
+    
     const HTML_NS = "http://www.w3.org/1999/xhtml";
     const SVG_NS = "http://www.w3.org/2000/svg";
     const content_type = if (namespace_slice != null and std.mem.eql(u8, namespace_slice.?, HTML_NS))
@@ -6366,13 +6422,23 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
         "application/xml";
     setXmlDocumentShape(ctx, document, content_type) catch return quickjs.Value.exception;
 
+    if (omit_root) {
+        if (has_doctype) {
+            setOwnerDocumentOverrideRecursive(ctx, args[2], document);
+            const appended = jsLightDocumentAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{args[2]}));
+            defer appended.deinit(ctx);
+            if (appended.isException()) return quickjs.Value.exception;
+        }
+        return document;
+    }
+
     const doctype = if (args.len >= 3 and args[2].isObject()) args[2].dup(ctx) else quickjs.Value.null;
     defer doctype.deinit(ctx);
     if (doctype.isObject()) {
+        setOwnerDocumentOverrideRecursive(ctx, doctype, document);
         const appended = jsLightDocumentAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{doctype}));
         defer appended.deinit(ctx);
         if (appended.isException()) return quickjs.Value.exception;
-        document.setPropertyStr(ctx, "doctype", doctype.dup(ctx)) catch return quickjs.Value.exception;
     }
 
     if (!omit_root) {
@@ -6383,10 +6449,10 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
         const root = jsImplementationLightDocumentCreateElementNS(ctx, document, @ptrCast(&[_]quickjs.Value{ namespace_value, qualified_value }));
         if (root.isException()) return quickjs.Value.exception;
         defer root.deinit(ctx);
+        setOwnerDocumentOverrideRecursive(ctx, root, document);
         const appended = jsLightDocumentAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{root}));
         defer appended.deinit(ctx);
         if (appended.isException()) return quickjs.Value.exception;
-        document.setPropertyStr(ctx, "documentElement", root.dup(ctx)) catch return quickjs.Value.exception;
     }
     return document;
 }
@@ -6413,9 +6479,13 @@ fn createLightXmlDocument(ctx: *quickjs.Context) quickjs.Value {
     installMethod(ctx, document, "isSameNode", jsNodeIsSameNode, 1) catch return quickjs.Value.exception;
     installMethod(ctx, document, "isEqualNode", jsNodeIsEqualNode, 1) catch return quickjs.Value.exception;
     installAccessor(ctx, document, "textContent", jsNullGetter, jsReadonlySetter) catch return quickjs.Value.exception;
+    installAccessor(ctx, document, "implementation", jsDocumentImplementationGet, jsReadonlySetter) catch return quickjs.Value.exception;
+    installAccessor(ctx, document, "documentElement", jsLightDocumentElementGet, jsReadonlySetter) catch return quickjs.Value.exception;
+    installAccessor(ctx, document, "doctype", jsLightDocumentDoctypeGet, jsReadonlySetter) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "__zigIsXmlDocument", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "nodeType", quickjs.Value.initInt64(9)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "nodeName", quickjs.Value.initStringLen(ctx, "#document")) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "nodeValue", quickjs.Value.null) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "location", quickjs.Value.null) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "compatMode", quickjs.Value.initStringLen(ctx, "CSS1Compat")) catch return quickjs.Value.exception;
@@ -6425,8 +6495,6 @@ fn createLightXmlDocument(ctx: *quickjs.Context) quickjs.Value {
     document.setPropertyStr(ctx, "URL", quickjs.Value.initStringLen(ctx, "about:blank")) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "documentURI", quickjs.Value.initStringLen(ctx, "about:blank")) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "contentType", quickjs.Value.initStringLen(ctx, "application/xml")) catch return quickjs.Value.exception;
-    document.setPropertyStr(ctx, "documentElement", quickjs.Value.null) catch return quickjs.Value.exception;
-    document.setPropertyStr(ctx, "doctype", quickjs.Value.null) catch return quickjs.Value.exception;
     return document;
 }
 
@@ -7700,6 +7768,7 @@ fn jsNodeAppendChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_
             else
                 zig_dom.zig_dom_node_append_child(this_handle, imported_handle);
             if (status != 0) return throwStatus(ctx, "appendChild", status);
+            setOwnerDocumentOverrideRecursive(ctx, args[0], parent_document);
             args[0].setPropertyStr(ctx, "__zigDomNativeHandle", quickjs.Value.initInt64(@intCast(imported_handle))) catch return quickjs.Value.exception;
             cacheNativeNodeWrapper(ctx, imported_handle, args[0]);
             queueMutationRecord(ctx, this_value, .child_list, null, null);
