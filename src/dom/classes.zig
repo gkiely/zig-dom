@@ -51,6 +51,7 @@ const NodeCallbacks = struct {
     pub const getRootNode = jsNodeGetRootNode;
     pub const compareDocumentPosition = jsNodeCompareDocumentPosition;
     pub const isEqualNode = jsNodeIsEqualNode;
+    pub const isSameNode = jsNodeIsSameNode;
     pub const normalize = jsNodeNormalize;
     pub const appendChild = jsNodeAppendChild;
     pub const append = jsNodeAppend;
@@ -242,6 +243,7 @@ pub const DomClasses = struct {
         if (document.isException()) return error.PropertyAccessFailed;
         defer document.deinit(ctx);
         document.setPropertyStr(ctx, "_windowHandle", quickjs.Value.initInt64(@intCast(window_handle))) catch return error.PropertyAccessFailed;
+        document.setPropertyStr(ctx, "__zigHasSyntheticHtmlDoctype", quickjs.Value.initBool(true)) catch return error.PropertyAccessFailed;
 
         const window = createWindowObject(ctx, window_handle, document);
         if (window.isException()) return error.PropertyAccessFailed;
@@ -2235,14 +2237,16 @@ fn jsNodeTextContentSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, n
 
 fn jsNodeValueGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
-    const node_type = zig_dom.zig_dom_node_type(parseThisHandle(ctx, this_value, "nodeValue") orelse return quickjs.Value.exception);
+    const node_handle = parseThisHandle(ctx, this_value, "nodeValue") orelse return quickjs.Value.exception;
+    const node_type = getIntProperty(ctx, this_value, "_nodeTypeOverride") orelse zig_dom.zig_dom_node_type(node_handle);
     if (node_type == 3 or node_type == 8) return jsNodeTextContentGet(ctx, this_value);
     return quickjs.Value.null;
 }
 
 fn jsNodeValueSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
-    const node_type = zig_dom.zig_dom_node_type(parseThisHandle(ctx, this_value, "nodeValue") orelse return quickjs.Value.exception);
+    const node_handle = parseThisHandle(ctx, this_value, "nodeValue") orelse return quickjs.Value.exception;
+    const node_type = getIntProperty(ctx, this_value, "_nodeTypeOverride") orelse zig_dom.zig_dom_node_type(node_handle);
     if (node_type == 3 or node_type == 8) return jsNodeTextContentSet(ctx, this_value, next_value);
     return quickjs.Value.undefined;
 }
@@ -3726,6 +3730,10 @@ fn jsElementQuerySelector(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value,
         }
     }
 
+    if (isKnownFastSelector(selector.ptr[0..selector.len])) {
+        return firstFastQuerySelector(ctx, this_value, selector.ptr[0..selector.len]);
+    }
+
     var out_handle: u64 = 0;
     const status = zig_dom.zig_dom_node_query_selector(this_handle, selector.ptr, selector.len, &out_handle);
     if (status != 0) return throwStatus(ctx, "querySelector", status);
@@ -3771,6 +3779,10 @@ fn jsElementQuerySelectorAll(ctx_opt: ?*quickjs.Context, this_value: quickjs.Val
         }
 
         return out;
+    }
+
+    if (isKnownFastSelector(selector.ptr[0..selector.len])) {
+        return querySelectorAllFast(ctx, this_value, selector.ptr[0..selector.len]);
     }
 
     var out_ptr: [*c]u64 = null;
@@ -3901,12 +3913,15 @@ fn isKnownFastSelector(selector: []const u8) bool {
         std.mem.eql(u8, selector, "input:not([type])") or
         std.mem.eql(u8, selector, "input[type=\"text\"]") or
         std.mem.eql(u8, selector, "input[type=\"search\"]") or
+        std.mem.eql(u8, selector, "input[name*=user i]") or
         std.mem.eql(u8, selector, "img") or
         std.mem.eql(u8, selector, "a") or
         std.mem.eql(u8, selector, "area") or
         isRoleTokenSelector(selector) or
         std.mem.eql(u8, selector, "[title]") or
         std.mem.eql(u8, selector, "svg > title") or
+        std.mem.eql(u8, selector, ":scope > p") or
+        std.mem.eql(u8, selector, ":scope > span") or
         std.mem.eql(u8, selector, "section > p") or
         std.mem.eql(u8, selector, "h1 + p") or
         std.mem.eql(u8, selector, "#scope") or
@@ -4078,6 +4093,16 @@ fn parentLocalNameEquals(ctx: *quickjs.Context, element: quickjs.Value, expected
     return std.ascii.eqlIgnoreCase(parent_local.ptr[0..parent_local.len], expected);
 }
 
+fn asciiContainsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return true;
+    if (needle.len > haystack.len) return false;
+    var start: usize = 0;
+    while (start + needle.len <= haystack.len) : (start += 1) {
+        if (std.ascii.eqlIgnoreCase(haystack[start .. start + needle.len], needle)) return true;
+    }
+    return false;
+}
+
 fn matchesTagAttributeSelector(ctx: *quickjs.Context, element: quickjs.Value, local: []const u8, selector: []const u8) ?bool {
     if (std.mem.indexOf(u8, selector, ":not([")) |not_index| {
         if (std.mem.indexOfScalar(u8, selector[0..not_index], '[') != null) {
@@ -4120,6 +4145,19 @@ fn matchesTagAttributeSelector(ctx: *quickjs.Context, element: quickjs.Value, lo
 
     if (std.mem.startsWith(u8, selector[bracket..], "[") and std.mem.endsWith(u8, selector, "]")) {
         const attr = selector[bracket + 1 .. selector.len - 1];
+        if (std.mem.indexOf(u8, attr, "*=")) |operator_index| {
+            const attr_name = attr[0..operator_index];
+            var expected = std.mem.trim(u8, attr[operator_index + 2 ..], " \t\n\r");
+            const case_insensitive = std.mem.endsWith(u8, expected, " i");
+            if (case_insensitive) expected = std.mem.trim(u8, expected[0 .. expected.len - 2], " \t\n\r");
+            if (expected.len >= 2 and ((expected[0] == '"' and expected[expected.len - 1] == '"') or (expected[0] == '\'' and expected[expected.len - 1] == '\''))) {
+                expected = expected[1 .. expected.len - 1];
+            }
+            const value = elementAttributeString(ctx, element, attr_name) orelse return false;
+            defer ctx.freeCString(value.ptr);
+            const text = value.ptr[0..value.len];
+            return if (case_insensitive) asciiContainsIgnoreCase(text, expected) else std.mem.indexOf(u8, text, expected) != null;
+        }
         if (std.mem.indexOfScalar(u8, attr, '=') != null) return null;
         const value = elementAttributeString(ctx, element, attr) orelse return false;
         defer ctx.freeCString(value.ptr);
@@ -4356,6 +4394,22 @@ fn jsDocumentDoctypeGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) q
     var child = zig_dom.zig_dom_node_first_child(document_handle);
     while (child != 0) : (child = zig_dom.zig_dom_node_next_sibling(child)) {
         if (zig_dom.zig_dom_node_type(child) == 10) return wrapNodeHandle(ctx, child);
+    }
+    const cached = this_value.getPropertyStr(ctx, "__zigSyntheticDoctype");
+    if (!cached.isException() and cached.isObject()) return cached;
+    cached.deinit(ctx);
+    const should_synthesize = getBoolProperty(ctx, this_value, "__zigHasSyntheticHtmlDoctype") orelse false;
+    if (should_synthesize) {
+        const name = quickjs.Value.initStringLen(ctx, "html");
+        defer name.deinit(ctx);
+        const empty_public = quickjs.Value.initStringLen(ctx, "");
+        defer empty_public.deinit(ctx);
+        const empty_system = quickjs.Value.initStringLen(ctx, "");
+        defer empty_system.deinit(ctx);
+        const doctype = jsDocumentCreateDocumentType(ctx, this_value, @ptrCast(&[_]quickjs.Value{ name, empty_public, empty_system }));
+        if (doctype.isException()) return doctype;
+        this_value.setPropertyStr(ctx, "__zigSyntheticDoctype", doctype.dup(ctx)) catch return quickjs.Value.exception;
+        return doctype;
     }
     return quickjs.Value.null;
 }
@@ -4791,6 +4845,10 @@ fn jsDocumentQuerySelector(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value
         return wrapNodeHandle(ctx, out_handle_id);
     }
 
+    if (isKnownFastSelector(selector.ptr[0..selector.len])) {
+        return firstFastQuerySelector(ctx, this_value, selector.ptr[0..selector.len]);
+    }
+
     var out_handle: u64 = 0;
     const status = zig_dom.zig_dom_document_query_selector(document_handle, selector.ptr, selector.len, &out_handle);
     if (status != 0) return throwStatus(ctx, "querySelector", status);
@@ -4833,6 +4891,10 @@ fn jsDocumentQuerySelectorAll(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
         return out;
     }
 
+    if (isKnownFastSelector(selector.ptr[0..selector.len])) {
+        return querySelectorAllFast(ctx, this_value, selector.ptr[0..selector.len]);
+    }
+
     var out_ptr: [*c]u64 = null;
     var out_len: usize = 0;
     const status = zig_dom.zig_dom_document_query_selector_all(document_handle, selector.ptr, selector.len, &out_ptr, &out_len);
@@ -4845,7 +4907,11 @@ fn querySelectorAllFast(ctx: *quickjs.Context, root: quickjs.Value, selector: []
     const array = quickjs.Value.initArray(ctx);
     if (array.isException()) return array;
     var index: u32 = 0;
-    collectMatchingDescendantsFast(ctx, root, selector, array, &index) catch {
+    const collect_result = if (std.mem.startsWith(u8, selector, ":scope > "))
+        collectMatchingDirectChildrenFast(ctx, root, selector[":scope > ".len..], array, &index)
+    else
+        collectMatchingDescendantsFast(ctx, root, selector, array, &index);
+    collect_result catch {
         array.deinit(ctx);
         return quickjs.Value.exception;
     };
@@ -4858,6 +4924,35 @@ fn querySelectorAllFast(ctx: *quickjs.Context, root: quickjs.Value, selector: []
         return quickjs.Value.exception;
     };
     return array;
+}
+
+fn firstFastQuerySelector(ctx: *quickjs.Context, root: quickjs.Value, selector: []const u8) quickjs.Value {
+    const matches = querySelectorAllFast(ctx, root, selector);
+    if (matches.isException()) return matches;
+    defer matches.deinit(ctx);
+    const first = matches.getPropertyUint32(ctx, 0);
+    if (first.isException()) return first;
+    if (first.isUndefined() or first.isNull()) {
+        first.deinit(ctx);
+        return quickjs.Value.null;
+    }
+    return first;
+}
+
+fn collectMatchingDirectChildrenFast(ctx: *quickjs.Context, root: quickjs.Value, selector: []const u8, out: quickjs.Value, index: *u32) !void {
+    const children = jsNodeChildNodesGet(ctx, root);
+    defer children.deinit(ctx);
+    const len = arrayLength(ctx, children);
+    for (0..len) |child_index| {
+        const child = children.getPropertyUint32(ctx, @intCast(child_index));
+        defer child.deinit(ctx);
+        if (child.isException() or !child.isObject()) continue;
+        if (zig_dom.zig_dom_node_type(parseThisHandle(ctx, child, "querySelectorAll") orelse 0) != 1) continue;
+        if (matchesSelectorFast(ctx, child, selector) orelse false) {
+            try out.setPropertyUint32(ctx, index.*, child.dup(ctx));
+            index.* += 1;
+        }
+    }
 }
 
 fn collectMatchingDescendantsFast(ctx: *quickjs.Context, root: quickjs.Value, selector: []const u8, out: quickjs.Value, index: *u32) !void {
@@ -5256,6 +5351,7 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     document.setPropertyStr(ctx, "implementation", implementation) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "contentType", quickjs.Value.initStringLen(ctx, "text/html")) catch return quickjs.Value.exception;
     installMethod(ctx, document, "createElement", jsImplementationLightDocumentCreateElement, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "isSameNode", jsNodeIsSameNode, 1) catch return quickjs.Value.exception;
 
     const body_name = quickjs.Value.initStringLen(ctx, "body");
     defer body_name.deinit(ctx);
@@ -5361,6 +5457,7 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
         document.setPropertyStr(ctx, "childNodes", child_nodes) catch return quickjs.Value.exception;
         installMethod(ctx, document, "appendChild", jsLightDocumentAppendChild, 1) catch return quickjs.Value.exception;
         installMethod(ctx, document, "createAttribute", jsDocumentCreateAttribute, 1) catch return quickjs.Value.exception;
+        installMethod(ctx, document, "isSameNode", jsNodeIsSameNode, 1) catch return quickjs.Value.exception;
         document.setPropertyStr(ctx, "__zigIsXmlDocument", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
         document.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
         document.setPropertyStr(ctx, "location", quickjs.Value.null) catch return quickjs.Value.exception;
@@ -6351,6 +6448,21 @@ fn jsNodeIsEqualNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_
     const right_text = right.toCStringLen(ctx) orelse return quickjs.Value.initBool(false);
     defer ctx.freeCString(right_text.ptr);
     return quickjs.Value.initBool(std.mem.eql(u8, left_text.ptr[0..left_text.len], right_text.ptr[0..right_text.len]));
+}
+
+fn jsNodeIsSameNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len == 0 or args[0].isNull() or args[0].isUndefined()) return quickjs.Value.initBool(false);
+    const this_handle_i64 = parseValueNodeHandle(ctx, this_value) orelse {
+        if (this_value.isObject()) return quickjs.Value.initBool(this_value.isStrictEqual(ctx, args[0]));
+        _ = throwOperationMessage(ctx, "isSameNode", "receiver is not a native node");
+        return quickjs.Value.exception;
+    };
+    if (this_handle_i64 <= 0) return quickjs.Value.initBool(false);
+    const other_handle_i64 = parseValueNodeHandle(ctx, args[0]) orelse return quickjs.Value.initBool(false);
+    if (other_handle_i64 <= 0) return quickjs.Value.initBool(false);
+    return quickjs.Value.initBool(this_handle_i64 == other_handle_i64);
 }
 
 fn jsNodeNormalize(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {

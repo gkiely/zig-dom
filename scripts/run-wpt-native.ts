@@ -245,7 +245,7 @@ const pending = [];
 const source = ${JSON.stringify(scripts.join("\n;\n"))};
 const __zigWptFirstTestOffset = source.search(/\\b(?:test|async_test|promise_test)\\s*\\(/);
 const __zigWptPreface = source.slice(0, __zigWptFirstTestOffset >= 0 ? __zigWptFirstTestOffset : source.length);
-const __zigWptResetPerTest = !/^var\\s+[A-Za-z_$][\\w$]*\\s*=\\s*document\\.getElementById\\(/m.test(__zigWptPreface);
+const __zigWptResetPerTest = !/^(?:var|let|const)\\s+[A-Za-z_$][\\w$]*\\s*=\\s*document\\.getElementById\\(/m.test(__zigWptPreface);
 const __zigWptRegistersTestsViaWindowOnload = /window\\s*\\.\\s*onload\\s*=/.test(__zigWptPreface);
 
 ${nativeWindowSetupSource(JSON.stringify(entryUrl(entry.file, variant)))}

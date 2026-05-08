@@ -5,11 +5,17 @@ pub const NodeConstant = struct {
 
 pub const node_constants = [_]NodeConstant{
     .{ .name = "ELEMENT_NODE", .value = 1 },
+    .{ .name = "ATTRIBUTE_NODE", .value = 2 },
     .{ .name = "TEXT_NODE", .value = 3 },
+    .{ .name = "CDATA_SECTION_NODE", .value = 4 },
+    .{ .name = "ENTITY_REFERENCE_NODE", .value = 5 },
+    .{ .name = "ENTITY_NODE", .value = 6 },
+    .{ .name = "PROCESSING_INSTRUCTION_NODE", .value = 7 },
     .{ .name = "COMMENT_NODE", .value = 8 },
     .{ .name = "DOCUMENT_NODE", .value = 9 },
     .{ .name = "DOCUMENT_TYPE_NODE", .value = 10 },
     .{ .name = "DOCUMENT_FRAGMENT_NODE", .value = 11 },
+    .{ .name = "NOTATION_NODE", .value = 12 },
     .{ .name = "DOCUMENT_POSITION_DISCONNECTED", .value = 1 },
     .{ .name = "DOCUMENT_POSITION_PRECEDING", .value = 2 },
     .{ .name = "DOCUMENT_POSITION_FOLLOWING", .value = 4 },
