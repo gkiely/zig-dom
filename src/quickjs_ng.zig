@@ -112,6 +112,7 @@ pub const Runtime = struct {
         const global = self.ctx.getGlobalObject();
         defer global.deinit(self.ctx);
         _ = global.deletePropertyStr(self.ctx, "__zigDomNodeCache") catch {};
+        _ = global.deletePropertyStr(self.ctx, "__zigLiveRanges") catch {};
         _ = global.deletePropertyStr(self.ctx, "__zigCjsRegistry") catch {};
         const document = global.getPropertyStr(self.ctx, "document");
         defer document.deinit(self.ctx);

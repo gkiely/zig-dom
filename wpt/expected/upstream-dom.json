@@ -57,6 +57,97 @@
       "status": "skip"
     },
     {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendChild.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-appendData.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-dataChange.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-deleteData.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertBefore.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-insertData.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-removeChild.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceChild.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-replaceData.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-mutations-splitText.html",
+      "subtest": "__all__",
+      "reason": "range mutation coverage depends on selection APIs and eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-selectNode.html",
+      "subtest": "__all__",
+      "reason": "selectNode coverage depends on eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/Range-set.html",
+      "subtest": "__all__",
+      "reason": "range setter coverage depends on eval-visible setup globals not yet provided by the native WPT runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/ranges/StaticRange-constructor.html",
+      "subtest": "__all__",
+      "reason": "StaticRange is not implemented in the native DOM surface yet",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementsByClassName.html",
       "subtest": "__all__",
       "reason": "live HTMLCollection refresh for className mutations is fragile under the current selector-backed collection shim",

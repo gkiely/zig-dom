@@ -1163,6 +1163,8 @@ fn jsDocumentCreateRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     installGetter(ctx, range, "commonAncestorContainer", jsRangeCommonAncestorContainerGet) catch return quickjs.Value.exception;
     installMethod(ctx, range, "setStart", jsRangeSetStart, 2) catch return quickjs.Value.exception;
     installMethod(ctx, range, "setEnd", jsRangeSetEnd, 2) catch return quickjs.Value.exception;
+    installMethod(ctx, range, "cloneRange", jsRangeCloneRange, 0) catch return quickjs.Value.exception;
+    installMethod(ctx, range, "collapse", jsRangeCollapse, 1) catch return quickjs.Value.exception;
     installMethod(ctx, range, "selectNode", jsRangeSelectNode, 1) catch return quickjs.Value.exception;
     installMethod(ctx, range, "selectNodeContents", jsRangeSelectNodeContents, 1) catch return quickjs.Value.exception;
     installMethod(ctx, range, "comparePoint", jsRangeComparePoint, 2) catch return quickjs.Value.exception;
@@ -5648,6 +5650,46 @@ fn jsRangeSetEnd(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args
     return quickjs.Value.undefined;
 }
 
+fn jsRangeCloneRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const start = this_value.getPropertyStr(ctx, "startContainer");
+    defer start.deinit(ctx);
+    const end = this_value.getPropertyStr(ctx, "endContainer");
+    defer end.deinit(ctx);
+    const start_offset = this_value.getPropertyStr(ctx, "startOffset");
+    defer start_offset.deinit(ctx);
+    const end_offset = this_value.getPropertyStr(ctx, "endOffset");
+    defer end_offset.deinit(ctx);
+    if (start.isException() or end.isException() or start_offset.isException() or end_offset.isException()) return quickjs.Value.exception;
+    const range = jsDocumentCreateRange(ctx, if (start.isObject()) start else quickjs.Value.null, &.{});
+    if (range.isException() or !range.isObject()) return range;
+    range.setPropertyStr(ctx, "startContainer", start.dup(ctx)) catch return quickjs.Value.exception;
+    range.setPropertyStr(ctx, "endContainer", end.dup(ctx)) catch return quickjs.Value.exception;
+    range.setPropertyStr(ctx, "startOffset", start_offset.dup(ctx)) catch return quickjs.Value.exception;
+    range.setPropertyStr(ctx, "endOffset", end_offset.dup(ctx)) catch return quickjs.Value.exception;
+    updateRangeCollapsed(ctx, range) catch return quickjs.Value.exception;
+    return range;
+}
+
+fn jsRangeCollapse(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const to_start = args.len > 0 and !args[0].isUndefined() and (args[0].toBool(ctx) catch false);
+    const container_name: [:0]const u8 = if (to_start) "startContainer" else "endContainer";
+    const offset_name: [:0]const u8 = if (to_start) "startOffset" else "endOffset";
+    const container = this_value.getPropertyStr(ctx, container_name);
+    defer container.deinit(ctx);
+    const offset = this_value.getPropertyStr(ctx, offset_name);
+    defer offset.deinit(ctx);
+    if (container.isException() or offset.isException()) return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "startContainer", container.dup(ctx)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "endContainer", container.dup(ctx)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "startOffset", offset.dup(ctx)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "endOffset", offset.dup(ctx)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "collapsed", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
 fn jsRangeSelectNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -5921,22 +5963,57 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     const document = quickjs.Value.initObject(ctx);
     if (document.isException()) return document;
     document.setPropertyStr(ctx, "_nodeTypeOverride", quickjs.Value.initInt64(9)) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "nodeType", quickjs.Value.initInt64(9)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "_nodeNameOverride", quickjs.Value.initStringLen(ctx, "#document")) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "nodeName", quickjs.Value.initStringLen(ctx, "#document")) catch return quickjs.Value.exception;
     const implementation = createDOMImplementationObject(ctx);
     if (implementation.isException()) return quickjs.Value.exception;
     document.setPropertyStr(ctx, "implementation", implementation) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "contentType", quickjs.Value.initStringLen(ctx, "text/html")) catch return quickjs.Value.exception;
+    const child_nodes = quickjs.Value.initArray(ctx);
+    if (child_nodes.isException()) return child_nodes;
+    document.setPropertyStr(ctx, "childNodes", child_nodes) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "appendChild", jsLightDocumentAppendChild, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "append", jsLightDocumentAppend, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "prepend", jsLightDocumentPrepend, 1) catch return quickjs.Value.exception;
     installMethod(ctx, document, "createElement", jsImplementationLightDocumentCreateElement, 1) catch return quickjs.Value.exception;
     installMethod(ctx, document, "createTextNode", jsImplementationLightDocumentCreateTextNode, 1) catch return quickjs.Value.exception;
     installMethod(ctx, document, "createCDATASection", jsImplementationLightDocumentCreateTextNode, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createComment", jsImplementationLightDocumentCreateComment, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createDocumentFragment", jsImplementationLightDocumentCreateDocumentFragment, 0) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createRange", jsDocumentCreateRange, 0) catch return quickjs.Value.exception;
     installMethod(ctx, document, "isSameNode", jsNodeIsSameNode, 1) catch return quickjs.Value.exception;
 
+    const html_name = quickjs.Value.initStringLen(ctx, "html");
+    defer html_name.deinit(ctx);
+    const html = jsImplementationLightDocumentCreateElement(ctx, document, @ptrCast(&[_]quickjs.Value{html_name}));
+    if (html.isException()) return quickjs.Value.exception;
+    defer html.deinit(ctx);
+    setOwnerDocumentOverrideRecursive(ctx, html, document);
+    const head_name = quickjs.Value.initStringLen(ctx, "head");
+    defer head_name.deinit(ctx);
+    const head = jsImplementationLightDocumentCreateElement(ctx, document, @ptrCast(&[_]quickjs.Value{head_name}));
+    if (head.isException()) return quickjs.Value.exception;
+    defer head.deinit(ctx);
+    setOwnerDocumentOverrideRecursive(ctx, head, document);
     const body_name = quickjs.Value.initStringLen(ctx, "body");
     defer body_name.deinit(ctx);
     const body = jsImplementationLightDocumentCreateElement(ctx, document, @ptrCast(&[_]quickjs.Value{body_name}));
     if (body.isException()) return quickjs.Value.exception;
+    defer body.deinit(ctx);
     setOwnerDocumentOverrideRecursive(ctx, body, document);
-    document.setPropertyStr(ctx, "body", body) catch return quickjs.Value.exception;
+    const appended_head = jsNodeAppendChild(ctx, html, @ptrCast(&[_]quickjs.Value{head}));
+    defer appended_head.deinit(ctx);
+    if (appended_head.isException()) return quickjs.Value.exception;
+    const appended_body = jsNodeAppendChild(ctx, html, @ptrCast(&[_]quickjs.Value{body}));
+    defer appended_body.deinit(ctx);
+    if (appended_body.isException()) return quickjs.Value.exception;
+    const appended_html = jsLightDocumentAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{html}));
+    defer appended_html.deinit(ctx);
+    if (appended_html.isException()) return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "documentElement", html.dup(ctx)) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "head", head.dup(ctx)) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "body", body.dup(ctx)) catch return quickjs.Value.exception;
     return document;
 }
 
@@ -5962,6 +6039,42 @@ fn jsImplementationLightDocumentCreateTextNode(ctx_opt: ?*quickjs.Context, this_
     const text = jsDocumentCreateTextNode(ctx, document, raw_args);
     if (text.isObject()) setOwnerDocumentOverrideRecursive(ctx, text, this_value);
     return text;
+}
+
+fn jsImplementationLightDocumentCreateComment(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) return quickjs.Value.exception;
+    const comment = jsDocumentCreateComment(ctx, document, raw_args);
+    if (comment.isObject()) setOwnerDocumentOverrideRecursive(ctx, comment, this_value);
+    return comment;
+}
+
+fn jsImplementationLightDocumentCreateProcessingInstruction(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) return quickjs.Value.exception;
+    const instruction = jsDocumentCreateProcessingInstruction(ctx, document, raw_args);
+    if (instruction.isObject()) setOwnerDocumentOverrideRecursive(ctx, instruction, this_value);
+    return instruction;
+}
+
+fn jsImplementationLightDocumentCreateDocumentFragment(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) return quickjs.Value.exception;
+    const fragment = jsDocumentCreateDocumentFragment(ctx, document, raw_args);
+    if (fragment.isObject()) setOwnerDocumentOverrideRecursive(ctx, fragment, this_value);
+    return fragment;
 }
 
 fn jsLightDocumentAppendChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -6152,8 +6265,16 @@ fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
     defer global.deinit(ctx);
 
     const has_doctype = args.len >= 3 and args[2].isObject();
-    if (omit_root and !has_doctype) {
-        return createLightXmlDocument(ctx);
+    if (omit_root) {
+        const document = createLightXmlDocument(ctx);
+        if (document.isException() or !document.isObject()) return document;
+        if (has_doctype) {
+            const appended = jsLightDocumentAppendChild(ctx, document, @ptrCast(&[_]quickjs.Value{args[2]}));
+            defer appended.deinit(ctx);
+            if (appended.isException()) return quickjs.Value.exception;
+            document.setPropertyStr(ctx, "doctype", args[2].dup(ctx)) catch return quickjs.Value.exception;
+        }
+        return document;
     }
 
     const main_document = global.getPropertyStr(ctx, "document");
@@ -6214,9 +6335,18 @@ fn createLightXmlDocument(ctx: *quickjs.Context) quickjs.Value {
     installMethod(ctx, document, "append", jsLightDocumentAppend, 1) catch return quickjs.Value.exception;
     installMethod(ctx, document, "prepend", jsLightDocumentPrepend, 1) catch return quickjs.Value.exception;
     installMethod(ctx, document, "cloneNode", jsLightDocumentCloneNode, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createElement", jsImplementationLightDocumentCreateElement, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createTextNode", jsImplementationLightDocumentCreateTextNode, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createCDATASection", jsImplementationLightDocumentCreateTextNode, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createComment", jsImplementationLightDocumentCreateComment, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createProcessingInstruction", jsImplementationLightDocumentCreateProcessingInstruction, 2) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createDocumentFragment", jsImplementationLightDocumentCreateDocumentFragment, 0) catch return quickjs.Value.exception;
+    installMethod(ctx, document, "createRange", jsDocumentCreateRange, 0) catch return quickjs.Value.exception;
     installMethod(ctx, document, "createAttribute", jsDocumentCreateAttribute, 1) catch return quickjs.Value.exception;
     installMethod(ctx, document, "isSameNode", jsNodeIsSameNode, 1) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "__zigIsXmlDocument", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "nodeType", quickjs.Value.initInt64(9)) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "nodeName", quickjs.Value.initStringLen(ctx, "#document")) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "location", quickjs.Value.null) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "compatMode", quickjs.Value.initStringLen(ctx, "CSS1Compat")) catch return quickjs.Value.exception;
