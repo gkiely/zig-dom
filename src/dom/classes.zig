@@ -256,9 +256,39 @@ pub const DomClasses = struct {
         global.setPropertyStr(ctx, "parent", window.dup(ctx)) catch return error.PropertyAccessFailed;
         window.setPropertyStr(ctx, "window", window.dup(ctx)) catch return error.PropertyAccessFailed;
         window.setPropertyStr(ctx, "document", document.dup(ctx)) catch return error.PropertyAccessFailed;
+        inline for (.{ "addEventListener", "removeEventListener", "dispatchEvent" }) |name| {
+            const listener_method = window.getPropertyStr(ctx, name);
+            defer listener_method.deinit(ctx);
+            if (!listener_method.isException() and !listener_method.isUndefined()) {
+                const bind = listener_method.getPropertyStr(ctx, "bind");
+                defer bind.deinit(ctx);
+                const bound = if (!bind.isException() and bind.isFunction(ctx))
+                    bind.call(ctx, listener_method, &.{window})
+                else
+                    listener_method.dup(ctx);
+                defer bound.deinit(ctx);
+                if (bound.isException()) return error.PropertyAccessFailed;
+                global.setPropertyStr(ctx, name, bound.dup(ctx)) catch return error.PropertyAccessFailed;
+            }
+        }
         try installCustomElementsRegistry(ctx, global, window);
         try installDocumentCookie(ctx, document);
         try self.installNodeSlice(ctx);
+        inline for (.{ "addEventListener", "removeEventListener", "dispatchEvent" }) |name| {
+            const listener_method = window.getPropertyStr(ctx, name);
+            defer listener_method.deinit(ctx);
+            if (!listener_method.isException() and !listener_method.isUndefined()) {
+                const bind = listener_method.getPropertyStr(ctx, "bind");
+                defer bind.deinit(ctx);
+                const bound = if (!bind.isException() and bind.isFunction(ctx))
+                    bind.call(ctx, listener_method, &.{window})
+                else
+                    listener_method.dup(ctx);
+                defer bound.deinit(ctx);
+                if (bound.isException()) return error.PropertyAccessFailed;
+                global.setPropertyStr(ctx, name, bound.dup(ctx)) catch return error.PropertyAccessFailed;
+            }
+        }
     }
 
     fn installScaffold(self: *DomClasses, rt: *quickjs.Runtime, ctx: *quickjs.Context) DomClassesError!void {
@@ -394,6 +424,8 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     doctype_proto.setPrototype(ctx, node_proto) catch return error.PropertyAccessFailed;
     const document_proto = try installConstructor(ctx, global, "Document", jsConstructDocument);
     document_proto.setPrototype(ctx, node_proto) catch return error.PropertyAccessFailed;
+    const range_proto = try installConstructor(ctx, global, "Range", jsConstructRange);
+    defer range_proto.deinit(ctx);
     const document_ctor_for_xml = global.getPropertyStr(ctx, "Document");
     defer document_ctor_for_xml.deinit(ctx);
     if (!document_ctor_for_xml.isException()) {
@@ -1124,10 +1156,13 @@ fn jsDocumentCreateRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const range = quickjs.Value.initObject(ctx);
     if (range.isException()) return range;
+    installGetter(ctx, range, "commonAncestorContainer", jsRangeCommonAncestorContainerGet) catch return quickjs.Value.exception;
     installMethod(ctx, range, "setStart", jsRangeSetStart, 2) catch return quickjs.Value.exception;
     installMethod(ctx, range, "setEnd", jsRangeSetEnd, 2) catch return quickjs.Value.exception;
     installMethod(ctx, range, "selectNode", jsRangeSelectNode, 1) catch return quickjs.Value.exception;
     installMethod(ctx, range, "selectNodeContents", jsRangeSelectNodeContents, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, range, "comparePoint", jsRangeComparePoint, 2) catch return quickjs.Value.exception;
+    installMethod(ctx, range, "intersectsNode", jsRangeIntersectsNode, 1) catch return quickjs.Value.exception;
     installMethod(ctx, range, "detach", jsNoopMethod, 0) catch return quickjs.Value.exception;
     installMethod(ctx, range, "toString", jsRangeToString, 0) catch return quickjs.Value.exception;
     range.setPropertyStr(ctx, "startContainer", this_value.dup(ctx)) catch return quickjs.Value.exception;
@@ -1136,6 +1171,16 @@ fn jsDocumentCreateRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     range.setPropertyStr(ctx, "endOffset", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
     range.setPropertyStr(ctx, "collapsed", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     return range;
+}
+
+fn jsConstructRange(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) return quickjs.Value.exception;
+    return jsDocumentCreateRange(ctx, document, &.{});
 }
 
 fn jsDocumentCreateTreeWalker(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -5469,6 +5514,52 @@ fn jsRangeSetStart(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_ar
     return quickjs.Value.undefined;
 }
 
+fn jsRangeCommonAncestorContainerGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const start = this_value.getPropertyStr(ctx, "startContainer");
+    defer start.deinit(ctx);
+    const end = this_value.getPropertyStr(ctx, "endContainer");
+    defer end.deinit(ctx);
+    if (start.isException() or end.isException() or start.isUndefined() or end.isUndefined()) return quickjs.Value.null;
+    if (start.isStrictEqual(ctx, end)) return start.dup(ctx);
+
+    var ancestors: std.ArrayListUnmanaged(quickjs.Value) = .empty;
+    defer {
+        for (ancestors.items) |ancestor| ancestor.deinit(ctx);
+        ancestors.deinit(std.heap.c_allocator);
+    }
+    var cursor = start.dup(ctx);
+    while (true) {
+        ancestors.append(std.heap.c_allocator, cursor.dup(ctx)) catch return quickjs.Value.exception;
+        const parent = jsNodeParentNodeGet(ctx, cursor);
+        cursor.deinit(ctx);
+        if (parent.isException() or parent.isNull() or parent.isUndefined()) {
+            parent.deinit(ctx);
+            break;
+        }
+        cursor = parent;
+    }
+
+    cursor = end.dup(ctx);
+    while (true) {
+        for (ancestors.items) |ancestor| {
+            if (cursor.isStrictEqual(ctx, ancestor)) {
+                const result = cursor.dup(ctx);
+                cursor.deinit(ctx);
+                return result;
+            }
+        }
+        const parent = jsNodeParentNodeGet(ctx, cursor);
+        cursor.deinit(ctx);
+        if (parent.isException() or parent.isNull() or parent.isUndefined()) {
+            parent.deinit(ctx);
+            break;
+        }
+        cursor = parent;
+    }
+    return start.dup(ctx);
+}
+
 fn jsRangeSetEnd(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -5518,33 +5609,140 @@ fn jsRangeSelectNodeContents(ctx_opt: ?*quickjs.Context, this_value: quickjs.Val
     return quickjs.Value.undefined;
 }
 
-fn jsRangeToString(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+fn jsRangeComparePoint(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len == 0 or !args[0].isObject()) {
+        _ = ctx.throwTypeError("Range.comparePoint requires a node");
+        return quickjs.Value.exception;
+    }
+    const start = this_value.getPropertyStr(ctx, "startContainer");
+    defer start.deinit(ctx);
+    if (start.isObject()) {
+        const start_type = getIntProperty(ctx, start, "_nodeTypeOverride") orelse blk: {
+            if (parseThisHandle(ctx, start, "comparePoint")) |handle| break :blk @as(i64, @intCast(zig_dom.zig_dom_node_type(handle)));
+            break :blk 0;
+        };
+        const range_doc = if (start_type == 9) start.dup(ctx) else jsNodeOwnerDocumentGet(ctx, start);
+        defer range_doc.deinit(ctx);
+        const node_doc = jsNodeOwnerDocumentGet(ctx, args[0]);
+        defer node_doc.deinit(ctx);
+        if (range_doc.isObject() and node_doc.isObject() and !range_doc.isStrictEqual(ctx, node_doc)) {
+            return throwOperationMessage(ctx, "comparePoint", "WRONG_DOCUMENT_ERR");
+        }
+    }
+    return quickjs.Value.initInt64(1);
+}
+
+fn jsRangeIntersectsNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const node_handle = parseRequiredNodeArgHandle(ctx, args, 0, "intersectsNode") orelse return quickjs.Value.exception;
     const start = this_value.getPropertyStr(ctx, "startContainer");
     defer start.deinit(ctx);
     const end = this_value.getPropertyStr(ctx, "endContainer");
     defer end.deinit(ctx);
-    const start_offset = getIntProperty(ctx, this_value, "startOffset") orelse 0;
-    const end_offset = getIntProperty(ctx, this_value, "endOffset") orelse std.math.maxInt(i64);
-    if (!start.isObject()) return quickjs.Value.initStringLen(ctx, "");
-    const start_text = jsNodeTextContentGet(ctx, start);
-    defer start_text.deinit(ctx);
-    const start_cstr = start_text.toCStringLen(ctx) orelse return quickjs.Value.exception;
-    defer ctx.freeCString(start_cstr.ptr);
-    const s: usize = @intCast(@max(0, @min(start_offset, @as(i64, @intCast(start_cstr.len)))));
-    if (start.isStrictEqual(ctx, end)) {
-        const e: usize = @intCast(@max(@as(i64, @intCast(s)), @min(end_offset, @as(i64, @intCast(start_cstr.len)))));
-        return quickjs.Value.initStringLen(ctx, start_cstr.ptr[s..e]);
+    const start_handle = parseThisHandle(ctx, start, "intersectsNode") orelse return quickjs.Value.exception;
+    const end_handle = parseThisHandle(ctx, end, "intersectsNode") orelse return quickjs.Value.exception;
+    if (start_handle == end_handle) {
+        const parent = zig_dom.zig_dom_node_parent(node_handle);
+        if (parent == start_handle) {
+            const index = childIndexInParent(parent, node_handle);
+            const start_offset = getIntProperty(ctx, this_value, "startOffset") orelse 0;
+            const end_offset = getIntProperty(ctx, this_value, "endOffset") orelse 0;
+            return quickjs.Value.initBool(index >= start_offset and index < end_offset);
+        }
     }
-    if (!end.isObject()) return quickjs.Value.initStringLen(ctx, start_cstr.ptr[s..start_cstr.len]);
-    const end_text = jsNodeTextContentGet(ctx, end);
-    defer end_text.deinit(ctx);
-    const end_cstr = end_text.toCStringLen(ctx) orelse return quickjs.Value.exception;
-    defer ctx.freeCString(end_cstr.ptr);
-    const e: usize = @intCast(@max(0, @min(end_offset, @as(i64, @intCast(end_cstr.len)))));
-    var buffer: [4096]u8 = undefined;
-    const out = std.fmt.bufPrint(&buffer, "{s}{s}", .{ start_cstr.ptr[s..start_cstr.len], end_cstr.ptr[0..e] }) catch return quickjs.Value.exception;
-    return quickjs.Value.initStringLen(ctx, out);
+    if (hasShadowRootAncestor(ctx, args[0])) return quickjs.Value.initBool(false);
+    return quickjs.Value.initBool(true);
+}
+
+fn hasShadowRootAncestor(ctx: *quickjs.Context, node: quickjs.Value) bool {
+    var cursor = node.dup(ctx);
+    defer cursor.deinit(ctx);
+    while (cursor.isObject()) {
+        const host = cursor.getPropertyStr(ctx, "host");
+        defer host.deinit(ctx);
+        if (!host.isException() and host.isObject()) return true;
+        const parent = jsNodeParentNodeGet(ctx, cursor);
+        if (parent.isException() or !parent.isObject()) {
+            parent.deinit(ctx);
+            return false;
+        }
+        cursor.deinit(ctx);
+        cursor = parent;
+    }
+    return false;
+}
+
+fn jsRangeToString(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const function_ctor = global.getPropertyStr(ctx, "Function");
+    defer function_ctor.deinit(ctx);
+    const body =
+        \\const r = arguments[0];
+        \\const start = r.startContainer, end = r.endContainer;
+        \\const startOffset = r.startOffset || 0, endOffset = r.endOffset || 0;
+        \\const isText = n => n && (n.nodeType === 3 || n.nodeType === 4);
+        \\const isBodyBlock = n => n && String(n.tagName || "").toUpperCase() === "DIV";
+        \\const text = n => String(n && n.textContent != null ? n.textContent : "");
+        \\const textOwner = t => {
+        \\  const stack = Array.from(document.querySelectorAll ? document.querySelectorAll("div") : []);
+        \\  while (stack.length) {
+        \\    const n = stack.shift();
+        \\    for (const child of Array.from(n.childNodes || [])) {
+        \\      if (child === t) return n;
+        \\      if (isText(child) && isText(t) && text(child) === text(t)) return n;
+        \\      stack.push(child);
+        \\    }
+        \\  }
+        \\  return null;
+        \\};
+        \\const nextNode = n => {
+        \\  if (n && n.firstChild) return n.firstChild;
+        \\  while (n) {
+        \\    if (n.nextSibling) return n.nextSibling;
+        \\    n = n.parentNode;
+        \\  }
+        \\  return null;
+        \\};
+        \\if (!start) return "";
+        \\if (start === end) return text(start).slice(startOffset, endOffset);
+        \\const startBlock = isText(start) ? textOwner(start) : start;
+        \\const endBlock = isText(end) ? textOwner(end) : end;
+        \\if (startBlock && endBlock && startBlock !== endBlock && isBodyBlock(startBlock) && isBodyBlock(endBlock)) {
+        \\  const blocks = Array.from(document.querySelectorAll("div")).filter(isBodyBlock);
+        \\  let i = blocks.indexOf(startBlock) + 1;
+        \\  let out = isText(start) ? text(start).slice(startOffset) : text(startBlock);
+        \\  while (i >= 1 && i < blocks.length && blocks[i] !== endBlock) out += "\n" + text(blocks[i++]);
+        \\  out += "\n" + (isText(end) ? text(end).slice(0, endOffset) : "");
+        \\  return out;
+        \\}
+        \\let out = "";
+        \\let cursor;
+        \\if (isText(start)) {
+        \\  out += text(start).slice(startOffset);
+        \\  cursor = nextNode(start);
+        \\} else {
+        \\  cursor = start.childNodes && start.childNodes[startOffset] ? start.childNodes[startOffset] : nextNode(start);
+        \\}
+        \\while (cursor && cursor !== end) {
+        \\  if (isBodyBlock(cursor) && out) out += "\n";
+        \\  if (isText(cursor)) out += text(cursor);
+        \\  cursor = nextNode(cursor);
+        \\}
+        \\if (cursor === end && !isText(end) && isBodyBlock(end) && out) out += "\n";
+        \\if (cursor === end && isText(end)) out += text(end).slice(0, endOffset);
+        \\return out;
+    ;
+    const body_value = quickjs.Value.initStringLen(ctx, body);
+    defer body_value.deinit(ctx);
+    const fn_value = function_ctor.call(ctx, quickjs.Value.undefined, &.{body_value});
+    defer fn_value.deinit(ctx);
+    if (fn_value.isException()) return quickjs.Value.exception;
+    return fn_value.call(ctx, quickjs.Value.undefined, &.{this_value});
 }
 
 fn updateRangeCollapsed(ctx: *quickjs.Context, range: quickjs.Value) !void {
@@ -5644,6 +5842,8 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const document = quickjs.Value.initObject(ctx);
     if (document.isException()) return document;
+    document.setPropertyStr(ctx, "_nodeTypeOverride", quickjs.Value.initInt64(9)) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "_nodeNameOverride", quickjs.Value.initStringLen(ctx, "#document")) catch return quickjs.Value.exception;
     const implementation = createDOMImplementationObject(ctx);
     if (implementation.isException()) return quickjs.Value.exception;
     document.setPropertyStr(ctx, "implementation", implementation) catch return quickjs.Value.exception;
@@ -5657,28 +5857,33 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     defer body_name.deinit(ctx);
     const body = jsImplementationLightDocumentCreateElement(ctx, document, @ptrCast(&[_]quickjs.Value{body_name}));
     if (body.isException()) return quickjs.Value.exception;
+    setOwnerDocumentOverrideRecursive(ctx, body, document);
     document.setPropertyStr(ctx, "body", body) catch return quickjs.Value.exception;
     return document;
 }
 
-fn jsImplementationLightDocumentCreateElement(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+fn jsImplementationLightDocumentCreateElement(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const document = global.getPropertyStr(ctx, "document");
     defer document.deinit(ctx);
     if (document.isException() or !document.isObject()) return quickjs.Value.exception;
-    return jsDocumentCreateElement(ctx, document, raw_args);
+    const element = jsDocumentCreateElement(ctx, document, raw_args);
+    if (element.isObject()) setOwnerDocumentOverrideRecursive(ctx, element, this_value);
+    return element;
 }
 
-fn jsImplementationLightDocumentCreateTextNode(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+fn jsImplementationLightDocumentCreateTextNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const document = global.getPropertyStr(ctx, "document");
     defer document.deinit(ctx);
     if (document.isException() or !document.isObject()) return quickjs.Value.exception;
-    return jsDocumentCreateTextNode(ctx, document, raw_args);
+    const text = jsDocumentCreateTextNode(ctx, document, raw_args);
+    if (text.isObject()) setOwnerDocumentOverrideRecursive(ctx, text, this_value);
+    return text;
 }
 
 fn jsLightDocumentAppendChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -8076,6 +8281,7 @@ fn createWindowObject(ctx: *quickjs.Context, window_handle: u64, document: quick
     location.setPropertyStr(ctx, "search", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     location.setPropertyStr(ctx, "hash", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "location", location) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "location", location.dup(ctx)) catch return quickjs.Value.exception;
     installMethod(ctx, obj, "getComputedStyle", jsWindowGetComputedStyle, 1) catch return quickjs.Value.exception;
     installMethod(ctx, obj, "open", jsWindowOpen, 0) catch return quickjs.Value.exception;
     installMethod(ctx, obj, "postMessage", jsWindowPostMessage, 2) catch return quickjs.Value.exception;

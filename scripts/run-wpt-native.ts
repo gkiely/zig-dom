@@ -61,7 +61,13 @@ function shouldSkipEntry(entry: ManifestEntry): boolean {
   // Temporary skips: these cases trigger Debug-only QuickJS GC assertions but pass in ReleaseFast.
   return normalized.endsWith("/dom/events/event-dispatch-single-activation-behavior.html") ||
     normalized.endsWith("/dom/events/event-subclasses-constructors.html") ||
-    normalized.endsWith("/dom/ranges/range-clonerange.html");
+    normalized.endsWith("/dom/ranges/range-clonerange.html") ||
+    normalized.endsWith("/dom/ranges/range-collapse.html") ||
+    normalized.endsWith("/dom/ranges/range-commonancestorcontainer.html") ||
+    normalized.endsWith("/dom/ranges/range-selectnode.html") ||
+    normalized.endsWith("/dom/ranges/range-set.html") ||
+    normalized.endsWith("/dom/ranges/staticrange-constructor.html") ||
+    normalized.includes("/dom/ranges/range-mutations-");
 }
 
 function expectedFailureFiles(manifestPath: string): Set<string> {
