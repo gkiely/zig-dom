@@ -839,6 +839,7 @@ const wptRootPath = resolve(
 const startEntry = optionalNumberArg("--start-entry") ?? 0;
 const entryCount = optionalNumberArg("--entry-count");
 const batchSize = optionalNumberArg("--batch-size") ?? 1;
+const timeoutMs = optionalNumberArg("--timeout-ms");
 const optimizeMode = optionalArg("--optimize");
 const defaultGeneratedDir = `wpt/.native-generated/${basename(manifestPath, ".json")}`;
 const outDir = resolve(optionalArg("--generated-dir") ?? defaultGeneratedDir);
@@ -887,6 +888,9 @@ if (generatedFiles.length === 0) {
 if (batchSize <= 0) {
   throw new Error(`Invalid --batch-size value: ${batchSize}`);
 }
+if (timeoutMs != null && timeoutMs <= 0) {
+  throw new Error(`Invalid --timeout-ms value: ${timeoutMs}`);
+}
 
 for (let offset = 0; offset < generatedFiles.length; offset += batchSize) {
   const batch = generatedFiles.slice(offset, offset + batchSize);
@@ -903,11 +907,15 @@ for (let offset = 0; offset < generatedFiles.length; offset += batchSize) {
 
     const result = spawnSync("zig", zigArgs, {
       encoding: "utf8",
-      maxBuffer: 20 * 1024 * 1024
+      maxBuffer: 20 * 1024 * 1024,
+      timeout: timeoutMs
     });
 
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
+    if (result.error?.message) {
+      console.error(`NATIVE_WPT error=${result.error.message}`);
+    }
 
     const status = result.status ?? 1;
     if (status === 0) break;
