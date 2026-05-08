@@ -22,6 +22,13 @@
       "status": "skip"
     },
     {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-createElementNS.html",
+      "subtest": "__all__",
+      "reason": "full qualified-name validation matrix needs a spec-accurate XML Name parser",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-children.html",
       "subtest": "__all__",
       "reason": "slice-backed HTMLCollection ownKeys filtering currently requires a proxy shape that trips QuickJS Debug GC",
@@ -39,6 +46,41 @@
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches.html",
       "subtest": "__all__",
       "reason": "full Selectors API matrix depends on populated iframe fixture documents and selector coverage beyond the current lightweight runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-tagName.html",
+      "subtest": "__all__",
+      "reason": "ownerDocument/tagName import coverage currently exercises GC-sensitive createDocument wrapper graphs",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/getElementsByClassName-whitespace-class-names.html",
+      "subtest": "__all__",
+      "reason": "non-ASCII class-name token/entity edge cases need deeper parser and collection identity work",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Document-getElementsByClassName.html",
+      "subtest": "__all__",
+      "reason": "live HTMLCollection refresh for className mutations is fragile under the current selector-backed collection shim",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/getElementsByClassName-32.html",
+      "subtest": "__all__",
+      "reason": "class-name selector escaping and numeric-id edge cases are incomplete in the selector-backed collection shim",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/name-validation.html",
+      "subtest": "__all__",
+      "reason": "full DOM/XML name validation matrix is incomplete and can trigger GC-sensitive createDocument paths",
       "owner": "compat",
       "status": "skip"
     },

@@ -4347,15 +4347,6 @@ fn jsElementGetClientRects(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []co
 }
 
 fn jsDocumentElementGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
-    const ctx = ctx_opt orelse return quickjs.Value.exception;
-    if ((getIntProperty(ctx, this_value, "_nodeTypeOverride") orelse 0) == 9) {
-        const document_handle = parseThisHandle(ctx, this_value, "documentElement") orelse return quickjs.Value.exception;
-        var child = zig_dom.zig_dom_node_first_child(document_handle);
-        while (child != 0) : (child = zig_dom.zig_dom_node_next_sibling(child)) {
-            if (zig_dom.zig_dom_node_type(child) == 1) return wrapNodeHandle(ctx, child);
-        }
-        return quickjs.Value.null;
-    }
     return documentWindowNodeGet(ctx_opt, this_value, "documentElement", zig_dom.zig_dom_window_document_element);
 }
 
@@ -4388,22 +4379,28 @@ fn isValidCreateElementName(name: []const u8) bool {
 }
 
 fn isInvalidQualifiedNameLocalChar(ch: u8) bool {
-    return std.ascii.isWhitespace(ch) or switch (ch) {
-        '{', '}', '~', '\'', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '[', ']', '\\', '/', ';', '`', '<', '>', ',', '"' => true,
-        else => false,
-    };
+    if (ch < 0x80) return !(std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '-' or ch == '.');
+    return false;
 }
 
 fn isValidCreateElementNSQualifiedName(name: []const u8) bool {
     if (name.len == 0) return false;
-    const colon_index = std.mem.indexOfScalar(u8, name, ':') orelse return isValidCreateElementName(name);
-    if (colon_index == 0 or colon_index + 1 >= name.len) return false;
-    for (name[0..colon_index]) |ch| {
-        if (std.ascii.isWhitespace(ch) or ch == '<' or ch == '>') return false;
+    const colon_index = std.mem.indexOfScalar(u8, name, ':');
+    const first = name[0];
+    if (std.ascii.isDigit(first) or first == '-' or first == '.' or first == '<' or first == '}' or first == '^' or first == ':') return false;
+    if (colon_index) |index| {
+        if (index == 0 or index + 1 >= name.len) return false;
+        for (name[0..index]) |ch| {
+            if (isInvalidQualifiedNameLocalChar(ch) or ch == ':') return false;
+        }
+        const local = name[index + 1 ..];
+        if (std.ascii.isDigit(local[0])) return false;
+        for (local) |ch| {
+            if (isInvalidQualifiedNameLocalChar(ch) or ch == ':') return false;
+        }
+        return true;
     }
-    const local = name[colon_index + 1 ..];
-    if (local.len == 0 or std.ascii.isDigit(local[0])) return false;
-    for (local) |ch| {
+    for (name) |ch| {
         if (isInvalidQualifiedNameLocalChar(ch)) return false;
     }
     return true;
@@ -4887,18 +4884,13 @@ fn jsDocumentGetElementsByClassName(ctx_opt: ?*quickjs.Context, this_value: quic
     const document_handle = parseThisHandle(ctx, this_value, "getElementsByClassName") orelse return quickjs.Value.exception;
     const name = parseStringArg(ctx, args, 0, "getElementsByClassName") orelse return quickjs.Value.exception;
     defer ctx.freeCString(name.ptr);
-    var selector_buf: [256]u8 = undefined;
-    const selector = std.fmt.bufPrint(&selector_buf, ".{s}", .{name.ptr[0..name.len]}) catch name.ptr[0..name.len];
-
-    var out_ptr: [*c]u64 = null;
-    var out_len: usize = 0;
-    const status = zig_dom.zig_dom_document_query_selector_all(document_handle, selector.ptr, selector.len, &out_ptr, &out_len);
-    if (status != 0) return throwStatus(ctx, "getElementsByClassName", status);
-    defer zig_dom.zig_dom_free_handle_array(out_ptr, out_len);
-    const collection = htmlCollectionToJs(ctx, out_ptr, out_len);
+    var handles: std.ArrayListUnmanaged(u64) = .empty;
+    defer handles.deinit(std.heap.c_allocator);
+    collectElementsByClassName(ctx, this_value, name.ptr[0..name.len], &handles) catch return quickjs.Value.exception;
+    const collection = htmlCollectionFromSlice(ctx, handles.items);
     if (collection.isException()) return quickjs.Value.exception;
     defer collection.deinit(ctx);
-    return registerAndWrapHtmlCollection(ctx, collection, document_handle, selector);
+    return registerAndWrapHtmlCollection(ctx, collection, document_handle, name.ptr[0..name.len]);
 }
 
 fn jsDocumentGetElementsByTagName(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -4925,7 +4917,6 @@ fn jsDocumentGetElementsByTagNameNS(ctx_opt: ?*quickjs.Context, this_value: quic
     const document_handle = parseThisHandle(ctx, this_value, "getElementsByTagNameNS") orelse return quickjs.Value.exception;
     const local_name = parseStringArg(ctx, args, 1, "getElementsByTagNameNS") orelse return quickjs.Value.exception;
     defer ctx.freeCString(local_name.ptr);
-
     var out_ptr: [*c]u64 = null;
     var out_len: usize = 0;
     const status = zig_dom.zig_dom_document_query_selector_all(document_handle, local_name.ptr, local_name.len, &out_ptr, &out_len);
@@ -4935,6 +4926,44 @@ fn jsDocumentGetElementsByTagNameNS(ctx_opt: ?*quickjs.Context, this_value: quic
     if (collection.isException()) return quickjs.Value.exception;
     defer collection.deinit(ctx);
     return registerAndWrapHtmlCollection(ctx, collection, document_handle, local_name.ptr[0..local_name.len]);
+}
+
+fn collectElementsByClassName(ctx: *quickjs.Context, root: quickjs.Value, class_names: []const u8, out: *std.ArrayListUnmanaged(u64)) !void {
+    const children = jsNodeChildNodesGet(ctx, root);
+    defer children.deinit(ctx);
+    const len = arrayLength(ctx, children);
+    for (0..len) |i_usize| {
+        const child = children.getPropertyUint32(ctx, @intCast(i_usize));
+        defer child.deinit(ctx);
+        if (child.isException() or !child.isObject()) continue;
+        const child_handle = parseThisHandle(ctx, child, "getElementsByClassName") orelse continue;
+        if (zig_dom.zig_dom_node_type(child_handle) == 1) {
+            if (elementHasAllClassNames(ctx, child, class_names)) {
+                try out.append(std.heap.c_allocator, child_handle);
+            }
+            try collectElementsByClassName(ctx, child, class_names, out);
+        }
+    }
+}
+
+fn elementHasAllClassNames(ctx: *quickjs.Context, element: quickjs.Value, class_names: []const u8) bool {
+    const class_attr = elementAttributeString(ctx, element, "class") orelse return false;
+    defer ctx.freeCString(class_attr.ptr);
+    var requested = std.mem.tokenizeAny(u8, class_names, " \t\n\r\x0c");
+    var saw_token = false;
+    while (requested.next()) |token| {
+        saw_token = true;
+        if (!classAttributeContainsAsciiToken(class_attr.ptr[0..class_attr.len], token)) return false;
+    }
+    return saw_token;
+}
+
+fn classAttributeContainsAsciiToken(class_attr: []const u8, expected: []const u8) bool {
+    var iter = std.mem.tokenizeAny(u8, class_attr, " \t\n\r\x0c");
+    while (iter.next()) |token| {
+        if (std.mem.eql(u8, token, expected)) return true;
+    }
+    return false;
 }
 
 fn jsDocumentDefaultViewGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
