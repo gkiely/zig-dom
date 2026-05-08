@@ -407,8 +407,8 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     event_proto.setPropertyStr(ctx, "AT_TARGET", quickjs.Value.initInt64(2)) catch return error.PropertyAccessFailed;
     event_proto.setPropertyStr(ctx, "BUBBLING_PHASE", quickjs.Value.initInt64(3)) catch return error.PropertyAccessFailed;
     try installMethod(ctx, event_proto, "preventDefault", jsEventPreventDefault, 0);
-    try installMethod(ctx, event_proto, "stopPropagation", jsEventStop, 0);
-    try installMethod(ctx, event_proto, "stopImmediatePropagation", jsEventStop, 0);
+    try installMethod(ctx, event_proto, "stopPropagation", jsEventStopPropagation, 0);
+    try installMethod(ctx, event_proto, "stopImmediatePropagation", jsEventStopImmediatePropagation, 0);
     try installMethod(ctx, event_proto, "composedPath", jsEventComposedPath, 0);
     try installMethod(ctx, event_proto, "initEvent", jsEventInitEvent, 3);
     try installAccessor(ctx, event_proto, "cancelBubble", jsEventCancelBubbleGet, jsEventCancelBubbleSet);
@@ -1120,10 +1120,29 @@ fn jsEventPreventDefault(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     return quickjs.Value.undefined;
 }
 
-fn jsEventStop(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+fn jsEventStopPropagation(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "_stopped", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsEventStopImmediatePropagation(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "_stopped", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "_immediateStopped", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn resetEventDispatchState(ctx: *quickjs.Context, event: quickjs.Value) quickjs.Value {
+    event.setPropertyStr(ctx, "_eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    event.setPropertyStr(ctx, "eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    event.setPropertyStr(ctx, "_currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
+    event.setPropertyStr(ctx, "currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
+    event.setPropertyStr(ctx, "_stopped", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
+    event.setPropertyStr(ctx, "_immediateStopped", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
+    const empty_path = quickjs.Value.initArray(ctx);
+    if (empty_path.isException()) return quickjs.Value.exception;
+    event.setPropertyStr(ctx, "_path", empty_path) catch return quickjs.Value.exception;
     return quickjs.Value.undefined;
 }
 
@@ -1343,6 +1362,7 @@ fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []
     obj.setPropertyStr(ctx, "srcElement", quickjs.Value.null) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "isTrusted", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "defaultPrevented", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     if (kind == .ui or kind == .mouse or kind == .keyboard or kind == .input or kind == .composition) {
         obj.setPropertyStr(ctx, "view", optionValueOrNull(ctx, args, "view")) catch return quickjs.Value.exception;
@@ -4717,6 +4737,14 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     event.setPropertyStr(ctx, "target", this_value.dup(ctx)) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "srcElement", this_value.dup(ctx)) catch return quickjs.Value.exception;
 
+    const was_stopped_before_dispatch = boolProperty(ctx, event, "_stopped") or boolProperty(ctx, event, "_immediateStopped");
+    if (was_stopped_before_dispatch) {
+        const reset = resetEventDispatchState(ctx, event);
+        if (reset.isException()) return quickjs.Value.exception;
+        reset.deinit(ctx);
+        return quickjs.Value.initBool(!boolProperty(ctx, event, "_canceled"));
+    }
+
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
 
@@ -4792,15 +4820,9 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
         }
     }
 
-    event.setPropertyStr(ctx, "_eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
-    event.setPropertyStr(ctx, "eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
-    event.setPropertyStr(ctx, "_currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
-    event.setPropertyStr(ctx, "currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
-    event.setPropertyStr(ctx, "_stopped", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
-    event.setPropertyStr(ctx, "_immediateStopped", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
-    const empty_path = quickjs.Value.initArray(ctx);
-    if (empty_path.isException()) return quickjs.Value.exception;
-    event.setPropertyStr(ctx, "_path", empty_path) catch return quickjs.Value.exception;
+    const reset = resetEventDispatchState(ctx, event);
+    if (reset.isException()) return quickjs.Value.exception;
+    reset.deinit(ctx);
 
     if (is_mouse_click and boolProperty(ctx, event, "defaultPrevented")) {
         restoreCanceledPreClickState(ctx, event);
