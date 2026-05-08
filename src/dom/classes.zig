@@ -670,12 +670,9 @@ fn isForwardedBodyFrameEventAttribute(name: []const u8) bool {
         std.mem.eql(u8, name, "onresize");
 }
 
-fn isEventHandlerContentAttribute(name: []const u8) bool {
-    if (name.len < 3) return false;
-    return name[0] == 'o' and name[1] == 'n';
-}
+fn setForwardedHandlerFromContentAttribute(ctx: *quickjs.Context, element: quickjs.Value, attribute_name: [*:0]const u8, script_source: []const u8) void {
+    if (!isBodyOrFrameSetElement(ctx, element)) return;
 
-fn setHandlerFromContentAttribute(ctx: *quickjs.Context, element: quickjs.Value, attribute_name: [*:0]const u8, script_source: []const u8) void {
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const function_ctor = global.getPropertyStr(ctx, "Function");
@@ -691,12 +688,6 @@ fn setHandlerFromContentAttribute(ctx: *quickjs.Context, element: quickjs.Value,
     if (handler.isException()) return;
 
     element.setPropertyStr(ctx, attribute_name, handler.dup(ctx)) catch {};
-}
-
-fn setForwardedHandlerFromContentAttribute(ctx: *quickjs.Context, element: quickjs.Value, attribute_name: [*:0]const u8, script_source: []const u8) void {
-    if (!isBodyOrFrameSetElement(ctx, element)) return;
-
-    setHandlerFromContentAttribute(ctx, element, attribute_name, script_source);
 }
 
 fn installElementSlice(ctx: *quickjs.Context, global: quickjs.Value) DomClassesError!void {
@@ -2825,9 +2816,6 @@ fn jsElementSetAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     defer old_value.deinit(ctx);
     const status = zig_dom.zig_dom_element_set_attribute(this_handle, name.ptr, name.len, value.ptr, value.len);
     if (status != 0) return throwStatus(ctx, "setAttribute", status);
-    if (isEventHandlerContentAttribute(name.ptr[0..name.len])) {
-        setHandlerFromContentAttribute(ctx, this_value, name.ptr, value.ptr[0..value.len]);
-    }
     if (isForwardedBodyFrameEventAttribute(name.ptr[0..name.len])) {
         setForwardedHandlerFromContentAttribute(ctx, this_value, name.ptr, value.ptr[0..value.len]);
     }

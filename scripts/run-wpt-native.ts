@@ -424,36 +424,8 @@ globalThis.assert_unreached = (message = "Reached unreachable code") => fail(mes
 globalThis.promise_rejects_js = async (_t, ctor, promise) => expect(promise).rejects.toThrow(ctor);
 globalThis.add_cleanup = () => {};
 
-const __zigWptTopLevelFunctionNames = Array.from(
-  source.matchAll(/(?:^|\\n)\\s*function\\s+([A-Za-z_$][\\w$]*)\\s*\\(/g),
-  (match) => match[1]
-);
-const __zigWptExportBindings = __zigWptTopLevelFunctionNames
-  .map((name) => JSON.stringify(name) + ": (typeof " + name + " !== 'undefined' ? " + name + " : undefined)")
-  .join(", ");
-const __zigWptRunner = new Function(source + "\\nreturn {" + __zigWptExportBindings + "};");
-const __zigWptExports = __zigWptRunner();
-const __zigWptMissingExport = Symbol("__zigWptMissingExport");
-const __zigWptPreviousExports = Object.create(null);
-if (__zigWptExports && typeof __zigWptExports === "object") {
-  for (const [name, value] of Object.entries(__zigWptExports)) {
-    if (typeof value === "function") {
-      __zigWptPreviousExports[name] = Object.prototype.hasOwnProperty.call(globalThis, name) ? globalThis[name] : __zigWptMissingExport;
-      globalThis[name] = value;
-    }
-  }
-}
-try {
-  await Promise.all(pending);
-} finally {
-  for (const [name, value] of Object.entries(__zigWptPreviousExports)) {
-    if (value === __zigWptMissingExport) {
-      delete globalThis[name];
-    } else {
-      globalThis[name] = value;
-    }
-  }
-}
+new Function(source)();
+await Promise.all(pending);
 `;
 }
 
