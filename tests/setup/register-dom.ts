@@ -1,7 +1,5 @@
-import { GlobalRegistrator } from "../../js/global-registrator";
+if (typeof document === "undefined") {
+  throw new Error("native DOM setup requires running the test runner with --dom");
+}
 
-GlobalRegistrator.register({
-  url: "http://localhost:3000",
-  width: 1024,
-  height: 768
-});
+globalThis.location.href = "http://localhost:3000/";

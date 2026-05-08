@@ -1,116 +1,44 @@
 # zig-dom
 
-A Zig-backed DOM implementation.
+A Zig-backed native DOM implementation with a built-in test runner.
 
-## Install
-
-### Bun
-
-```sh
-bun add zig-dom
-```
-
-### npm
-
-```sh
-npm install zig-dom
-```
-
-## Development Commands
-
-Use the package scripts for local development validation:
+## Development
 
 ```sh
 bun run build:dev
 bun run build:dev <test-file-token>
 bun run build:perf
-bun run build:perf <test-file-token>
+bun run test
+bun run test tests/runner/basic.test.ts
+bun run test:integration
 ```
 
-Current status:
-
-- `test` command discovers test files in Zig, transforms TS/JSX as needed, and executes through the embedded QuickJS-ng runtime.
-- Runner collection and execution are split phases with support for nested `describe`, hooks, `skip`, and `only`.
-- `wpt`, `wpt-sync`, and `wpt-manifest` bridge to native WPT scripts under `scripts/`.
-- Runtime glue now lives at `src/runtime.zig` and `src/quickjs_ng.zig`; native DOM code lives under `src/dom/`.
-
-## Perf Build (Edit.test.tsx)
-
-Milestone work should run the ReleaseFast guard for `../youneedawiki/src/elements/Buttons/Edit.test.tsx`.
+The `test` command runs JavaScript, TypeScript, JSX, and TSX tests through the embedded QuickJS-ng runtime. DOM support can be enabled for all files with `--dom`, is enabled automatically for `.jsx` and `.tsx`, or can be customized with suffixes:
 
 ```sh
-bun run build:perf
+bun run test tests/runner --dom
+bun run test tests/runner
+bun run test tests/runner --dom=.vue,.jsx,.tsx
 ```
 
-The helper script builds with ReleaseFast first, then runs two timed test invocations so build time is not included in runtime timing.
+## WPT
 
-## Test Setup
-
-Create a Bun preload file:
-
-```ts
-// preload.ts
-import { GlobalRegistrator } from "zig-dom/global-registrator";
-
-GlobalRegistrator.register();
-```
-
-### bunfig.toml
-
-```toml
-[test]
-preload = ["./preload.ts"]
-```
-
-### CLI
+Native WPT support is driven by generated manifests under `wpt/manifest`.
 
 ```sh
-bun test --preload ./preload.ts
+bun run test:wpt
 ```
 
-### Vanilla JS
-
-```ts
-import { test, expect } from "bun:test";
-
-test("updates the document", () => {
-  document.body.innerHTML = "<button>Save</button>";
-  expect(document.querySelector("button")?.textContent).toBe("Save");
-});
-```
-
-### React
-
-```tsx
-import { render, screen } from "@testing-library/react";
-import { test, expect } from "bun:test";
-
-test("renders", () => {
-  render(<button>Save</button>);
-  expect(screen.getByRole("button").textContent).toBe("Save");
-});
-```
-
-## Benchmarks
-
-Run with:
+To refresh upstream WPT inputs directly:
 
 ```sh
-bun run benchmark:dom
+bun run scripts/sync-wpt.ts
+bun run scripts/generate-wpt-manifest.ts
 ```
 
-Latest local run: 2026-05-04 21:20:08 UTC on `darwin-arm64`.
+## Layout
 
-| Metric | zig-dom | happy-dom | jsdom | vs happy-dom |
-| --- | ---: | ---: | ---: | --- |
-| Append 10k children | 0.89 ms | 3.30 ms | 8.55 ms | zig-dom is 3.7x faster |
-| Create 10k elements | 2.35 ms | 3.38 ms | 7.30 ms | zig-dom is 1.4x faster |
-| Query `.class` across 10k nodes | 1.58 ms | 13.98 ms | 18.45 ms | zig-dom is 8.8x faster |
-| Query `[attr]` across 10k nodes | 1.32 ms | 7.01 ms | 15.06 ms | zig-dom is 5.3x faster |
-| Parse `innerHTML` | 0.44 ms | 11.54 ms | 25.03 ms | zig-dom is 26.0x faster |
-| Serialize `outerHTML` | 0.13 ms | 1.88 ms | 2.06 ms | zig-dom is 14.7x faster |
-| Mixed DOM workflow, 10k ops | 20.70 ms | 76.69 ms | 116.29 ms | zig-dom is 3.7x faster |
-| Mutation observer append, 10k nodes | 11.01 ms | 16.42 ms | 36.68 ms | zig-dom is 1.5x faster |
-| React render, 10k rows | 48.92 ms | 103.81 ms | 132.10 ms | zig-dom is 2.1x faster |
-| React update, 10k rows | 39.03 ms | 39.38 ms | 53.39 ms | zig-dom is 1.0x faster |
-| Import time | 29.94 ms | 68.86 ms | 491.57 ms | zig-dom is 2.3x faster |
+- `src/dom`: native DOM implementation and public DOM API.
+- `src/host`: host assertions, mocks, platform glue, and runner bridge.
+- `src/runner`: CLI, transform, test discovery, and execution.
+- `src/runtime.zig`, `src/quickjs_ng.zig`, `src/value.zig`, `src/main.zig`: runtime entrypoints and shared QuickJS bindings.

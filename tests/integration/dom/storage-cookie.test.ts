@@ -30,11 +30,14 @@ describe("storage and cookie compatibility", () => {
     expect(document.cookie).toContain("lang=en-US");
   });
 
-  test("happyDOM.reset clears storage and cookies", () => {
+  test("storage and cookies can be cleared between tests", () => {
     localStorage.setItem("persist", "x");
+    sessionStorage.setItem("draft", "1");
     document.cookie = "session=active";
 
-    window.happyDOM.reset();
+    localStorage.clear();
+    sessionStorage.clear();
+    document.cookie = "session=; Max-Age=0";
 
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);

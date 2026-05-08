@@ -1,71 +1,26 @@
 {
   "name": "zig-dom",
   "version": "0.1.4",
-  "description": "Bun-only Zig-backed DOM implementation with happy-dom-compatible surface",
+  "description": "Zig-backed native DOM implementation with a built-in test runner",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./global-registrator": {
-      "types": "./dist/global-registrator.d.ts",
-      "default": "./dist/global-registrator.js"
-    }
-  },
-  "files": [
-    "dist",
-    "build.zig",
-    "build.zig.zon"
-  ],
   "scripts": {
     "build:dev": "bun run scripts/build-dev.ts",
     "build:perf": "bun run scripts/build-perf.ts",
     "build:native": "bun run scripts/build-native.ts",
-    "build:native:packages": "bun run scripts/build-native-packages.ts",
-    "build:js": "bunx tsc -p tsconfig.json",
-    "build": "bun run build:js && bun run build:native:packages",
-    "build:local": "bun run build && npm --prefix ../youneedawiki install ../zig-dom",
-    "wpt:sync": "bun run scripts/sync-wpt.ts",
-    "wpt:manifest": "bun run scripts/generate-wpt-manifest.ts",
-    "verify:wpt:upstream:dom:smoke": "bun run wpt:sync && bun run wpt:manifest --dir dom --out-manifest wpt/manifest/upstream-dom-smoke.json --out-expected wpt/expected/upstream-dom-smoke.json --max 200 && bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom-smoke.json --wpt-root .wpt-cache/web-platform-tests",
-    "verify:wpt:upstream:dom": "bun run wpt:sync && bun run wpt:manifest --dir dom --out-manifest wpt/manifest/upstream-dom.json --out-expected wpt/expected/upstream-dom.json && bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests",
-    "verify:wpt:upstream:dom:resume": "bun run wpt:sync && bun run wpt:manifest --dir dom --out-manifest wpt/manifest/upstream-dom.json --out-expected wpt/expected/upstream-dom.json && bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --start-entry ${WPT_START:-0} --entry-count ${WPT_COUNT:-100}",
-    "verify:wpt:upstream:dom:batched": "WPT_START=0 WPT_COUNT=100 bun run verify:wpt:upstream:dom:resume && WPT_START=100 WPT_COUNT=100 bun run verify:wpt:upstream:dom:resume && WPT_START=200 WPT_COUNT=100 bun run verify:wpt:upstream:dom:resume && WPT_START=300 WPT_COUNT=100 bun run verify:wpt:upstream:dom:resume",
-    "wpt:status": "bun run scripts/wpt-native-status.ts",
-    "verify:ffi": "bun run build:native && ZIG_DOM_SKIP_TESTING_LIBRARY=1 bun test tests/unit/ffi.test.ts",
-    "verify:dom": "bun run build && ZIG_DOM_SKIP_TESTING_LIBRARY=1 bun test tests/unit tests/integration/dom",
-    "verify:react": "bun run build && bun run scripts/smoke-bun-react.ts",
-    "verify:wpt:tiny": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/dom-core.json",
-    "verify:wpt:selectors": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/selectors.json",
-    "verify:wpt:events": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/events.json",
-    "verify:wpt:parser": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/parser-fragments.json",
-    "verify:wpt:forms": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/forms.json",
-    "verify:wpt:custom-elements-shadow": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/custom-elements-shadow.json",
-    "verify:fast": "bun run verify:ffi && bun run verify:dom && bun run verify:react",
-    "benchmark:dom": "bun run build && bun run scripts/benchmark-dom.ts && bun run scripts/update-benchmark-readme.ts",
-    "benchmark:dom:update": "bun run build && bun run scripts/benchmark-dom.ts && bun run scripts/update-benchmark-readme.ts",
-    "test": "bun run build && bun test tests/unit tests/integration/dom tests/integration/react",
+    "build:packages": "bun run scripts/build-native-packages.ts",
+    "build": "bun run build:packages",
+    "test": "zig build run -- test",
     "test:wpt": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests",
-    "test:wpt:dom": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/dom-core.json",
-    "test:wpt:expanded": "bun run verify:wpt:selectors && bun run verify:wpt:events && bun run verify:wpt:parser && bun run verify:wpt:forms && bun run verify:wpt:custom-elements-shadow",
-    "test:react": "bun run build && bun test tests/integration/react"
+    "test:integration": "zig build run -- test --dom --setup tests/setup/testing-library.ts tests/integration"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
-    "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
-    "@types/jsdom": "^28.0.1",
     "@types/node": "^22.15.21",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "bun-types": "^1.3.2",
-    "happy-dom": "^20.9.0",
-    "jsdom": "^29.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^6.0.3"

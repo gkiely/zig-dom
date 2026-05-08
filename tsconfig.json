@@ -1,29 +1,35 @@
 {
   "compilerOptions": {
-    "target": "esnext",
+    "target": "ES2024",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": [
-      "ESNext",
+      "ES2024",
       "DOM"
     ],
     "strict": true,
-    "declaration": true,
-    "sourceMap": true,
-    "rootDir": "js",
-    "outDir": "dist",
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true,
-    "rewriteRelativeImportExtensions": true,
     "types": [
       "bun-types",
       "node"
-    ]
+    ],
+    "jsx": "react-jsx",
+    "noEmit": true
   },
   "include": [
-    "js/index.ts",
-    "js/global-registrator.ts"
+    "scripts/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "wpt/.native-generated",
+    ".wpt-cache",
+    ".zig-cache",
+    ".zig-dom-cache",
+    ".zig-global-cache",
+    "zig-out"
   ]
 }
