@@ -293,9 +293,6 @@ function initializeFrameFixtures() {
     if (!frameWindow) continue;
     frameWindows.push(frameWindow);
 
-    if (typeof globalThis.ErrorEvent === "function" && typeof frameWindow.ErrorEvent !== "function") {
-      frameWindow.ErrorEvent = globalThis.ErrorEvent;
-    }
     if (!frameWindow.__zigWrappedFunctionCtor && typeof globalThis.Function === "function") {
       const wrappedFunctionCtor = function (...args) {
         const created = globalThis.Function(...args);
@@ -393,44 +390,6 @@ try {
 
 function fail(message) {
   throw new Error(message);
-}
-
-if (typeof globalThis.ErrorEvent !== "function" && typeof Event === "function") {
-  class ZigErrorEvent extends Event {
-    constructor(type, init = {}) {
-      super(type, init);
-      this.message = typeof init.message === "string" ? init.message : "";
-      this.error = init.error;
-    }
-  }
-  globalThis.ErrorEvent = ZigErrorEvent;
-}
-if (window && typeof globalThis.ErrorEvent === "function") {
-  window.ErrorEvent = globalThis.ErrorEvent;
-}
-if (typeof globalThis.UIEvent !== "function" && typeof Event === "function") {
-  class ZigUIEvent extends Event {
-    constructor(type, init = {}) {
-      super(type, init);
-      this.detail = Number(init.detail) || 0;
-      this.view = init.view ?? null;
-    }
-  }
-  globalThis.UIEvent = ZigUIEvent;
-}
-if (window && typeof globalThis.UIEvent === "function") {
-  window.UIEvent = globalThis.UIEvent;
-}
-if (typeof globalThis.XMLHttpRequest !== "function" && typeof EventTarget === "function") {
-  class ZigXMLHttpRequest extends EventTarget {}
-  globalThis.XMLHttpRequest = ZigXMLHttpRequest;
-}
-if (window && typeof globalThis.XMLHttpRequest === "function") {
-  window.XMLHttpRequest = globalThis.XMLHttpRequest;
-}
-if (window && typeof window === "object") {
-  globalThis.top = window;
-  globalThis.parent = window;
 }
 
 function dispatchSyntheticWindowLoad() {
