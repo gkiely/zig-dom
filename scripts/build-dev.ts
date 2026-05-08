@@ -77,24 +77,6 @@ function listTestFiles(dir: string): string[] {
   return files;
 }
 
-function defaultTests(): string[] {
-  const nativeDomTests = listTestFiles("tests/runner")
-    .filter((file) => {
-      const basename = file.split(sep).at(-1) ?? "";
-      return basename.startsWith("native-dom-") && basename.endsWith(".test.js");
-    })
-    .sort();
-
-  return [
-    ...nativeDomTests,
-    "tests/runner/dom-auto-plain.test.ts",
-    "tests/runner/dom-auto-tsx.test.tsx",
-    "tests/runner/mock-spy.test.ts",
-    "tests/runner/plugin-onload.test.ts",
-    "tests/runner/testing-library-role.test.js"
-  ];
-}
-
 function targetForPath(path: string): TestTarget {
   return {
     root: path.startsWith(`${downstreamRoot}/`) ? downstreamRoot : null,
@@ -193,6 +175,11 @@ async function run(args: string[], timeoutMs: number, label: string): Promise<nu
 }
 
 const { input, runnerArgs, timeoutMs } = splitArgs();
+if (!input) {
+  console.error("Usage: bun run test:dev <test-file-token> [runner args...]");
+  process.exit(1);
+}
+
 const testArgGroups: { label: string; args: string[] }[] = input
   ? (() => {
       const groups = resolveTestFiles(input);
@@ -204,7 +191,7 @@ const testArgGroups: { label: string; args: string[] }[] = input
         };
       });
     })()
-  : [{ label: "default development validation", args: [...runnerArgs, ...defaultTests()] }];
+  : [];
 
 let exitCode = 0;
 for (const group of testArgGroups) {

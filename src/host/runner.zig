@@ -162,6 +162,7 @@ pub const HostRunner = struct {
         try setFunction(ctx, global, "beforeEach", jsBeforeEach, 1);
         try setFunction(ctx, global, "afterEach", jsAfterEach, 1);
         try setFunction(ctx, global, "afterAll", jsAfterAll, 1);
+        try self.installDomCleanup();
 
         const runner_obj = quickjs.Value.initObject(ctx);
         if (runner_obj.isException()) return error.JSError;
@@ -200,6 +201,24 @@ pub const HostRunner = struct {
             \\})();
         ;
         const result = self.ctx.eval(source, "<zig-runner-each>", .{});
+        defer result.deinit(self.ctx);
+        if (result.isException()) return error.JSError;
+    }
+
+    fn installDomCleanup(self: *HostRunner) HostRunnerError!void {
+        const source =
+            \\afterEach(() => {
+            \\  const doc = globalThis.document;
+            \\  if (!doc) return;
+            \\  try {
+            \\    if (doc.body) doc.body.innerHTML = "";
+            \\    if (doc.head) doc.head.innerHTML = "";
+            \\  } catch {}
+            \\  try { globalThis.localStorage?.clear?.(); } catch {}
+            \\  try { globalThis.sessionStorage?.clear?.(); } catch {}
+            \\});
+        ;
+        const result = self.ctx.eval(source, "<zig-runner-dom-cleanup>", .{});
         defer result.deinit(self.ctx);
         if (result.isException()) return error.JSError;
     }
