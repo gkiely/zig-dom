@@ -1,4 +1,5 @@
 Ideas to make it faster
-- Preload react and cache it
-- Build our own testing-library in zig
-- Move to our own setup file
+- On first run save the React QuickJS bytecode to disk and use it for all subsequent runs
+- Use our own testing library
+- Use our own setup file
+
