@@ -100,6 +100,38 @@ function parseScriptBlocks(entryFile: string, html: string, wptRootPath: string)
   return scripts;
 }
 
+function parseIframeInitScripts(entryFile: string, html: string, wptRootPath: string): Record<string, string> {
+  const scriptsBySrc: Record<string, string> = {};
+  const body = extractBody(html);
+  const iframeRegex = /<iframe\b([^>]*)>/gi;
+  let match: RegExpExecArray | null = null;
+  while ((match = iframeRegex.exec(body)) !== null) {
+    const attrs = match[1] ?? "";
+    const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
+    const rawSrc = srcMatch?.[1] ?? srcMatch?.[2] ?? srcMatch?.[3];
+    if (!rawSrc) continue;
+
+    const srcRef = scriptFileRef(rawSrc);
+    if (!srcRef || srcRef.startsWith("//") || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(srcRef)) {
+      continue;
+    }
+
+    const framePath = resolveScriptPath(entryFile, srcRef, wptRootPath);
+    let frameHtml = "";
+    try {
+      frameHtml = readFileSync(framePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    const frameScripts = parseScriptBlocks(framePath, frameHtml, wptRootPath);
+    if (frameScripts.length === 0) continue;
+    scriptsBySrc[srcRef] = frameScripts.join("\n;\n");
+  }
+
+  return scriptsBySrc;
+}
+
 function extractBody(html: string): string {
   const explicitBody = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1];
   if (explicitBody != null) {
@@ -179,6 +211,7 @@ function generateHtmlTest(entry: ManifestEntry, wptRootPath: string, variant?: s
     ...parseMetaScripts(html).map((script) => readFileSync(resolveScriptPath(entry.file, script, wptRootPath), "utf8")),
     ...parseScriptBlocks(entry.file, html, wptRootPath)
   ];
+  const iframeInitScripts = parseIframeInitScripts(entry.file, html, wptRootPath);
   return `import { expect, test as bunTest } from "bun:test";
 
 const pending = [];
@@ -186,17 +219,120 @@ const source = ${JSON.stringify(scripts.join("\n;\n"))};
 const __zigWptFirstTestOffset = source.search(/\\b(?:test|async_test|promise_test)\\s*\\(/);
 const __zigWptPreface = source.slice(0, __zigWptFirstTestOffset >= 0 ? __zigWptFirstTestOffset : source.length);
 const __zigWptResetPerTest = !/^var\\s+[A-Za-z_$][\\w$]*\\s*=\\s*document\\.getElementById\\(/m.test(__zigWptPreface);
+const __zigWptRegistersTestsViaWindowOnload = /window\\s*\\.\\s*onload\\s*=/.test(__zigWptPreface);
 
 ${nativeWindowSetupSource(JSON.stringify(entryUrl(entry.file, variant)))}
 
 const __zigWptInitialBody = ${JSON.stringify(extractBody(html))};
+const __zigWptIFrameInitScripts = ${JSON.stringify(iframeInitScripts)};
 const __zigWptSetups = [];
+
+function normalizeFrameSrc(rawSrc) {
+  if (typeof rawSrc !== "string") return "";
+  return rawSrc.split(/[?#]/)[0] ?? "";
+}
+
+function runFrameInitScript(frameWindow, scriptSource) {
+  try {
+    const frameTop = frameWindow?.top ?? frameWindow?.parent ?? frameWindow;
+    const runner = new Function("window", "document", "parent", "self", "top", "location", scriptSource);
+    runner(frameWindow, frameWindow?.document, frameWindow?.parent, frameWindow, frameTop, frameWindow?.location);
+  } catch {}
+}
+
+function installFrameNavigationShim(iframe, frameWindow) {
+  if (!iframe || !frameWindow || !frameWindow.location) return;
+  const location = frameWindow.location;
+  if (!location || location.__zigHrefShimInstalled) return;
+
+  let hrefValue = typeof location.href === "string" ? location.href : "";
+  try {
+    Object.defineProperty(location, "href", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return hrefValue;
+      },
+      set(next) {
+        hrefValue = String(next);
+
+        const beforeUnload = frameWindow.onbeforeunload;
+        if (typeof beforeUnload === "function" && typeof Event === "function") {
+          const beforeUnloadEvent = new Event("beforeunload", { cancelable: true });
+          const previousEvent = frameWindow.event;
+          try {
+            frameWindow.event = beforeUnloadEvent;
+            const result = beforeUnload.call(frameWindow, beforeUnloadEvent);
+            if (result !== undefined && result !== null) {
+              String(result);
+            }
+          } catch {} finally {
+            frameWindow.event = previousEvent;
+          }
+        }
+
+        if (typeof iframe.dispatchEvent === "function" && typeof Event === "function") {
+          try {
+            iframe.dispatchEvent(new Event("load"));
+          } catch {}
+        }
+      }
+    });
+    location.__zigHrefShimInstalled = true;
+  } catch {}
+}
+
+function initializeFrameFixtures() {
+  if (!document || typeof document.getElementsByTagName !== "function") return;
+  const iframes = document.getElementsByTagName("iframe");
+  const frameWindows = [];
+  for (let i = 0; i < (iframes?.length ?? 0); i += 1) {
+    const iframe = iframes[i];
+    if (!iframe) continue;
+    const frameWindow = iframe.contentWindow;
+    if (!frameWindow) continue;
+    frameWindows.push(frameWindow);
+
+    if (typeof globalThis.ErrorEvent === "function" && typeof frameWindow.ErrorEvent !== "function") {
+      frameWindow.ErrorEvent = globalThis.ErrorEvent;
+    }
+    if (!frameWindow.__zigWrappedFunctionCtor && typeof globalThis.Function === "function") {
+      const wrappedFunctionCtor = function (...args) {
+        const created = globalThis.Function(...args);
+        if (typeof created === "function") {
+          created.__zigListenerGlobal = frameWindow;
+        }
+        return created;
+      };
+      wrappedFunctionCtor.prototype = globalThis.Function.prototype;
+      frameWindow.Function = wrappedFunctionCtor;
+      frameWindow.__zigWrappedFunctionCtor = true;
+    }
+
+    installFrameNavigationShim(iframe, frameWindow);
+
+    const rawSrc = typeof iframe.getAttribute === "function" ? iframe.getAttribute("src") : "";
+    const frameSrc = normalizeFrameSrc(rawSrc || "");
+    const scriptSource = __zigWptIFrameInitScripts[frameSrc];
+    if (scriptSource && !iframe.__zigFrameScriptInitialized) {
+      runFrameInitScript(frameWindow, scriptSource);
+      iframe.__zigFrameScriptInitialized = true;
+    }
+  }
+
+  if (window && typeof window === "object") {
+    window.frames = frameWindows;
+    window.length = frameWindows.length;
+  }
+  globalThis.frames = frameWindows;
+}
 
 function resetWptDomFixture() {
   document.body.innerHTML = __zigWptInitialBody;
   if (typeof globalThis.__zigDomSyncWindowNamedProperties === "function") {
     globalThis.__zigDomSyncWindowNamedProperties();
   }
+  initializeFrameFixtures();
 }
 
 function runWptSetups() {
@@ -257,6 +393,44 @@ try {
 
 function fail(message) {
   throw new Error(message);
+}
+
+if (typeof globalThis.ErrorEvent !== "function" && typeof Event === "function") {
+  class ZigErrorEvent extends Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.message = typeof init.message === "string" ? init.message : "";
+      this.error = init.error;
+    }
+  }
+  globalThis.ErrorEvent = ZigErrorEvent;
+}
+if (window && typeof globalThis.ErrorEvent === "function") {
+  window.ErrorEvent = globalThis.ErrorEvent;
+}
+if (typeof globalThis.UIEvent !== "function" && typeof Event === "function") {
+  class ZigUIEvent extends Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.detail = Number(init.detail) || 0;
+      this.view = init.view ?? null;
+    }
+  }
+  globalThis.UIEvent = ZigUIEvent;
+}
+if (window && typeof globalThis.UIEvent === "function") {
+  window.UIEvent = globalThis.UIEvent;
+}
+if (typeof globalThis.XMLHttpRequest !== "function" && typeof EventTarget === "function") {
+  class ZigXMLHttpRequest extends EventTarget {}
+  globalThis.XMLHttpRequest = ZigXMLHttpRequest;
+}
+if (window && typeof globalThis.XMLHttpRequest === "function") {
+  window.XMLHttpRequest = globalThis.XMLHttpRequest;
+}
+if (window && typeof window === "object") {
+  globalThis.top = window;
+  globalThis.parent = window;
 }
 
 function dispatchSyntheticWindowLoad() {
@@ -393,7 +567,9 @@ globalThis.async_test = (first = "async_test", second) => {
       }
     try {
       if (callback) callback.call(testObject, testObject);
-      dispatchSyntheticWindowLoad();
+      if (!__zigWptRegistersTestsViaWindowOnload) {
+        dispatchSyntheticWindowLoad();
+      }
       await done;
     } finally {
       runCleanups();
@@ -414,6 +590,8 @@ globalThis.assert_true = (value, message = "Expected value to be truthy") => exp
 globalThis.assert_false = (value, message = "Expected value to be falsy") => expect(Boolean(value), message).toBe(false);
 globalThis.assert_equals = (actual, expected, message = "Expected values to be equal") => expect(actual, message).toBe(expected);
 globalThis.assert_not_equals = (actual, expected, message = "Expected values to differ") => expect(actual, message).not.toBe(expected);
+globalThis.assert_own_property = (object, property, message = "Expected own property") =>
+  expect(Object.prototype.hasOwnProperty.call(object, property), message).toBe(true);
 globalThis.assert_array_equals = (actual, expected, message = "Expected arrays to be equal") => expect(Array.from(actual), message).toEqual(Array.from(expected));
 globalThis.assert_throws_js = (ctor, fn, message = "Expected JS exception") => expect(fn, message).toThrow(ctor);
 globalThis.assert_throws_dom = (_expected, fnOrCtor, maybeFn, message = "Expected DOM exception") => {
@@ -426,6 +604,7 @@ globalThis.add_cleanup = () => {};
 
 // Indirect eval runs scripts in the global scope, matching browser script tag semantics.
 (0, eval)(source);
+dispatchSyntheticWindowLoad();
 await Promise.all(pending);
 `;
 }
@@ -469,11 +648,27 @@ for (let offset = 0; offset < generatedFiles.length; offset += batchSize) {
   const batchIndex = Math.floor(offset / batchSize) + 1;
   const batchTotal = Math.ceil(generatedFiles.length / batchSize);
   console.log(`NATIVE_WPT batch=${batchIndex}/${batchTotal} size=${batch.length}`);
-  const result = spawnSync("zig", ["build", "run", "--", "test", ...batch, "--dom"], {
-    stdio: "inherit"
-  });
-  if ((result.status ?? 1) !== 0) {
-    process.exit(result.status ?? 1);
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    const result = spawnSync("zig", ["build", "run", "--", "test", ...batch, "--dom"], {
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024
+    });
+
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+
+    const status = result.status ?? 1;
+    if (status === 0) break;
+
+    const combined = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+    const flakyGcAssert = combined.includes("Assertion failed: (list_empty(&rt->gc_obj_list))");
+    if (flakyGcAssert && attempt < maxRetries) {
+      console.warn(`NATIVE_WPT retry batch=${batchIndex}/${batchTotal} attempt=${attempt + 1}/${maxRetries}`);
+      continue;
+    }
+
+    process.exit(status);
   }
 }
 

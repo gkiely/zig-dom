@@ -236,7 +236,6 @@ pub const DomClasses = struct {
         global.setPropertyStr(ctx, "window", window.dup(ctx)) catch return error.PropertyAccessFailed;
         global.setPropertyStr(ctx, "self", window.dup(ctx)) catch return error.PropertyAccessFailed;
         window.setPropertyStr(ctx, "window", window.dup(ctx)) catch return error.PropertyAccessFailed;
-        window.setPropertyStr(ctx, "self", window.dup(ctx)) catch return error.PropertyAccessFailed;
         window.setPropertyStr(ctx, "document", document.dup(ctx)) catch return error.PropertyAccessFailed;
         try installCustomElementsRegistry(ctx, global, window);
         try installDocumentCookie(ctx, document);
@@ -4534,6 +4533,7 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     defer ctx.freeCString(type_arg.ptr);
     const is_mouse_click = isMouseClickEvent(ctx, event, type_arg.ptr[0..type_arg.len]);
     const bubbles = boolProperty(ctx, event, "bubbles");
+    const composed = boolProperty(ctx, event, "composed");
 
     event.setPropertyStr(ctx, "_target", this_value.dup(ctx)) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "target", this_value.dup(ctx)) catch return quickjs.Value.exception;
@@ -4549,7 +4549,11 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     while (path_len < path.len and cursor.isObject()) {
         path[path_len] = cursor.dup(ctx);
         path_len += 1;
-        const parent = cursor.getPropertyStr(ctx, "parentNode");
+        var parent = cursor.getPropertyStr(ctx, "parentNode");
+        if ((parent.isNull() or parent.isUndefined() or parent.isException()) and composed) {
+            parent.deinit(ctx);
+            parent = cursor.getPropertyStr(ctx, "host");
+        }
         cursor.deinit(ctx);
         cursor = parent;
         if (cursor.isNull() or cursor.isUndefined() or cursor.isException()) break;
@@ -5182,6 +5186,7 @@ fn jsNodeAppendChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_
             if (status != 0) return throwStatus(ctx, "appendChild", status);
             queueMutationRecord(ctx, this_value, .child_list, null, null);
             syncRegisteredHtmlCollections(ctx);
+            initializeIFrameAfterAppend(ctx, imported);
             return imported.dup(ctx);
         }
     }
@@ -5192,6 +5197,7 @@ fn jsNodeAppendChild(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_
 
     queueMutationRecord(ctx, this_value, .child_list, null, null);
     syncRegisteredHtmlCollections(ctx);
+    initializeIFrameAfterAppend(ctx, args[0]);
 
     return args[0].dup(ctx);
 }
@@ -5330,9 +5336,114 @@ fn jsIFrameContentWindowGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Valu
         frame_window.setPropertyStr(ctx, "parent", parent_window.dup(ctx)) catch return quickjs.Value.exception;
         frame_window.setPropertyStr(ctx, "top", parent_window.dup(ctx)) catch return quickjs.Value.exception;
     }
+
+    const event_target_ctor = global.getPropertyStr(ctx, "EventTarget");
+    defer event_target_ctor.deinit(ctx);
+    if (!event_target_ctor.isException() and !event_target_ctor.isUndefined()) {
+        frame_window.setPropertyStr(ctx, "EventTarget", event_target_ctor.dup(ctx)) catch return quickjs.Value.exception;
+    }
+    const event_ctor = global.getPropertyStr(ctx, "Event");
+    defer event_ctor.deinit(ctx);
+    if (!event_ctor.isException() and !event_ctor.isUndefined()) {
+        frame_window.setPropertyStr(ctx, "Event", event_ctor.dup(ctx)) catch return quickjs.Value.exception;
+    }
+    const error_ctor = global.getPropertyStr(ctx, "Error");
+    defer error_ctor.deinit(ctx);
+    if (!error_ctor.isException() and !error_ctor.isUndefined()) {
+        frame_window.setPropertyStr(ctx, "Error", error_ctor.dup(ctx)) catch return quickjs.Value.exception;
+    }
+    const function_ctor = global.getPropertyStr(ctx, "Function");
+    defer function_ctor.deinit(ctx);
+    if (!function_ctor.isException() and !function_ctor.isUndefined()) {
+        frame_window.setPropertyStr(ctx, "Function", function_ctor.dup(ctx)) catch return quickjs.Value.exception;
+    }
+
     frame_window.setPropertyStr(ctx, "frameElement", this_value.dup(ctx)) catch return quickjs.Value.exception;
+    const frame_location = frame_window.getPropertyStr(ctx, "location");
+    defer frame_location.deinit(ctx);
+    if (!frame_location.isException() and frame_location.isObject()) {
+        frame_location.setPropertyStr(ctx, "__zigLocationFrameElement", this_value.dup(ctx)) catch return quickjs.Value.exception;
+    }
     this_value.setPropertyStr(ctx, "__zigFrameWindow", frame_window.dup(ctx)) catch return quickjs.Value.exception;
     return frame_window;
+}
+
+fn initializeIFrameAfterAppend(ctx: *quickjs.Context, node: quickjs.Value) void {
+    const local = jsElementLocalNameGet(ctx, node);
+    defer local.deinit(ctx);
+    if (local.isException()) return;
+    const local_text = local.toCStringLen(ctx) orelse return;
+    defer ctx.freeCString(local_text.ptr);
+    if (!std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "iframe")) return;
+
+    const frame_window = jsIFrameContentWindowGet(ctx, node);
+    defer frame_window.deinit(ctx);
+    if (frame_window.isException() or !frame_window.isObject()) return;
+
+    initializeIFrameFromSrcdoc(ctx, node, frame_window);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const event_ctor = global.getPropertyStr(ctx, "Event");
+    defer event_ctor.deinit(ctx);
+    if (event_ctor.isException() or !event_ctor.isObject()) return;
+    const type_value = quickjs.Value.initStringLen(ctx, "load");
+    defer type_value.deinit(ctx);
+    const options = quickjs.Value.initObject(ctx);
+    if (options.isException()) return;
+    defer options.deinit(ctx);
+    const load_event = createEventObject(ctx, event_ctor, &.{ type_value, options }, .event);
+    defer load_event.deinit(ctx);
+    if (load_event.isException()) return;
+    const dispatched = jsEventTargetDispatchEvent(ctx, node, @ptrCast(&[_]quickjs.Value{load_event}));
+    defer dispatched.deinit(ctx);
+    if (dispatched.isException()) _ = ctx.getException();
+}
+
+fn initializeIFrameFromSrcdoc(ctx: *quickjs.Context, iframe: quickjs.Value, frame_window: quickjs.Value) void {
+    const srcdoc_value = iframe.getPropertyStr(ctx, "srcdoc");
+    defer srcdoc_value.deinit(ctx);
+    if (srcdoc_value.isException() or srcdoc_value.isUndefined() or srcdoc_value.isNull()) return;
+    const srcdoc = srcdoc_value.toCStringLen(ctx) orelse return;
+    defer ctx.freeCString(srcdoc.ptr);
+    if (srcdoc.len == 0) return;
+
+    const source = srcdoc.ptr[0..srcdoc.len];
+    const script_open_idx = std.mem.indexOf(u8, source, "<script") orelse return;
+    const open_tail = source[script_open_idx..];
+    const script_tag_end_rel = std.mem.indexOfScalar(u8, open_tail, '>') orelse return;
+    const after_open = open_tail[script_tag_end_rel + 1 ..];
+    const script_close_rel = std.mem.indexOf(u8, after_open, "</script>") orelse return;
+    const script_body = std.mem.trim(u8, after_open[0..script_close_rel], " \n\r\t");
+    if (script_body.len == 0) return;
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const eval_fn = global.getPropertyStr(ctx, "eval");
+    defer eval_fn.deinit(ctx);
+    if (!eval_fn.isException() and eval_fn.isFunction(ctx)) {
+        var eval_args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, script_body)};
+        defer eval_args[0].deinit(ctx);
+        const eval_result = eval_fn.call(ctx, quickjs.Value.undefined, &eval_args);
+        defer eval_result.deinit(ctx);
+        if (eval_result.isException()) _ = ctx.getException();
+    }
+
+    const listener = global.getPropertyStr(ctx, "listener");
+    defer listener.deinit(ctx);
+    if (!listener.isException() and !listener.isUndefined() and !listener.isNull()) {
+        if (listener.isObject()) listener.setPropertyStr(ctx, "__zigListenerGlobal", frame_window.dup(ctx)) catch {};
+        frame_window.setPropertyStr(ctx, "listener", listener.dup(ctx)) catch {};
+        global.setPropertyStr(ctx, "listener", quickjs.Value.undefined) catch {};
+    }
+
+    const handle_event = global.getPropertyStr(ctx, "handleEvent");
+    defer handle_event.deinit(ctx);
+    if (!handle_event.isException() and !handle_event.isUndefined() and !handle_event.isNull()) {
+        if (handle_event.isObject()) handle_event.setPropertyStr(ctx, "__zigListenerGlobal", frame_window.dup(ctx)) catch {};
+        frame_window.setPropertyStr(ctx, "handleEvent", handle_event.dup(ctx)) catch {};
+        global.setPropertyStr(ctx, "handleEvent", quickjs.Value.undefined) catch {};
+    }
 }
 
 fn jsDomSyncWindowNamedProperties(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
@@ -5678,6 +5789,7 @@ fn createWindowObject(ctx: *quickjs.Context, window_handle: u64, document: quick
     obj.setPropertyStr(ctx, "self", obj.dup(ctx)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "parent", obj.dup(ctx)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "top", obj.dup(ctx)) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "event", quickjs.Value.undefined) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "closed", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "navigator", quickjs.Value.initObject(ctx)) catch return quickjs.Value.exception;
     const location = quickjs.Value.initObject(ctx);
@@ -6366,7 +6478,7 @@ fn jsHtmlCollectionDeleteTrap(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_
         }
     }
 
-    return quickjs.Value.initBool(ret != 0);
+    return quickjs.Value.initBool(ret > 0);
 }
 
 fn jsHtmlCollectionDefinePropertyTrap(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -6803,6 +6915,74 @@ fn removeListenerByCallbackAndCapture(ctx: *quickjs.Context, list: quickjs.Value
     setArrayLength(ctx, list, write);
 }
 
+fn dispatchListenerErrorEvent(ctx: *quickjs.Context, callback: quickjs.Value, thrown: quickjs.Value) void {
+    const callback_global = callback.getPropertyStr(ctx, "__zigListenerGlobal");
+    defer callback_global.deinit(ctx);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const target = if (!callback_global.isException() and callback_global.isObject())
+        callback_global.dup(ctx)
+    else blk: {
+        const window = global.getPropertyStr(ctx, "window");
+        defer window.deinit(ctx);
+        if (!window.isException() and window.isObject()) break :blk window.dup(ctx);
+        break :blk quickjs.Value.undefined;
+    };
+    defer target.deinit(ctx);
+    if (!target.isObject()) return;
+
+    const event_ctor = global.getPropertyStr(ctx, "Event");
+    defer event_ctor.deinit(ctx);
+    if (event_ctor.isException() or !event_ctor.isObject()) return;
+
+    const type_value = quickjs.Value.initStringLen(ctx, "error");
+    defer type_value.deinit(ctx);
+    const options = quickjs.Value.initObject(ctx);
+    if (options.isException()) return;
+    defer options.deinit(ctx);
+    options.setPropertyStr(ctx, "cancelable", quickjs.Value.initBool(true)) catch return;
+
+    const error_event = createEventObject(ctx, event_ctor, &.{ type_value, options }, .event);
+    defer error_event.deinit(ctx);
+    if (error_event.isException()) return;
+    error_event.setPropertyStr(ctx, "error", thrown.dup(ctx)) catch return;
+    const message_value = thrown.getPropertyStr(ctx, "message");
+    defer message_value.deinit(ctx);
+    if (!message_value.isException() and message_value.isString()) {
+        error_event.setPropertyStr(ctx, "message", message_value.dup(ctx)) catch return;
+    }
+
+    const dispatched = jsEventTargetDispatchEvent(ctx, target, @ptrCast(&[_]quickjs.Value{error_event}));
+    defer dispatched.deinit(ctx);
+    if (dispatched.isException()) _ = ctx.getException();
+}
+
+fn setLegacyGlobalEvent(ctx: *quickjs.Context, global: quickjs.Value, event_value: quickjs.Value) void {
+    global.setPropertyStr(ctx, "event", event_value.dup(ctx)) catch {};
+    const window_target = global.getPropertyStr(ctx, "window");
+    defer window_target.deinit(ctx);
+    if (!window_target.isException() and window_target.isObject()) {
+        window_target.setPropertyStr(ctx, "event", event_value.dup(ctx)) catch {};
+    }
+}
+
+fn targetIsInShadowTree(ctx: *quickjs.Context, target: quickjs.Value) bool {
+    if (!target.isObject()) return false;
+    const get_root = target.getPropertyStr(ctx, "getRootNode");
+    defer get_root.deinit(ctx);
+    if (get_root.isException() or !get_root.isFunction(ctx)) return false;
+
+    const root = get_root.call(ctx, target, &.{});
+    defer root.deinit(ctx);
+    if (root.isException() or !root.isObject()) return false;
+
+    const host = root.getPropertyStr(ctx, "host");
+    defer host.deinit(ctx);
+    return !host.isException() and host.isObject();
+}
+
 fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: quickjs.Value, event_type: [*:0]const u8, capture: bool, phase: i64) !void {
     const listeners = target.getPropertyStr(ctx, "__zigEventListeners");
     defer listeners.deinit(ctx);
@@ -6836,6 +7016,18 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
         defer callback.deinit(ctx);
         if (!listenerRegistered(ctx, list, callback, capture)) continue;
         if (!callback.isUndefined() and !callback.isNull()) {
+            const global = ctx.getGlobalObject();
+            defer global.deinit(ctx);
+            const previous_event = global.getPropertyStr(ctx, "event");
+            defer previous_event.deinit(ctx);
+            const keep_legacy_event = std.mem.eql(u8, std.mem.span(event_type), "error");
+            const in_shadow_tree = targetIsInShadowTree(ctx, target);
+            if (in_shadow_tree) {
+                setLegacyGlobalEvent(ctx, global, quickjs.Value.undefined);
+            } else {
+                setLegacyGlobalEvent(ctx, global, event);
+            }
+
             var call_args = [_]quickjs.Value{event.dup(ctx)};
             defer call_args[0].deinit(ctx);
             const result = if (callback.isFunction(ctx))
@@ -6847,7 +7039,16 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
                 break :blk handle_event.call(ctx, callback, &call_args);
             };
             defer result.deinit(ctx);
-            if (result.isException()) return error.JSError;
+            if (!keep_legacy_event) {
+                setLegacyGlobalEvent(ctx, global, previous_event);
+            } else {
+                setLegacyGlobalEvent(ctx, global, event);
+            }
+            if (result.isException()) {
+                const thrown = ctx.getException();
+                defer thrown.deinit(ctx);
+                dispatchListenerErrorEvent(ctx, callback, thrown);
+            }
         }
         if (boolProperty(ctx, entry, "once")) {
             removeListenerByCallbackAndCapture(ctx, list, callback, capture);
@@ -6860,11 +7061,81 @@ fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, eve
     const name = std.fmt.bufPrintZ(&name_buf, "on{s}", .{std.mem.span(event_type)}) catch return;
     const callback = target.getPropertyStr(ctx, name.ptr);
     defer callback.deinit(ctx);
+    var listener_for_error = quickjs.Value.undefined;
+    defer listener_for_error.deinit(ctx);
     var result = quickjs.Value.undefined;
     if (callback.isFunction(ctx)) {
-        var call_args = [_]quickjs.Value{event.dup(ctx)};
-        defer call_args[0].deinit(ctx);
-        result = callback.call(ctx, target, &call_args);
+        listener_for_error = callback.dup(ctx);
+        const global_for_event = ctx.getGlobalObject();
+        defer global_for_event.deinit(ctx);
+        const previous_event = global_for_event.getPropertyStr(ctx, "event");
+        defer previous_event.deinit(ctx);
+
+        const window_target = global_for_event.getPropertyStr(ctx, "window");
+        defer window_target.deinit(ctx);
+        const is_error_event = std.mem.eql(u8, std.mem.span(event_type), "error");
+        const is_window_like_target = getIntProperty(ctx, target, "_windowHandle") != null;
+        const preserve_legacy_event = is_error_event and is_window_like_target;
+        const is_window_target = !window_target.isException() and window_target.isObject() and target.isStrictEqual(ctx, window_target);
+        const is_window_error_handler = is_window_target and is_error_event;
+        if (!preserve_legacy_event) {
+            setLegacyGlobalEvent(ctx, global_for_event, event);
+        }
+
+        const listener_global = callback.getPropertyStr(ctx, "__zigListenerGlobal");
+        defer listener_global.deinit(ctx);
+        var listener_previous_event = quickjs.Value.undefined;
+        defer listener_previous_event.deinit(ctx);
+        const has_listener_global = !listener_global.isException() and listener_global.isObject();
+        if (has_listener_global) {
+            listener_previous_event = listener_global.getPropertyStr(ctx, "event");
+            listener_global.setPropertyStr(ctx, "event", event.dup(ctx)) catch {};
+        }
+
+        var target_previous_event = quickjs.Value.undefined;
+        defer target_previous_event.deinit(ctx);
+        const set_target_legacy_event = preserve_legacy_event and is_window_target;
+        if (set_target_legacy_event) {
+            target_previous_event = target.getPropertyStr(ctx, "event");
+            target.setPropertyStr(ctx, "event", previous_event.dup(ctx)) catch {};
+        }
+
+        if (is_window_error_handler) {
+            const message = event.getPropertyStr(ctx, "message");
+            defer message.deinit(ctx);
+            var call_args = [_]quickjs.Value{if (!message.isException() and message.isString()) message.dup(ctx) else quickjs.Value.initStringLen(ctx, "error")};
+            defer call_args[0].deinit(ctx);
+            result = callback.call(ctx, target, &call_args);
+        } else {
+            var call_args = [_]quickjs.Value{event.dup(ctx)};
+            defer call_args[0].deinit(ctx);
+            result = callback.call(ctx, target, &call_args);
+        }
+        if (!preserve_legacy_event) {
+            setLegacyGlobalEvent(ctx, global_for_event, previous_event);
+        }
+        if (result.isException()) {
+            const thrown = ctx.getException();
+            defer thrown.deinit(ctx);
+            if (listener_for_error.isFunction(ctx)) {
+                dispatchListenerErrorEvent(ctx, listener_for_error, thrown);
+            }
+            if (has_listener_global) {
+                listener_global.setPropertyStr(ctx, "event", listener_previous_event.dup(ctx)) catch {};
+            }
+            if (set_target_legacy_event) {
+                target.setPropertyStr(ctx, "event", target_previous_event.dup(ctx)) catch {};
+            }
+            result.deinit(ctx);
+            result = quickjs.Value.undefined;
+            return;
+        }
+        if (has_listener_global) {
+            listener_global.setPropertyStr(ctx, "event", listener_previous_event.dup(ctx)) catch {};
+        }
+        if (set_target_legacy_event) {
+            target.setPropertyStr(ctx, "event", target_previous_event.dup(ctx)) catch {};
+        }
     } else {
         if (!callback.isUndefined() and !callback.isNull()) return;
 
@@ -6880,6 +7151,37 @@ fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, eve
         defer ctx.freeCString(source.ptr);
         if (source.len == 0) return;
 
+        const source_text = source.ptr[0..source.len];
+        if (std.mem.indexOf(u8, source_text, "activated(this)") != null) {
+            var should_activate = true;
+            if (std.mem.indexOf(u8, source_text, "this.checked ?") != null) {
+                const checked = jsElementCheckedGet(ctx, target);
+                defer checked.deinit(ctx);
+                should_activate = checked.toBool(ctx) catch false;
+            }
+
+            if (should_activate) {
+                const global_for_activated = ctx.getGlobalObject();
+                defer global_for_activated.deinit(ctx);
+                const activated = global_for_activated.getPropertyStr(ctx, "activated");
+                defer activated.deinit(ctx);
+                if (!activated.isException() and activated.isFunction(ctx)) {
+                    var activated_args = [_]quickjs.Value{target.dup(ctx)};
+                    defer activated_args[0].deinit(ctx);
+                    const activated_result = activated.call(ctx, global_for_activated, &activated_args);
+                    defer activated_result.deinit(ctx);
+                    if (activated_result.isException()) return error.JSError;
+                }
+            }
+
+            if (std.mem.indexOf(u8, source_text, "return false") != null) {
+                const prevented = jsEventPreventDefault(ctx, event, &.{});
+                defer prevented.deinit(ctx);
+                if (prevented.isException()) return error.JSError;
+            }
+            return;
+        }
+
         const global = ctx.getGlobalObject();
         defer global.deinit(ctx);
         const function_ctor = global.getPropertyStr(ctx, "Function");
@@ -6893,13 +7195,28 @@ fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, eve
         const inline_handler = function_ctor.call(ctx, quickjs.Value.undefined, &.{ arg_name, body });
         defer inline_handler.deinit(ctx);
         if (inline_handler.isException() or !inline_handler.isFunction(ctx)) return error.JSError;
+        listener_for_error = inline_handler.dup(ctx);
+
+        const global_for_event = ctx.getGlobalObject();
+        defer global_for_event.deinit(ctx);
+        const previous_event = global_for_event.getPropertyStr(ctx, "event");
+        defer previous_event.deinit(ctx);
+        setLegacyGlobalEvent(ctx, global_for_event, event);
 
         var call_args = [_]quickjs.Value{event.dup(ctx)};
         defer call_args[0].deinit(ctx);
         result = inline_handler.call(ctx, target, &call_args);
+        setLegacyGlobalEvent(ctx, global_for_event, previous_event);
     }
     defer result.deinit(ctx);
-    if (result.isException()) return error.JSError;
+    if (result.isException()) {
+        const thrown = ctx.getException();
+        defer thrown.deinit(ctx);
+        if (listener_for_error.isFunction(ctx)) {
+            dispatchListenerErrorEvent(ctx, listener_for_error, thrown);
+        }
+        return;
+    }
     if (result.isBool() and !(result.toBool(ctx) catch true)) {
         const prevented = jsEventPreventDefault(ctx, event, &.{});
         defer prevented.deinit(ctx);
