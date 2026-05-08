@@ -34,6 +34,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "prepend", callbacks.prepend, 1);
     try bindings.installMethod(ctx, proto, "insertBefore", callbacks.insertBefore, 2);
     try bindings.installMethod(ctx, proto, "removeChild", callbacks.removeChild, 1);
+    try bindings.installMethod(ctx, proto, "remove", callbacks.remove, 0);
     try bindings.installMethod(ctx, proto, "replaceChild", callbacks.replaceChild, 2);
     try bindings.installMethod(ctx, proto, "cloneNode", callbacks.cloneNode, 1);
 }

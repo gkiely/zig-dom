@@ -11,6 +11,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installGetter(ctx, proto, "implementation", callbacks.implementationGet);
     try bindings.installMethod(ctx, proto, "createElement", callbacks.createElement, 1);
     try bindings.installMethod(ctx, proto, "createElementNS", callbacks.createElementNS, 2);
+    try bindings.installMethod(ctx, proto, "createAttribute", callbacks.createAttribute, 1);
     try bindings.installMethod(ctx, proto, "createTextNode", callbacks.createTextNode, 1);
     try bindings.installMethod(ctx, proto, "createComment", callbacks.createComment, 1);
     try bindings.installMethod(ctx, proto, "createDocumentFragment", callbacks.createDocumentFragment, 0);
@@ -22,6 +23,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "getElementById", callbacks.getElementById, 1);
     try bindings.installMethod(ctx, proto, "querySelector", callbacks.querySelector, 1);
     try bindings.installMethod(ctx, proto, "querySelectorAll", callbacks.querySelectorAll, 1);
-    try bindings.installMethod(ctx, proto, "getElementsByTagName", callbacks.querySelectorAll, 1);
+    try bindings.installMethod(ctx, proto, "getElementsByTagName", callbacks.getElementsByTagName, 1);
+    try bindings.installMethod(ctx, proto, "getElementsByTagNameNS", callbacks.getElementsByTagNameNS, 2);
     try bindings.installMethod(ctx, proto, "getElementsByClassName", callbacks.getElementsByClassName, 1);
 }

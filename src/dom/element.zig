@@ -28,7 +28,8 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installGetter(ctx, proto, "dataset", callbacks.datasetGet);
     try bindings.installMethod(ctx, proto, "querySelector", callbacks.querySelector, 1);
     try bindings.installMethod(ctx, proto, "querySelectorAll", callbacks.querySelectorAll, 1);
-    try bindings.installMethod(ctx, proto, "getElementsByTagName", callbacks.querySelectorAll, 1);
+    try bindings.installMethod(ctx, proto, "getElementsByTagName", callbacks.getElementsByTagName, 1);
+    try bindings.installMethod(ctx, proto, "getElementsByTagNameNS", callbacks.getElementsByTagNameNS, 2);
     try bindings.installMethod(ctx, proto, "getElementsByClassName", callbacks.getElementsByClassName, 1);
     try bindings.installMethod(ctx, proto, "matches", callbacks.matches, 1);
     try bindings.installMethod(ctx, proto, "closest", callbacks.closest, 1);
