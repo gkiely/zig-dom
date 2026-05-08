@@ -4820,6 +4820,7 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     const implementation = createDOMImplementationObject(ctx);
     if (implementation.isException()) return quickjs.Value.exception;
     document.setPropertyStr(ctx, "implementation", implementation) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "contentType", quickjs.Value.initStringLen(ctx, "text/html")) catch return quickjs.Value.exception;
     installMethod(ctx, document, "createElement", jsImplementationLightDocumentCreateElement, 1) catch return quickjs.Value.exception;
 
     const body_name = quickjs.Value.initStringLen(ctx, "body");
