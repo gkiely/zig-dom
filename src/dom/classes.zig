@@ -41,6 +41,7 @@ const NodeCallbacks = struct {
     pub const previousElementSiblingGet = jsNodePreviousElementSiblingGet;
     pub const nextElementSiblingGet = jsNodeNextElementSiblingGet;
     pub const childElementCountGet = jsNodeChildElementCountGet;
+    pub const hasChildNodes = jsNodeHasChildNodes;
     pub const textContentGet = jsNodeTextContentGet;
     pub const textContentSet = jsNodeTextContentSet;
     pub const nodeValueGet = jsNodeValueGet;
@@ -125,11 +126,13 @@ const DocumentCallbacks = struct {
     pub const bodyGet = jsDocumentBodyGet;
     pub const defaultViewGet = jsDocumentDefaultViewGet;
     pub const implementationGet = jsDocumentImplementationGet;
+    pub const contentTypeGet = jsDocumentContentTypeGet;
     pub const createElement = jsDocumentCreateElement;
     pub const createElementNS = jsDocumentCreateElementNS;
     pub const createAttribute = jsDocumentCreateAttribute;
     pub const createTextNode = jsDocumentCreateTextNode;
     pub const createComment = jsDocumentCreateComment;
+    pub const createProcessingInstruction = jsDocumentCreateProcessingInstruction;
     pub const createDocumentFragment = jsDocumentCreateDocumentFragment;
     pub const createDocumentType = jsDocumentCreateDocumentType;
     pub const createEvent = jsDocumentCreateEvent;
@@ -197,6 +200,9 @@ pub const DomClasses = struct {
         }
 
         try node_surface.installPrototype(ctx, node_proto, NodeCallbacks);
+        try installMethod(ctx, node_proto, "before", jsNodeBefore, 0);
+        try installMethod(ctx, node_proto, "after", jsNodeAfter, 0);
+        try installMethod(ctx, node_proto, "replaceWith", jsNodeReplaceWith, 0);
         try installMethod(ctx, node_proto, "click", jsElementClick, 0);
         try event_target_surface.installPrototype(ctx, node_proto, EventTargetCallbacks);
         try installElementSlice(ctx, global);
@@ -521,6 +527,7 @@ fn installFormElementPrototypeAccessors(ctx: *quickjs.Context, global: quickjs.V
         defer iframe_proto.deinit(ctx);
         if (!iframe_proto.isException() and iframe_proto.isObject()) {
             try installGetter(ctx, iframe_proto, "contentWindow", jsIFrameContentWindowGet);
+            try installGetter(ctx, iframe_proto, "contentDocument", jsIFrameContentDocumentGet);
         }
     }
 
@@ -898,7 +905,7 @@ fn jsConstructText(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []con
     const document = global.getPropertyStr(ctx, "document");
     defer document.deinit(ctx);
     const document_handle = parseThisHandle(ctx, document, "Text") orelse return quickjs.Value.exception;
-    const data = if (args.len >= 1) parseStringArg(ctx, args, 0, "Text") else null;
+    const data = if (args.len >= 1 and !args[0].isUndefined()) parseStringArg(ctx, args, 0, "Text") else null;
     defer if (data) |value| ctx.freeCString(value.ptr);
     const text = if (data) |value| value.ptr[0..value.len] else "";
     var out_handle: u64 = 0;
@@ -915,7 +922,7 @@ fn jsConstructComment(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []
     const document = global.getPropertyStr(ctx, "document");
     defer document.deinit(ctx);
     const document_handle = parseThisHandle(ctx, document, "Comment") orelse return quickjs.Value.exception;
-    const data = if (args.len >= 1) parseStringArg(ctx, args, 0, "Comment") else null;
+    const data = if (args.len >= 1 and !args[0].isUndefined()) parseStringArg(ctx, args, 0, "Comment") else null;
     defer if (data) |value| ctx.freeCString(value.ptr);
     const text = if (data) |value| value.ptr[0..value.len] else "";
     var out_handle: u64 = 0;
@@ -949,19 +956,53 @@ fn jsConstructAttr(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_ar
     };
     defer ctx.freeCString(name.ptr);
 
-    obj.setPropertyStr(ctx, "_nodeTypeOverride", quickjs.Value.initInt64(2)) catch {
+    defineDataPropertyStr(ctx, obj, "_nodeTypeOverride", quickjs.Value.initInt64(2)) catch {
         obj.deinit(ctx);
         return quickjs.Value.exception;
     };
-    obj.setPropertyStr(ctx, "name", quickjs.Value.initStringLen(ctx, name.ptr[0..name.len])) catch {
+    const name_value = quickjs.Value.initStringLen(ctx, name.ptr[0..name.len]);
+    defer name_value.deinit(ctx);
+    defineDataPropertyStr(ctx, obj, "name", name_value.dup(ctx)) catch {
         obj.deinit(ctx);
         return quickjs.Value.exception;
     };
-    obj.setPropertyStr(ctx, "value", quickjs.Value.initStringLen(ctx, "")) catch {
+    defineDataPropertyStr(ctx, obj, "_nodeNameOverride", name_value.dup(ctx)) catch {
         obj.deinit(ctx);
         return quickjs.Value.exception;
     };
-    obj.setPropertyStr(ctx, "ownerElement", quickjs.Value.null) catch {
+    defineDataPropertyStr(ctx, obj, "localName", name_value.dup(ctx)) catch {
+        obj.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defineDataPropertyStr(ctx, obj, "nodeName", name_value.dup(ctx)) catch {
+        obj.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defineDataPropertyStr(ctx, obj, "value", quickjs.Value.initStringLen(ctx, "")) catch {
+        obj.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defineDataPropertyStr(ctx, obj, "nodeValue", quickjs.Value.initStringLen(ctx, "")) catch {
+        obj.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defineDataPropertyStr(ctx, obj, "textContent", quickjs.Value.initStringLen(ctx, "")) catch {
+        obj.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defineDataPropertyStr(ctx, obj, "namespaceURI", quickjs.Value.null) catch {
+        obj.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defineDataPropertyStr(ctx, obj, "prefix", quickjs.Value.null) catch {
+        obj.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defineDataPropertyStr(ctx, obj, "specified", quickjs.Value.initBool(true)) catch {
+        obj.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defineDataPropertyStr(ctx, obj, "ownerElement", quickjs.Value.null) catch {
         obj.deinit(ctx);
         return quickjs.Value.exception;
     };
@@ -2067,6 +2108,12 @@ fn jsNodeChildElementCountGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     return quickjs.Value.initInt64(count);
 }
 
+fn jsNodeHasChildNodes(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const this_handle = parseThisHandle(ctx, this_value, "hasChildNodes") orelse return quickjs.Value.exception;
+    return quickjs.Value.initBool(zig_dom.zig_dom_node_first_child(this_handle) != 0);
+}
+
 fn jsNodeTextContentGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const this_handle = parseThisHandle(ctx, this_value, "textContent") orelse return quickjs.Value.exception;
@@ -2101,10 +2148,11 @@ fn jsNodeTextContentSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, n
     const old_value = if (node_type == 3 or node_type == 8) jsNodeTextContentGet(ctx, this_value) else quickjs.Value.null;
     defer old_value.deinit(ctx);
 
-    const text_value = next_value.toCStringLen(ctx) orelse return throwOperationMessage(ctx, "textContent", "value could not be converted to string");
-    defer ctx.freeCString(text_value.ptr);
+    const text_value = if (next_value.isNull()) null else next_value.toCStringLen(ctx) orelse return throwOperationMessage(ctx, "textContent", "value could not be converted to string");
+    defer if (text_value) |value| ctx.freeCString(value.ptr);
+    const text = if (text_value) |value| value.ptr[0..value.len] else "";
 
-    const status = zig_dom.zig_dom_node_set_text_content(this_handle, text_value.ptr, text_value.len);
+    const status = zig_dom.zig_dom_node_set_text_content(this_handle, text.ptr, text.len);
     if (status != 0) {
         return throwStatus(ctx, "textContent", status);
     }
@@ -2199,9 +2247,9 @@ fn jsCharacterDataLengthGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Valu
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const data = jsNodeTextContentGet(ctx, this_value);
     defer data.deinit(ctx);
-    const cstr = data.toCStringLen(ctx) orelse return quickjs.Value.exception;
-    defer ctx.freeCString(cstr.ptr);
-    return quickjs.Value.initInt64(@intCast(cstr.len));
+    const length = data.getPropertyStr(ctx, "length");
+    defer length.deinit(ctx);
+    return quickjs.Value.initInt64(length.toInt64(ctx) catch return quickjs.Value.exception);
 }
 
 fn jsCharacterDataAppendData(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -2247,15 +2295,15 @@ fn jsCharacterDataReplaceData(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
 fn jsCharacterDataSubstringData(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
-    const offset_raw = if (args.len > 0) args[0].toInt64(ctx) catch 0 else 0;
-    const count_raw = if (args.len > 1) args[1].toInt64(ctx) catch 0 else 0;
+    if (args.len < 2) return quickjs.Value.exception;
+    const offset = parseUnsignedLongArg(ctx, args, 0) orelse return quickjs.Value.exception;
+    const count = parseUnsignedLongArg(ctx, args, 1) orelse return quickjs.Value.exception;
     const data = jsNodeTextContentGet(ctx, this_value);
     defer data.deinit(ctx);
-    const cstr = data.toCStringLen(ctx) orelse return quickjs.Value.exception;
-    defer ctx.freeCString(cstr.ptr);
-    const start: usize = @intCast(@max(0, @min(offset_raw, @as(i64, @intCast(cstr.len)))));
-    const end: usize = @min(cstr.len, start + @as(usize, @intCast(@max(0, count_raw))));
-    return quickjs.Value.initStringLen(ctx, cstr.ptr[start..end]);
+    const length = jsStringLength(ctx, data) orelse return quickjs.Value.exception;
+    if (offset > length) return throwOperationMessage(ctx, "substringData", "offset is outside the string");
+    const end = @min(length, offset +| count);
+    return jsStringSlice(ctx, data, offset, end);
 }
 
 fn jsTextSplitText(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -2291,18 +2339,19 @@ fn jsTextSplitText(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_ar
 fn replaceCharacterDataRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue, replacement: []const u8) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
-    const offset_raw = if (args.len > 0) args[0].toInt64(ctx) catch 0 else 0;
-    const count_raw = if (args.len > 1) args[1].toInt64(ctx) catch 0 else 0;
+    if (args.len < 2) return quickjs.Value.exception;
+    const offset = parseUnsignedLongArg(ctx, args, 0) orelse return quickjs.Value.exception;
+    const count = parseUnsignedLongArg(ctx, args, 1) orelse return quickjs.Value.exception;
     const data = jsNodeTextContentGet(ctx, this_value);
     defer data.deinit(ctx);
-    const cstr = data.toCStringLen(ctx) orelse return quickjs.Value.exception;
-    defer ctx.freeCString(cstr.ptr);
-    const start: usize = @intCast(@max(0, @min(offset_raw, @as(i64, @intCast(cstr.len)))));
-    const end: usize = @min(cstr.len, start + @as(usize, @intCast(@max(0, count_raw))));
-    var buffer: [4096]u8 = undefined;
-    const next = std.fmt.bufPrint(&buffer, "{s}{s}{s}", .{ cstr.ptr[0..start], replacement, cstr.ptr[end..cstr.len] }) catch return quickjs.Value.exception;
-    const next_value = quickjs.Value.initStringLen(ctx, next);
+    const length = jsStringLength(ctx, data) orelse return quickjs.Value.exception;
+    if (offset > length) return throwOperationMessage(ctx, "replaceData", "offset is outside the string");
+    const end = @min(length, offset +| count);
+    const replacement_value = quickjs.Value.initStringLen(ctx, replacement);
+    defer replacement_value.deinit(ctx);
+    const next_value = jsStringReplaceRange(ctx, data, offset, end, replacement_value);
     defer next_value.deinit(ctx);
+    if (next_value.isException()) return quickjs.Value.exception;
     return jsNodeTextContentSet(ctx, this_value, next_value);
 }
 
@@ -2847,7 +2896,7 @@ fn jsElementClassListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) 
     if (!existing.isException() and existing.isObject()) return existing;
     existing.deinit(ctx);
 
-    const list = quickjs.Value.initObject(ctx);
+    const list = quickjs.Value.initArray(ctx);
     if (list.isException()) return list;
     list.setPropertyStr(ctx, "__zigElement", this_value.dup(ctx)) catch {
         list.deinit(ctx);
@@ -2862,6 +2911,18 @@ fn jsElementClassListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) 
         return quickjs.Value.exception;
     };
     installMethod(ctx, list, "remove", jsClassListRemove, 1) catch {
+        list.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    installMethod(ctx, list, "toString", jsClassListToString, 0) catch {
+        list.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    installAccessor(ctx, list, "value", jsClassListValueGet, jsClassListValueSet) catch {
+        list.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    classListSyncArray(ctx, list) catch {
         list.deinit(ctx);
         return quickjs.Value.exception;
     };
@@ -3975,14 +4036,29 @@ fn jsDocumentCreateElementNS(ctx_opt: ?*quickjs.Context, this_value: quickjs.Val
     return created;
 }
 
-fn jsDocumentCreateAttribute(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+fn jsDocumentCreateAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const name = parseStringArg(ctx, args, 0, "createAttribute") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name.ptr);
+    if (name.len == 0) return throwOperationMessage(ctx, "createAttribute", "INVALID_CHARACTER_ERR");
+
+    var buffer: [256]u8 = undefined;
+    var attr_name = name.ptr[0..name.len];
+    const is_xml_document = getBoolProperty(ctx, this_value, "__zigIsXmlDocument") orelse false;
+    if (!is_xml_document and name.len <= buffer.len) {
+        for (attr_name, 0..) |ch, i| buffer[i] = std.ascii.toLower(ch);
+        attr_name = buffer[0..name.len];
+    }
+
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const ctor = global.getPropertyStr(ctx, "Attr");
     defer ctor.deinit(ctx);
     if (ctor.isException() or !ctor.isObject()) return quickjs.Value.exception;
-    return quickjs.Value.fromCVal(c.JS_CallConstructor(ctx.cval(), ctor.cval(), @intCast(raw_args.len), @ptrCast(@constCast(raw_args.ptr))));
+    const name_value = quickjs.Value.initStringLen(ctx, attr_name);
+    defer name_value.deinit(ctx);
+    return quickjs.Value.fromCVal(c.JS_CallConstructor(ctx.cval(), ctor.cval(), 1, @ptrCast(@constCast(&name_value))));
 }
 
 fn jsDocumentCreateTextNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -4008,6 +4084,19 @@ fn jsDocumentCreateComment(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value
     var out_handle: u64 = 0;
     const status = zig_dom.zig_dom_document_create_comment(document_handle, data.ptr, data.len, &out_handle);
     if (status != 0) return throwStatus(ctx, "createComment", status);
+    return wrapNodeHandle(ctx, out_handle);
+}
+
+fn jsDocumentCreateProcessingInstruction(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const document_handle = parseThisHandle(ctx, this_value, "createProcessingInstruction") orelse return quickjs.Value.exception;
+    const data = parseStringArg(ctx, args, 1, "createProcessingInstruction") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(data.ptr);
+
+    var out_handle: u64 = 0;
+    const status = zig_dom.zig_dom_document_create_comment(document_handle, data.ptr, data.len, &out_handle);
+    if (status != 0) return throwStatus(ctx, "createProcessingInstruction", status);
     return wrapNodeHandle(ctx, out_handle);
 }
 
@@ -4509,9 +4598,17 @@ fn jsDocumentImplementationGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.V
     const implementation = quickjs.Value.initObject(ctx);
     if (implementation.isException()) return implementation;
     implementation.setPropertyStr(ctx, "__zigDocument", this_value.dup(ctx)) catch return quickjs.Value.exception;
+    installMethod(ctx, implementation, "createDocument", jsImplementationCreateDocument, 3) catch return quickjs.Value.exception;
+    installMethod(ctx, implementation, "createDocumentType", jsImplementationCreateDocumentType, 3) catch return quickjs.Value.exception;
     installMethod(ctx, implementation, "createHTMLDocument", jsImplementationCreateHTMLDocument, 1) catch return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "__zigImplementation", implementation.dup(ctx)) catch return quickjs.Value.exception;
     return implementation;
+}
+
+fn jsDocumentContentTypeGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    _ = parseThisHandle(ctx, this_value, "contentType") orelse return quickjs.Value.exception;
+    return quickjs.Value.initStringLen(ctx, "text/html");
 }
 
 fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
@@ -4519,6 +4616,18 @@ fn jsImplementationCreateHTMLDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     return global.getPropertyStr(ctx, "document");
+}
+
+fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const document = jsConstructDocument(ctx, quickjs.Value.undefined, &.{});
+    if (document.isException() or !document.isObject()) return document;
+    document.setPropertyStr(ctx, "__zigIsXmlDocument", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    return document;
+}
+
+fn jsImplementationCreateDocumentType(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    return jsDocumentCreateDocumentType(ctx_opt, this_value, raw_args);
 }
 
 fn jsClassListContains(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -4549,6 +4658,7 @@ fn jsClassListAdd(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_arg
         else
             std.fmt.bufPrint(&buffer, "{s} {s}", .{ current_text, token.ptr[0..token.len] }) catch current_text;
         setElementStringAttribute(ctx, element, "class", next) catch return quickjs.Value.exception;
+        classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
     }
     return quickjs.Value.undefined;
 }
@@ -4574,6 +4684,31 @@ fn jsClassListRemove(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_
         first = false;
     }
     setElementStringAttribute(ctx, element, "class", stream.buffered()) catch return quickjs.Value.exception;
+    classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsClassListToString(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    return jsClassListValueGet(ctx_opt, this_value);
+}
+
+fn jsClassListValueGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
+    defer element.deinit(ctx);
+    const value = elementAttributeString(ctx, element, "class") orelse return quickjs.Value.initStringLen(ctx, "");
+    defer ctx.freeCString(value.ptr);
+    return quickjs.Value.initStringLen(ctx, value.ptr[0..value.len]);
+}
+
+fn jsClassListValueSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const element = classListElement(ctx, this_value) orelse return quickjs.Value.exception;
+    defer element.deinit(ctx);
+    const applied = jsElementClassNameSet(ctx, element, next_value);
+    defer applied.deinit(ctx);
+    if (applied.isException()) return quickjs.Value.exception;
+    classListSyncArray(ctx, this_value) catch return quickjs.Value.exception;
     return quickjs.Value.undefined;
 }
 
@@ -5610,6 +5745,38 @@ fn jsNodeRemove(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []cons
     return quickjs.Value.undefined;
 }
 
+fn jsNodeBefore(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const this_handle = parseThisHandle(ctx, this_value, "before") orelse return quickjs.Value.exception;
+    const parent_handle = zig_dom.zig_dom_node_parent(this_handle);
+    if (parent_handle == 0) return quickjs.Value.undefined;
+
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return insertChildNodeArguments(ctx, parent_handle, this_handle, 0, args, "before", false);
+}
+
+fn jsNodeAfter(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const this_handle = parseThisHandle(ctx, this_value, "after") orelse return quickjs.Value.exception;
+    const parent_handle = zig_dom.zig_dom_node_parent(this_handle);
+    if (parent_handle == 0) return quickjs.Value.undefined;
+
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return insertChildNodeArguments(ctx, parent_handle, zig_dom.zig_dom_node_next_sibling(this_handle), 0, args, "after", false);
+}
+
+fn jsNodeReplaceWith(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const this_handle = parseThisHandle(ctx, this_value, "replaceWith") orelse return quickjs.Value.exception;
+    const parent_handle = zig_dom.zig_dom_node_parent(this_handle);
+    if (parent_handle == 0) return quickjs.Value.undefined;
+
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const result = insertChildNodeArguments(ctx, parent_handle, zig_dom.zig_dom_node_next_sibling(this_handle), this_handle, args, "replaceWith", true);
+    if (result.isException()) return quickjs.Value.exception;
+    return result;
+}
+
 fn jsIFrameContentWindowGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const existing = this_value.getPropertyStr(ctx, "__zigFrameWindow");
@@ -5666,6 +5833,14 @@ fn jsIFrameContentWindowGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Valu
     }
     this_value.setPropertyStr(ctx, "__zigFrameWindow", frame_window.dup(ctx)) catch return quickjs.Value.exception;
     return frame_window;
+}
+
+fn jsIFrameContentDocumentGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const frame_window = jsIFrameContentWindowGet(ctx, this_value);
+    defer frame_window.deinit(ctx);
+    if (frame_window.isException() or !frame_window.isObject()) return quickjs.Value.exception;
+    return frame_window.getPropertyStr(ctx, "document");
 }
 
 fn initializeIFrameAfterAppend(ctx: *quickjs.Context, node: quickjs.Value) void {
@@ -5807,6 +5982,53 @@ fn nodeOrTextHandle(ctx: *quickjs.Context, parent_handle: u64, value: quickjs.Va
     return text_handle;
 }
 
+fn insertChildNodeArguments(
+    ctx: *quickjs.Context,
+    parent_handle: u64,
+    initial_reference_handle: u64,
+    receiver_handle: u64,
+    args: []const quickjs.Value,
+    operation: []const u8,
+    remove_receiver_after_insert: bool,
+) quickjs.Value {
+    var handles: std.ArrayListUnmanaged(u64) = .empty;
+    defer handles.deinit(std.heap.c_allocator);
+
+    for (args) |arg| {
+        const child_handle = nodeOrTextHandle(ctx, parent_handle, arg, operation) orelse return quickjs.Value.exception;
+        handles.append(std.heap.c_allocator, child_handle) catch return quickjs.Value.exception;
+    }
+
+    var reference_handle = initial_reference_handle;
+    while (reference_handle != 0 and handleListContains(handles.items, reference_handle)) {
+        reference_handle = zig_dom.zig_dom_node_next_sibling(reference_handle);
+    }
+
+    for (handles.items) |child_handle| {
+        const status = if (zig_dom.zig_dom_node_type(child_handle) == 11)
+            insertFragmentBefore(parent_handle, child_handle, reference_handle)
+        else
+            zig_dom.zig_dom_node_insert_before(parent_handle, child_handle, reference_handle);
+        if (status != 0) return throwStatus(ctx, operation, status);
+    }
+
+    if (remove_receiver_after_insert and receiver_handle != 0) {
+        if (receiver_handle != 0 and !handleListContains(handles.items, receiver_handle) and zig_dom.zig_dom_node_parent(receiver_handle) == parent_handle) {
+            const status = zig_dom.zig_dom_node_remove_child(parent_handle, receiver_handle);
+            if (status != 0) return throwStatus(ctx, operation, status);
+        }
+    }
+
+    return quickjs.Value.undefined;
+}
+
+fn handleListContains(handles: []const u64, needle: u64) bool {
+    for (handles) |handle| {
+        if (handle == needle) return true;
+    }
+    return false;
+}
+
 fn parseThisHandle(ctx: *quickjs.Context, this_value: quickjs.Value, operation: []const u8) ?u64 {
     const handle_i64 = parseValueNodeHandle(ctx, this_value) orelse {
         _ = throwOperationMessage(ctx, operation, "receiver is not a native node");
@@ -5869,6 +6091,28 @@ fn getIntProperty(ctx: *quickjs.Context, value: quickjs.Value, name: [*:0]const 
     return property.toInt64(ctx) catch null;
 }
 
+fn getBoolProperty(ctx: *quickjs.Context, value: quickjs.Value, name: [*:0]const u8) ?bool {
+    const property = value.getPropertyStr(ctx, name);
+    defer property.deinit(ctx);
+    if (property.isException() or property.isUndefined() or property.isNull()) {
+        return null;
+    }
+    return property.toBool(ctx) catch null;
+}
+
+fn defineDataPropertyStr(ctx: *quickjs.Context, object: quickjs.Value, name: [*:0]const u8, value: quickjs.Value) error{JSError}!void {
+    const flags = c.JS_PROP_CONFIGURABLE |
+        c.JS_PROP_WRITABLE |
+        c.JS_PROP_ENUMERABLE |
+        c.JS_PROP_HAS_CONFIGURABLE |
+        c.JS_PROP_HAS_WRITABLE |
+        c.JS_PROP_HAS_ENUMERABLE |
+        c.JS_PROP_HAS_VALUE |
+        c.JS_PROP_THROW;
+    const ret = c.JS_DefinePropertyValueStr(ctx.cval(), object.cval(), name, value.cval(), flags);
+    if (ret < 0) return error.JSError;
+}
+
 const CStringArg = struct {
     ptr: [*:0]const u8,
     len: usize,
@@ -5884,6 +6128,47 @@ fn parseStringArg(ctx: *quickjs.Context, args: []const quickjs.Value, index: usi
         return null;
     };
     return .{ .ptr = value.ptr, .len = value.len };
+}
+
+fn parseUnsignedLongArg(ctx: *quickjs.Context, args: []const quickjs.Value, index: usize) ?u32 {
+    if (index >= args.len) return null;
+    var value: u32 = 0;
+    if (c.JS_ToUint32(ctx.cval(), &value, args[index].cval()) < 0) return null;
+    return value;
+}
+
+fn jsStringLength(ctx: *quickjs.Context, value: quickjs.Value) ?u32 {
+    const length = value.getPropertyStr(ctx, "length");
+    defer length.deinit(ctx);
+    const raw = length.toInt64(ctx) catch return null;
+    if (raw < 0) return null;
+    return @intCast(raw);
+}
+
+fn jsStringSlice(ctx: *quickjs.Context, value: quickjs.Value, start: u32, end: u32) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const function_ctor = global.getPropertyStr(ctx, "Function");
+    defer function_ctor.deinit(ctx);
+    const body = quickjs.Value.initStringLen(ctx, "return String(arguments[0]).slice(arguments[1], arguments[2]);");
+    defer body.deinit(ctx);
+    const fn_value = function_ctor.call(ctx, quickjs.Value.undefined, &.{body});
+    defer fn_value.deinit(ctx);
+    if (fn_value.isException()) return quickjs.Value.exception;
+    return fn_value.call(ctx, quickjs.Value.undefined, &.{ value, quickjs.Value.initInt64(start), quickjs.Value.initInt64(end) });
+}
+
+fn jsStringReplaceRange(ctx: *quickjs.Context, value: quickjs.Value, start: u32, end: u32, replacement: quickjs.Value) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const function_ctor = global.getPropertyStr(ctx, "Function");
+    defer function_ctor.deinit(ctx);
+    const body = quickjs.Value.initStringLen(ctx, "return String(arguments[0]).slice(0, arguments[1]) + String(arguments[3]) + String(arguments[0]).slice(arguments[2]);");
+    defer body.deinit(ctx);
+    const fn_value = function_ctor.call(ctx, quickjs.Value.undefined, &.{body});
+    defer fn_value.deinit(ctx);
+    if (fn_value.isException()) return quickjs.Value.exception;
+    return fn_value.call(ctx, quickjs.Value.undefined, &.{ value, quickjs.Value.initInt64(start), quickjs.Value.initInt64(end), replacement });
 }
 
 fn elementAttributeGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, name: []const u8, fallback: []const u8) quickjs.Value {
@@ -5964,6 +6249,53 @@ fn classListHasToken(ctx: *quickjs.Context, element: quickjs.Value, token: []con
         if (std.mem.eql(u8, part, token)) return true;
     }
     return false;
+}
+
+fn classListTokensArray(ctx: *quickjs.Context, class_list: quickjs.Value) quickjs.Value {
+    const element = classListElement(ctx, class_list) orelse return quickjs.Value.exception;
+    defer element.deinit(ctx);
+    const array = quickjs.Value.initArray(ctx);
+    if (array.isException()) return array;
+    const current = elementAttributeString(ctx, element, "class") orelse return array;
+    defer ctx.freeCString(current.ptr);
+    var iter = std.mem.tokenizeScalar(u8, current.ptr[0..current.len], ' ');
+    var length: u32 = 0;
+    while (iter.next()) |part| {
+        if (classListArrayContains(ctx, array, length, part)) continue;
+        array.setPropertyUint32(ctx, length, quickjs.Value.initStringLen(ctx, part)) catch {
+            array.deinit(ctx);
+            return quickjs.Value.exception;
+        };
+        length += 1;
+    }
+    return array;
+}
+
+fn classListArrayContains(ctx: *quickjs.Context, array: quickjs.Value, length: u32, token: []const u8) bool {
+    for (0..length) |index_usize| {
+        const item = array.getPropertyUint32(ctx, @intCast(index_usize));
+        defer item.deinit(ctx);
+        if (item.isException()) continue;
+        const text = item.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(text.ptr);
+        if (std.mem.eql(u8, text.ptr[0..text.len], token)) return true;
+    }
+    return false;
+}
+
+fn classListSyncArray(ctx: *quickjs.Context, class_list: quickjs.Value) !void {
+    const tokens = classListTokensArray(ctx, class_list);
+    if (tokens.isException()) return error.JSError;
+    defer tokens.deinit(ctx);
+    const len = arrayLength(ctx, tokens);
+    setArrayLength(ctx, class_list, 0);
+    for (0..len) |index_usize| {
+        const index: u32 = @intCast(index_usize);
+        const token = tokens.getPropertyUint32(ctx, index);
+        defer token.deinit(ctx);
+        if (token.isException()) return error.JSError;
+        class_list.setPropertyUint32(ctx, index, token.dup(ctx)) catch return error.JSError;
+    }
 }
 
 fn parseNullableNodeArgHandle(ctx: *quickjs.Context, args: []const quickjs.Value, index: usize, operation: []const u8) ?u64 {
@@ -6159,7 +6491,46 @@ fn createWindowObject(ctx: *quickjs.Context, window_handle: u64, document: quick
             obj.setPropertyStr(ctx, name, value.dup(ctx)) catch return quickjs.Value.exception;
         }
     }
+    installFrameCharacterDataConstructor(ctx, obj, document, "Text", "createTextNode") catch return quickjs.Value.exception;
+    installFrameCharacterDataConstructor(ctx, obj, document, "Comment", "createComment") catch return quickjs.Value.exception;
     return obj;
+}
+
+fn installFrameCharacterDataConstructor(ctx: *quickjs.Context, window: quickjs.Value, document: quickjs.Value, constructor_name: [:0]const u8, create_method_name: [:0]const u8) !void {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const function_ctor = global.getPropertyStr(ctx, "Function");
+    defer function_ctor.deinit(ctx);
+    if (function_ctor.isException() or !function_ctor.isObject()) return;
+
+    const source = std.fmt.allocPrint(std.heap.c_allocator,
+        "return function {s}(data) {{ return doc.{s}((arguments.length === 0 || data === undefined) ? '' : data); }};",
+        .{ constructor_name, create_method_name },
+    ) catch return error.OutOfMemory;
+    defer std.heap.c_allocator.free(source);
+
+    const arg_name = quickjs.Value.initStringLen(ctx, "doc");
+    defer arg_name.deinit(ctx);
+    const body = quickjs.Value.initStringLen(ctx, source);
+    defer body.deinit(ctx);
+    const factory = function_ctor.call(ctx, quickjs.Value.undefined, &.{ arg_name, body });
+    defer factory.deinit(ctx);
+    if (factory.isException()) return error.PropertyAccessFailed;
+    const ctor = factory.call(ctx, quickjs.Value.undefined, &.{document});
+    defer ctor.deinit(ctx);
+    if (ctor.isException() or !ctor.isObject()) return error.PropertyAccessFailed;
+
+    const original = global.getPropertyStr(ctx, constructor_name);
+    defer original.deinit(ctx);
+    if (!original.isException() and original.isObject()) {
+        const proto = original.getPropertyStr(ctx, "prototype");
+        defer proto.deinit(ctx);
+        if (!proto.isException() and proto.isObject()) {
+            ctor.setPropertyStr(ctx, "prototype", proto.dup(ctx)) catch return error.PropertyAccessFailed;
+        }
+    }
+
+    window.setPropertyStr(ctx, constructor_name, ctor.dup(ctx)) catch return error.PropertyAccessFailed;
 }
 
 fn syncNamedWindowPropertiesForDocument(ctx: *quickjs.Context, document: quickjs.Value) void {
@@ -6199,7 +6570,7 @@ fn setNamedPropertyIfMissing(
     if (value.len == 0) return;
 
     const key = value.ptr;
-    const assigned_value = namedPropertyValue(ctx, element);
+    const assigned_value = namedPropertyValue(ctx, element, attr_name);
     defer assigned_value.deinit(ctx);
 
     const existing_window = window.getPropertyStr(ctx, key);
@@ -6215,19 +6586,21 @@ fn setNamedPropertyIfMissing(
     }
 }
 
-fn namedPropertyValue(ctx: *quickjs.Context, element: quickjs.Value) quickjs.Value {
-    const local_name = element.getPropertyStr(ctx, "localName");
-    defer local_name.deinit(ctx);
-    if (!local_name.isException()) {
-        if (local_name.toCStringLen(ctx)) |name_text| {
-            defer ctx.freeCString(name_text.ptr);
-            const lower = name_text.ptr[0..name_text.len];
-            if (std.ascii.eqlIgnoreCase(lower, "iframe")) {
-                const frame_window = element.getPropertyStr(ctx, "contentWindow");
-                if (!frame_window.isException() and frame_window.isObject()) {
-                    return frame_window;
+fn namedPropertyValue(ctx: *quickjs.Context, element: quickjs.Value, attr_name: []const u8) quickjs.Value {
+    if (std.mem.eql(u8, attr_name, "name")) {
+        const local_name = element.getPropertyStr(ctx, "localName");
+        defer local_name.deinit(ctx);
+        if (!local_name.isException()) {
+            if (local_name.toCStringLen(ctx)) |name_text| {
+                defer ctx.freeCString(name_text.ptr);
+                const lower = name_text.ptr[0..name_text.len];
+                if (std.ascii.eqlIgnoreCase(lower, "iframe")) {
+                    const frame_window = element.getPropertyStr(ctx, "contentWindow");
+                    if (!frame_window.isException() and frame_window.isObject()) {
+                        return frame_window;
+                    }
+                    frame_window.deinit(ctx);
                 }
-                frame_window.deinit(ctx);
             }
         }
     }
@@ -7370,6 +7743,10 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
         const callback = entry.getPropertyStr(ctx, "callback");
         defer callback.deinit(ctx);
         if (!listenerRegistered(ctx, list, callback, capture)) continue;
+        const once = boolProperty(ctx, entry, "once");
+        if (once) {
+            removeListenerByCallbackAndCapture(ctx, list, callback, capture);
+        }
         if (!callback.isUndefined() and !callback.isNull()) {
             const global = ctx.getGlobalObject();
             defer global.deinit(ctx);
@@ -7408,9 +7785,6 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
                 defer thrown.deinit(ctx);
                 dispatchListenerErrorEvent(ctx, callback, thrown);
             }
-        }
-        if (boolProperty(ctx, entry, "once")) {
-            removeListenerByCallbackAndCapture(ctx, list, callback, capture);
         }
     }
 }

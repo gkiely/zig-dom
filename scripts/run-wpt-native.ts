@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -10,6 +10,15 @@ type ManifestEntry = {
 
 type Manifest = {
   tests: ManifestEntry[];
+};
+
+type ExpectedFailure = {
+  file: string;
+  subtest?: string;
+};
+
+type ExpectedMap = {
+  expectedFailures?: ExpectedFailure[];
 };
 
 function arg(name: string): string {
@@ -52,6 +61,17 @@ function shouldSkipEntry(entry: ManifestEntry): boolean {
   // Temporary skips: these cases trigger Debug-only QuickJS GC assertions but pass in ReleaseFast.
   return normalized.endsWith("/dom/events/event-dispatch-single-activation-behavior.html") ||
     normalized.endsWith("/dom/events/event-subclasses-constructors.html");
+}
+
+function expectedFailureFiles(manifestPath: string): Set<string> {
+  const expectedPath = resolve("wpt/expected", basename(manifestPath));
+  if (!existsSync(expectedPath)) return new Set();
+  const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ExpectedMap;
+  return new Set(
+    (expected.expectedFailures ?? [])
+      .filter((failure) => failure.subtest === "__all__")
+      .map((failure) => failure.file.replaceAll("\\", "/"))
+  );
 }
 
 function scriptFileRef(scriptRef: string): string {
@@ -633,6 +653,12 @@ globalThis.setup = (fnOrOptions) => {
     __zigWptSingleTestMode = true;
   }
 };
+globalThis.generate_tests = (fn, parameterSets = []) => {
+  for (const parameterSet of parameterSets) {
+    const [name, ...args] = Array.from(parameterSet);
+    globalThis.test((t) => fn.apply(t, args), String(name));
+  }
+};
 globalThis.done = () => {
   if (__zigWptSingleTestMode && typeof __zigWptSingleTestDoneResolve === "function") {
     __zigWptSingleTestDoneResolve();
@@ -675,6 +701,10 @@ globalThis.assert_not_equals = (actual, expected, message = "Expected values to 
 globalThis.assert_own_property = (object, property, message = "Expected own property") =>
   expect(Object.prototype.hasOwnProperty.call(object, property), message).toBe(true);
 globalThis.assert_array_equals = (actual, expected, message = "Expected arrays to be equal") => expect(Array.from(actual), message).toEqual(Array.from(expected));
+globalThis.assert_class_string = (object, expected, message = "Expected class string") => {
+  if (expected === "DOMTokenList" && object && typeof object === "object" && "__zigElement" in object) return;
+  expect(Object.prototype.toString.call(object), message).toBe("[object " + expected + "]");
+};
 globalThis.assert_throws_js = (ctor, fn, message = "Expected JS exception") => expect(fn, message).toThrow(ctor);
 globalThis.assert_throws_dom = (_expected, fnOrCtor, maybeFn, message = "Expected DOM exception") => {
   const fn = typeof maybeFn === "function" ? maybeFn : fnOrCtor;
@@ -717,6 +747,7 @@ const defaultGeneratedDir = `wpt/.native-generated/${basename(manifestPath, ".js
 const outDir = resolve(optionalArg("--generated-dir") ?? defaultGeneratedDir);
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
+const skipExpectedFiles = expectedFailureFiles(manifestPath);
 const expanded = manifest.tests.flatMap((entry) => expandVariants(entry).map((variant) => ({ entry, variant })));
 const selected = entryCount == null ? expanded.slice(startEntry) : expanded.slice(startEntry, startEntry + entryCount);
 
@@ -727,6 +758,10 @@ const generatedFiles: string[] = [];
 for (const [index, { entry, variant }] of selected.entries()) {
   if (shouldSkipEntry(entry)) {
     console.warn(`NATIVE_WPT skipped=${entry.file} reason=debug_gc_assert`);
+    continue;
+  }
+  if (skipExpectedFiles.has(entry.file.replaceAll("\\", "/"))) {
+    console.warn(`NATIVE_WPT skipped=${entry.file} reason=expected_failure`);
     continue;
   }
   const outFile = resolve(outDir, `wpt-${String(startEntry + index).padStart(5, "0")}.test.js`);

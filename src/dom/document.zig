@@ -9,11 +9,13 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installGetter(ctx, proto, "body", callbacks.bodyGet);
     try bindings.installGetter(ctx, proto, "defaultView", callbacks.defaultViewGet);
     try bindings.installGetter(ctx, proto, "implementation", callbacks.implementationGet);
+    try bindings.installGetter(ctx, proto, "contentType", callbacks.contentTypeGet);
     try bindings.installMethod(ctx, proto, "createElement", callbacks.createElement, 1);
     try bindings.installMethod(ctx, proto, "createElementNS", callbacks.createElementNS, 2);
     try bindings.installMethod(ctx, proto, "createAttribute", callbacks.createAttribute, 1);
     try bindings.installMethod(ctx, proto, "createTextNode", callbacks.createTextNode, 1);
     try bindings.installMethod(ctx, proto, "createComment", callbacks.createComment, 1);
+    try bindings.installMethod(ctx, proto, "createProcessingInstruction", callbacks.createProcessingInstruction, 2);
     try bindings.installMethod(ctx, proto, "createDocumentFragment", callbacks.createDocumentFragment, 0);
     try bindings.installMethod(ctx, proto, "createDocumentType", callbacks.createDocumentType, 3);
     try bindings.installMethod(ctx, proto, "createEvent", callbacks.createEvent, 1);

@@ -24,6 +24,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installAccessor(ctx, proto, "textContent", callbacks.textContentGet, callbacks.textContentSet);
     try bindings.installAccessor(ctx, proto, "nodeValue", callbacks.nodeValueGet, callbacks.nodeValueSet);
     try bindings.installGetter(ctx, proto, "outerHTML", callbacks.outerHtmlGet);
+    try bindings.installMethod(ctx, proto, "hasChildNodes", callbacks.hasChildNodes, 0);
     try bindings.installMethod(ctx, proto, "contains", callbacks.contains, 1);
     try bindings.installMethod(ctx, proto, "getRootNode", callbacks.getRootNode, 0);
     try bindings.installMethod(ctx, proto, "compareDocumentPosition", callbacks.compareDocumentPosition, 1);

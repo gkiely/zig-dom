@@ -262,6 +262,7 @@ fn detachFromParent(window: *Window, child_handle: u64) Status {
 
 fn appendChildResolved(window: *Window, parent_handle: u64, parent: *Node, child_handle: u64, child: *Node) Status {
     if (parent_handle == child_handle) return .hierarchy_request;
+    if (parent.kind == .text or parent.kind == .comment) return .hierarchy_request;
 
     // Fast path: detached children cannot form cycles and do not require detach bookkeeping.
     if (child.parent == 0) {
@@ -359,6 +360,7 @@ fn clearChildrenResolved(window: *Window, parent: *Node) Status {
 
 fn replaceChildrenWithDetached(window: *Window, parent_handle: u64, handles: []const u64) Status {
     const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
+    if (parent.kind == .text or parent.kind == .comment) return .hierarchy_request;
     const clear_status = clearChildrenResolved(window, parent);
     if (clear_status != .ok) return clear_status;
 
@@ -395,6 +397,7 @@ fn insertBefore(window: *Window, parent_handle: u64, child_handle: u64, referenc
     if (parent_handle == child_handle) return .hierarchy_request;
 
     const parent = resolveNode(window, parent_handle) orelse return .invalid_handle;
+    if (parent.kind == .text or parent.kind == .comment) return .hierarchy_request;
     const child = resolveNode(window, child_handle) orelse return .invalid_handle;
     const reference = resolveNode(window, reference_handle) orelse return .invalid_handle;
 
