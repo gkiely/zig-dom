@@ -560,6 +560,9 @@ fn installFormElementPrototypeAccessors(ctx: *quickjs.Context, global: quickjs.V
         defer template_proto.deinit(ctx);
         if (!template_proto.isException() and template_proto.isObject()) {
             try installGetter(ctx, template_proto, "content", jsTemplateContentGet);
+            try installMethod(ctx, template_proto, "querySelector", jsElementQuerySelector, 1);
+            try installMethod(ctx, template_proto, "querySelectorAll", jsElementQuerySelectorAll, 1);
+            try installMethod(ctx, template_proto, "getElementById", jsDocumentFragmentGetElementById, 1);
         }
     }
 }
@@ -797,6 +800,9 @@ fn installCharacterDataSlice(ctx: *quickjs.Context, global: quickjs.Value) DomCl
         defer fragment_proto.deinit(ctx);
         if (!fragment_proto.isException() and fragment_proto.isObject()) {
             try installAccessor(ctx, fragment_proto, "innerHTML", jsElementInnerHtmlGet, jsElementInnerHtmlSet);
+            try installMethod(ctx, fragment_proto, "querySelector", jsElementQuerySelector, 1);
+            try installMethod(ctx, fragment_proto, "querySelectorAll", jsElementQuerySelectorAll, 1);
+            try installMethod(ctx, fragment_proto, "getElementById", jsDocumentFragmentGetElementById, 1);
         }
     }
 }
@@ -4380,6 +4386,25 @@ fn jsDocumentGetElementById(ctx_opt: ?*quickjs.Context, this_value: quickjs.Valu
     return wrapNodeHandle(ctx, out_handle);
 }
 
+fn jsDocumentFragmentGetElementById(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const fragment_handle = parseThisHandle(ctx, this_value, "getElementById") orelse return quickjs.Value.exception;
+    const id = parseStringArg(ctx, args, 0, "getElementById") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(id.ptr);
+    if (id.len == 0) return quickjs.Value.null;
+
+    var selector_buf: [256]u8 = undefined;
+    const selector = std.fmt.bufPrint(&selector_buf, "#{s}", .{id.ptr[0..id.len]}) catch return quickjs.Value.null;
+    var out_ptr: [*c]u64 = null;
+    var out_len: usize = 0;
+    const status = zig_dom.zig_dom_node_query_selector_all(fragment_handle, selector.ptr, selector.len, &out_ptr, &out_len);
+    if (status != 0) return throwStatus(ctx, "getElementById", status);
+    defer zig_dom.zig_dom_free_handle_array(out_ptr, out_len);
+    if (out_len == 0) return quickjs.Value.null;
+    return wrapNodeHandle(ctx, out_ptr[0]);
+}
+
 fn jsDocumentQuerySelector(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -4843,8 +4868,25 @@ fn jsImplementationLightDocumentCreateElement(ctx_opt: ?*quickjs.Context, _: qui
 
 fn jsImplementationCreateDocument(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
-    const document = jsConstructDocument(ctx, quickjs.Value.undefined, &.{});
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const main_document = global.getPropertyStr(ctx, "document");
+    defer main_document.deinit(ctx);
+    if (main_document.isException() or !main_document.isObject()) return quickjs.Value.exception;
+
+    const document = jsDocumentCreateDocumentFragment(ctx, main_document, &.{});
     if (document.isException() or !document.isObject()) return document;
+    const document_ctor = global.getPropertyStr(ctx, "Document");
+    defer document_ctor.deinit(ctx);
+    if (!document_ctor.isException() and document_ctor.isObject()) {
+        const document_proto = document_ctor.getPropertyStr(ctx, "prototype");
+        defer document_proto.deinit(ctx);
+        if (!document_proto.isException() and document_proto.isObject()) {
+            document.setPrototype(ctx, document_proto) catch return quickjs.Value.exception;
+        }
+    }
+    document.setPropertyStr(ctx, "_nodeTypeOverride", quickjs.Value.initInt64(9)) catch return quickjs.Value.exception;
+    document.setPropertyStr(ctx, "_nodeNameOverride", quickjs.Value.initStringLen(ctx, "#document")) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "__zigIsXmlDocument", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     document.setPropertyStr(ctx, "__zigPreserveElementCase", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     return document;
