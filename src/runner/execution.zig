@@ -145,29 +145,8 @@ const node_vm_specifier = "vm";
 const node_vm_colon_specifier = "node:vm";
 const node_perf_hooks_colon_specifier = "node:perf_hooks";
 
-const bun_shim_source =
-    \\const api = globalThis.__zigBunApi;
-    \\export const plugin = api.plugin;
-    \\export const $ = api.$;
-    \\export const file = api.file;
-    \\const bunApi = { plugin, $, file };
-    \\export default bunApi;
-;
-
-const bun_test_shim_source =
-    \\const api = globalThis.__zigBunTestApi;
-    \\export const test = api.test;
-    \\export const it = api.it;
-    \\export const describe = api.describe;
-    \\export const expect = api.expect;
-    \\export const mock = api.mock;
-    \\export const spyOn = api.spyOn;
-    \\export const beforeAll = api.beforeAll;
-    \\export const beforeEach = api.beforeEach;
-    \\export const afterEach = api.afterEach;
-    \\export const afterAll = api.afterAll;
-    \\const bunTest = { test, it, describe, expect, mock, spyOn, beforeAll, beforeEach, afterEach, afterAll };
-    \\export default bunTest;
+const native_builtin_stub_source =
+    \\export {};
 ;
 
 const node_url_shim_source =
@@ -357,13 +336,6 @@ const node_stream_shim_source =
     \\class Duplex {}
     \\export { Readable, Writable, Transform, Duplex };
     \\export default { Readable, Writable, Transform, Duplex };
-;
-
-const node_stream_web_shim_source =
-    \\export const ReadableStream = globalThis.ReadableStream;
-    \\export const WritableStream = globalThis.WritableStream;
-    \\export const TransformStream = globalThis.TransformStream;
-    \\export default { ReadableStream, WritableStream, TransformStream };
 ;
 
 const node_vm_shim_source =
@@ -3388,6 +3360,21 @@ fn moduleLoad(
         return existing;
     }
 
+    if (loadNativeBuiltInModule(ctx, module_name)) |native_module| {
+        const key = state.allocator.dupe(u8, module_id) catch {
+            _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
+            return null;
+        };
+
+        state.loaded_modules.put(key, native_module) catch {
+            state.allocator.free(key);
+            _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
+            return null;
+        };
+
+        return native_module;
+    }
+
     const load_source_start = if (state.profile_enabled) state.profileNow() else 0;
     const source = state.loadModuleSource(module_id) catch |err| {
         _ = quickjs.c.JS_ThrowReferenceError(
@@ -3459,13 +3446,137 @@ fn allocJsCString(ctx: *ModuleContext, text: []const u8) ?[*:0]u8 {
     return @ptrCast(bytes);
 }
 
-fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
+fn loadNativeBuiltInModule(ctx: *ModuleContext, module_name: [:0]const u8) ?*ModuleDef {
     if (std.mem.eql(u8, module_name, bun_specifier)) {
-        return bun_shim_source;
+        const module = ModuleDef.init(ctx, module_name, initNativeBunModule) orelse return null;
+        if (!module.addExport(ctx, "plugin")) return null;
+        if (!module.addExport(ctx, "$")) return null;
+        if (!module.addExport(ctx, "file")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
     }
 
     if (std.mem.eql(u8, module_name, bun_test_specifier)) {
-        return bun_test_shim_source;
+        const module = ModuleDef.init(ctx, module_name, initNativeBunTestModule) orelse return null;
+        if (!module.addExport(ctx, "test")) return null;
+        if (!module.addExport(ctx, "it")) return null;
+        if (!module.addExport(ctx, "describe")) return null;
+        if (!module.addExport(ctx, "expect")) return null;
+        if (!module.addExport(ctx, "mock")) return null;
+        if (!module.addExport(ctx, "spyOn")) return null;
+        if (!module.addExport(ctx, "beforeAll")) return null;
+        if (!module.addExport(ctx, "beforeEach")) return null;
+        if (!module.addExport(ctx, "afterEach")) return null;
+        if (!module.addExport(ctx, "afterAll")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_stream_web_specifier) or std.mem.eql(u8, module_name, node_stream_web_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeStreamWebModule) orelse return null;
+        if (!module.addExport(ctx, "ReadableStream")) return null;
+        if (!module.addExport(ctx, "WritableStream")) return null;
+        if (!module.addExport(ctx, "TransformStream")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    return null;
+}
+
+fn initNativeBunModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    return exportApiMembersAsModule(ctx, module, "__zigBunApi", &.{ "plugin", "$", "file" });
+}
+
+fn initNativeBunTestModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    return exportApiMembersAsModule(ctx, module, "__zigBunTestApi", &.{
+        "test",
+        "it",
+        "describe",
+        "expect",
+        "mock",
+        "spyOn",
+        "beforeAll",
+        "beforeEach",
+        "afterEach",
+        "afterAll",
+    });
+}
+
+fn initNativeNodeStreamWebModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    return exportGlobalMembersAsModule(ctx, module, &.{ "ReadableStream", "WritableStream", "TransformStream" });
+}
+
+fn exportApiMembersAsModule(
+    ctx: *ModuleContext,
+    module: *ModuleDef,
+    global_api_name: [*:0]const u8,
+    comptime member_names: []const [:0]const u8,
+) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const api = global.getPropertyStr(ctx, global_api_name);
+    defer api.deinit(ctx);
+
+    if (api.isException()) return false;
+
+    if (!api.isObject()) {
+        _ = quickjs.c.JS_ThrowReferenceError(ctx.cval(), "native module API is not installed: %s", global_api_name);
+        return false;
+    }
+
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+
+    if (default_export.isException()) return false;
+
+    inline for (member_names) |member_name| {
+        const member_value = api.getPropertyStr(ctx, member_name.ptr);
+        defer member_value.deinit(ctx);
+        if (member_value.isException()) return false;
+
+        default_export.setPropertyStr(ctx, member_name.ptr, member_value.dup(ctx)) catch return false;
+        if (!module.setExport(ctx, member_name, member_value.dup(ctx))) return false;
+    }
+
+    if (!module.setExport(ctx, "default", default_export.dup(ctx))) return false;
+    return true;
+}
+
+fn exportGlobalMembersAsModule(
+    ctx: *ModuleContext,
+    module: *ModuleDef,
+    comptime member_names: []const [:0]const u8,
+) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+
+    if (default_export.isException()) return false;
+
+    inline for (member_names) |member_name| {
+        const member_value = global.getPropertyStr(ctx, member_name.ptr);
+        defer member_value.deinit(ctx);
+        if (member_value.isException()) return false;
+
+        default_export.setPropertyStr(ctx, member_name.ptr, member_value.dup(ctx)) catch return false;
+        if (!module.setExport(ctx, member_name, member_value.dup(ctx))) return false;
+    }
+
+    if (!module.setExport(ctx, "default", default_export.dup(ctx))) return false;
+    return true;
+}
+
+fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, module_name, bun_specifier)) {
+        return native_builtin_stub_source;
+    }
+
+    if (std.mem.eql(u8, module_name, bun_test_specifier)) {
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_url_specifier) or std.mem.eql(u8, module_name, node_url_colon_specifier)) {
@@ -3517,7 +3628,7 @@ fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
     }
 
     if (std.mem.eql(u8, module_name, node_stream_web_specifier) or std.mem.eql(u8, module_name, node_stream_web_colon_specifier)) {
-        return node_stream_web_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_vm_specifier) or std.mem.eql(u8, module_name, node_vm_colon_specifier)) {

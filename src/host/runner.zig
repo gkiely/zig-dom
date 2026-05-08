@@ -171,57 +171,27 @@ pub const HostRunner = struct {
     }
 
     fn installEachHelpers(self: *HostRunner) HostRunnerError!void {
-        const source =
-            \\(() => {
-            \\  const formatName = (name, row, index) => {
-            \\    if (typeof name !== "string") return String(name);
-            \\    let out = name.replace(/%#/g, String(index));
-            \\    if (Array.isArray(row)) {
-            \\      for (const value of row) out = out.replace(/%[sdifoOj]/, String(value));
-            \\    } else {
-            \\      out = out.replace(/%[sdifoOj]/, String(row));
-            \\    }
-            \\    return out;
-            \\  };
-            \\  const install = (target) => {
-            \\    target.each = (table) => (name, callback, timeout) => {
-            \\      const rows = Array.from(table ?? []);
-            \\      for (let index = 0; index < rows.length; index++) {
-            \\        const row = rows[index];
-            \\        target(formatName(name, row, index), () => Array.isArray(row) ? callback(...row) : callback(row), timeout);
-            \\      }
-            \\    };
-            \\  };
-            \\  install(globalThis.test);
-            \\  install(globalThis.it);
-            \\  install(globalThis.test.skip);
-            \\  install(globalThis.test.only);
-            \\  install(globalThis.it.skip);
-            \\  install(globalThis.it.only);
-            \\})();
-        ;
-        const result = self.ctx.eval(source, "<zig-runner-each>", .{});
-        defer result.deinit(self.ctx);
-        if (result.isException()) return error.JSError;
+        const ctx = self.ctx;
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+
+        try installEachOnGlobalTarget(ctx, global, "test");
+        try installEachOnGlobalTarget(ctx, global, "it");
+        try installEachOnGlobalNestedTarget(ctx, global, "test", "skip");
+        try installEachOnGlobalNestedTarget(ctx, global, "test", "only");
+        try installEachOnGlobalNestedTarget(ctx, global, "it", "skip");
+        try installEachOnGlobalNestedTarget(ctx, global, "it", "only");
     }
 
     fn installDomCleanup(self: *HostRunner) HostRunnerError!void {
-        const source =
-            \\afterEach(() => {
-            \\  const doc = globalThis.document;
-            \\  if (!doc) return;
-            \\  try {
-            \\    if (doc.body) doc.body.innerHTML = "";
-            \\    if (doc.head) doc.head.innerHTML = "";
-            \\  } catch {}
-            \\  try { doc.__zigCookie = ""; } catch {}
-            \\  try { globalThis.localStorage?.clear?.(); } catch {}
-            \\  try { globalThis.sessionStorage?.clear?.(); } catch {}
-            \\});
-        ;
-        const result = self.ctx.eval(source, "<zig-runner-dom-cleanup>", .{});
-        defer result.deinit(self.ctx);
-        if (result.isException()) return error.JSError;
+        const cleanup_fn = quickjs.Value.initCFunction(self.ctx, jsRunnerDomCleanup, "__zigRunnerDomCleanup", 0);
+        if (cleanup_fn.isException()) return error.JSError;
+        errdefer cleanup_fn.deinit(self.ctx);
+
+        self.root_scope.after_each.append(self.allocator, .{
+            .callback = cleanup_fn,
+            .timeout_ms = DEFAULT_TIMEOUT_MS,
+        }) catch return error.OutOfMemory;
     }
 
     fn currentScopeName(self: *HostRunner) ![]u8 {
@@ -634,6 +604,267 @@ pub const HostRunner = struct {
     }
 };
 
+fn installEachOnGlobalTarget(ctx: *quickjs.Context, global: quickjs.Value, comptime name: [:0]const u8) HostRunnerError!void {
+    const target = global.getPropertyStr(ctx, name);
+    defer target.deinit(ctx);
+    if (target.isException() or !target.isObject()) return error.JSError;
+    try installEachOnTarget(ctx, target);
+}
+
+fn installEachOnGlobalNestedTarget(
+    ctx: *quickjs.Context,
+    global: quickjs.Value,
+    comptime parent_name: [:0]const u8,
+    comptime child_name: [:0]const u8,
+) HostRunnerError!void {
+    const parent = global.getPropertyStr(ctx, parent_name);
+    defer parent.deinit(ctx);
+    if (parent.isException() or !parent.isObject()) return error.JSError;
+
+    const target = parent.getPropertyStr(ctx, child_name);
+    defer target.deinit(ctx);
+    if (target.isException() or !target.isObject()) return error.JSError;
+    try installEachOnTarget(ctx, target);
+}
+
+fn installEachOnTarget(ctx: *quickjs.Context, target: quickjs.Value) HostRunnerError!void {
+    var data = [_]quickjs.Value{target};
+    const each_fn = quickjs.Value.initCFunctionData2(ctx, jsEachBindTable, "each", 1, 0, &data);
+    if (each_fn.isException()) return error.JSError;
+    errdefer each_fn.deinit(ctx);
+    target.setPropertyStr(ctx, "each", each_fn) catch return error.JSError;
+}
+
+fn jsEachBindTable(
+    maybe_ctx: ?*quickjs.Context,
+    _: quickjs.Value,
+    args: []const quickjs.c.JSValue,
+    _: i32,
+    data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const target = quickjs.Value.fromCVal(data[0]);
+    const table = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    var closure_data = [_]quickjs.Value{ target, table };
+    return quickjs.Value.initCFunctionData2(ctx, jsEachRegisterRows, "__zigEachRows", 3, 0, &closure_data);
+}
+
+fn jsEachRegisterRows(
+    maybe_ctx: ?*quickjs.Context,
+    _: quickjs.Value,
+    args: []const quickjs.c.JSValue,
+    _: i32,
+    data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const target = quickjs.Value.fromCVal(data[0]);
+    const table = quickjs.Value.fromCVal(data[1]);
+
+    const rows = eachRowsArrayFrom(ctx, table);
+    defer rows.deinit(ctx);
+    if (rows.isException()) return quickjs.Value.exception;
+
+    const name = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const callback = if (args.len > 1) quickjs.Value.fromCVal(args[1]) else quickjs.Value.undefined;
+    const timeout_arg = if (args.len > 2) quickjs.Value.fromCVal(args[2]) else quickjs.Value.undefined;
+
+    const row_count = valueArrayLength(ctx, rows);
+    for (0..row_count) |index| {
+        const row = rows.getPropertyUint32(ctx, @intCast(index));
+        defer row.deinit(ctx);
+        if (row.isException()) return quickjs.Value.exception;
+
+        const formatted_name = formatEachName(ctx, name, row, index);
+        defer formatted_name.deinit(ctx);
+        if (formatted_name.isException()) return quickjs.Value.exception;
+
+        var callback_data = [_]quickjs.Value{ callback, row };
+        const row_callback = quickjs.Value.initCFunctionData2(ctx, jsEachInvokeRow, "__zigEachRow", 0, 0, &callback_data);
+        if (row_callback.isException()) return quickjs.Value.exception;
+        defer row_callback.deinit(ctx);
+
+        var call_args = [_]quickjs.Value{ formatted_name, row_callback, timeout_arg };
+        const register_result = target.call(ctx, quickjs.Value.undefined, &call_args);
+        defer register_result.deinit(ctx);
+        if (register_result.isException()) return quickjs.Value.exception;
+    }
+
+    return quickjs.Value.undefined;
+}
+
+fn jsEachInvokeRow(
+    maybe_ctx: ?*quickjs.Context,
+    _: quickjs.Value,
+    _: []const quickjs.c.JSValue,
+    _: i32,
+    data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const callback = quickjs.Value.fromCVal(data[0]);
+    const row = quickjs.Value.fromCVal(data[1]);
+    if (!callback.isFunction(ctx)) return ctx.throwInternalError("each() callback must be a function");
+
+    if (row.isArray()) {
+        var call_args: std.ArrayList(quickjs.Value) = .empty;
+        defer {
+            for (call_args.items) |value| value.deinit(ctx);
+            call_args.deinit(std.heap.c_allocator);
+        }
+
+        const row_len = valueArrayLength(ctx, row);
+        call_args.ensureTotalCapacity(std.heap.c_allocator, row_len) catch return quickjs.Value.exception;
+        for (0..row_len) |index| {
+            const item = row.getPropertyUint32(ctx, @intCast(index));
+            defer item.deinit(ctx);
+            if (item.isException()) return quickjs.Value.exception;
+            call_args.append(std.heap.c_allocator, item.dup(ctx)) catch return quickjs.Value.exception;
+        }
+
+        return callback.call(ctx, quickjs.Value.undefined, call_args.items);
+    }
+
+    var call_args = [_]quickjs.Value{row.dup(ctx)};
+    defer call_args[0].deinit(ctx);
+    return callback.call(ctx, quickjs.Value.undefined, &call_args);
+}
+
+fn eachRowsArrayFrom(ctx: *quickjs.Context, table: quickjs.Value) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const array_ctor = global.getPropertyStr(ctx, "Array");
+    defer array_ctor.deinit(ctx);
+    if (array_ctor.isException() or !array_ctor.isObject()) return quickjs.Value.exception;
+
+    const from_fn = array_ctor.getPropertyStr(ctx, "from");
+    defer from_fn.deinit(ctx);
+    if (!from_fn.isFunction(ctx)) return quickjs.Value.exception;
+
+    const input = if (table.isNull() or table.isUndefined()) quickjs.Value.initArray(ctx) else table.dup(ctx);
+    defer input.deinit(ctx);
+    if (input.isException()) return quickjs.Value.exception;
+
+    var from_args = [_]quickjs.Value{input};
+    return from_fn.call(ctx, array_ctor, &from_args);
+}
+
+fn formatEachName(ctx: *quickjs.Context, name: quickjs.Value, row: quickjs.Value, index: usize) quickjs.Value {
+    const allocator = std.heap.c_allocator;
+
+    var formatted = stringifyToOwned(ctx, name, allocator) catch return quickjs.Value.exception;
+    defer allocator.free(formatted);
+
+    const index_text = std.fmt.allocPrint(allocator, "{d}", .{index}) catch return quickjs.Value.exception;
+    defer allocator.free(index_text);
+
+    var replaced = replaceEachIndexTokens(allocator, formatted, index_text) catch return quickjs.Value.exception;
+    allocator.free(formatted);
+    formatted = replaced;
+
+    if (row.isArray()) {
+        const row_len = valueArrayLength(ctx, row);
+        for (0..row_len) |item_index| {
+            const item = row.getPropertyUint32(ctx, @intCast(item_index));
+            defer item.deinit(ctx);
+            if (item.isException()) return quickjs.Value.exception;
+
+            const item_text = stringifyToOwned(ctx, item, allocator) catch return quickjs.Value.exception;
+            defer allocator.free(item_text);
+
+            replaced = replaceFirstEachValueToken(allocator, formatted, item_text) catch return quickjs.Value.exception;
+            allocator.free(formatted);
+            formatted = replaced;
+        }
+    } else {
+        const row_text = stringifyToOwned(ctx, row, allocator) catch return quickjs.Value.exception;
+        defer allocator.free(row_text);
+
+        replaced = replaceFirstEachValueToken(allocator, formatted, row_text) catch return quickjs.Value.exception;
+        allocator.free(formatted);
+        formatted = replaced;
+    }
+
+    return quickjs.Value.initStringLen(ctx, formatted);
+}
+
+fn stringifyToOwned(ctx: *quickjs.Context, value: quickjs.Value, allocator: Allocator) ![]u8 {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const string_ctor = global.getPropertyStr(ctx, "String");
+    defer string_ctor.deinit(ctx);
+    if (string_ctor.isException() or !string_ctor.isFunction(ctx)) return error.JSError;
+
+    var args = [_]quickjs.Value{value.dup(ctx)};
+    defer args[0].deinit(ctx);
+    const string_value = string_ctor.call(ctx, quickjs.Value.undefined, &args);
+    defer string_value.deinit(ctx);
+    if (string_value.isException()) return error.JSError;
+
+    const text = string_value.toCStringLen(ctx) orelse return error.OutOfMemory;
+    defer ctx.freeCString(text.ptr);
+    return allocator.dupe(u8, text.ptr[0..text.len]);
+}
+
+fn replaceEachIndexTokens(allocator: Allocator, input: []const u8, replacement: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    while (cursor < input.len) {
+        if (cursor + 1 < input.len and input[cursor] == '%' and input[cursor + 1] == '#') {
+            try out.appendSlice(allocator, replacement);
+            cursor += 2;
+            continue;
+        }
+        try out.append(allocator, input[cursor]);
+        cursor += 1;
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn replaceFirstEachValueToken(allocator: Allocator, input: []const u8, replacement: []const u8) ![]u8 {
+    var found_at: ?usize = null;
+    if (input.len >= 2) {
+        for (0..input.len - 1) |index| {
+            if (input[index] == '%' and isEachValueTokenChar(input[index + 1])) {
+                found_at = index;
+                break;
+            }
+        }
+    }
+
+    if (found_at == null) return allocator.dupe(u8, input);
+
+    const at = found_at.?;
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try out.appendSlice(allocator, input[0..at]);
+    try out.appendSlice(allocator, replacement);
+    try out.appendSlice(allocator, input[at + 2 ..]);
+    return out.toOwnedSlice(allocator);
+}
+
+fn isEachValueTokenChar(ch: u8) bool {
+    return ch == 's' or
+        ch == 'd' or
+        ch == 'i' or
+        ch == 'f' or
+        ch == 'o' or
+        ch == 'O' or
+        ch == 'j';
+}
+
+fn valueArrayLength(ctx: *quickjs.Context, value: quickjs.Value) usize {
+    const length = value.getPropertyStr(ctx, "length");
+    defer length.deinit(ctx);
+    if (length.isException()) return 0;
+    const raw = length.toInt64(ctx) catch return 0;
+    if (raw <= 0) return 0;
+    return @intCast(raw);
+}
+
 fn jsTest(_: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     if (active_runner) |runner| runner.registerTest(args, false, false, false);
     return quickjs.Value.undefined;
@@ -687,6 +918,76 @@ fn jsAfterAll(_: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JS
 fn jsRun(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     if (active_runner) |runner| runner.run() catch return quickjs.Value.exception;
     return quickjs.Value.undefined;
+}
+
+fn jsRunnerDomCleanup(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (!document.isException() and document.isObject()) {
+        const body = document.getPropertyStr(ctx, "body");
+        defer body.deinit(ctx);
+        if (!body.isException() and body.isObject()) {
+            body.setPropertyStr(ctx, "innerHTML", quickjs.Value.initStringLen(ctx, "")) catch {
+                clearPendingException(ctx);
+            };
+        } else if (body.isException()) {
+            clearPendingException(ctx);
+        }
+
+        const head = document.getPropertyStr(ctx, "head");
+        defer head.deinit(ctx);
+        if (!head.isException() and head.isObject()) {
+            head.setPropertyStr(ctx, "innerHTML", quickjs.Value.initStringLen(ctx, "")) catch {
+                clearPendingException(ctx);
+            };
+        } else if (head.isException()) {
+            clearPendingException(ctx);
+        }
+
+        document.setPropertyStr(ctx, "__zigCookie", quickjs.Value.initStringLen(ctx, "")) catch {
+            clearPendingException(ctx);
+        };
+    } else if (document.isException()) {
+        clearPendingException(ctx);
+    }
+
+    clearStorageObject(ctx, global, "localStorage");
+    clearStorageObject(ctx, global, "sessionStorage");
+
+    return quickjs.Value.undefined;
+}
+
+fn clearStorageObject(ctx: *quickjs.Context, global: quickjs.Value, comptime name: [:0]const u8) void {
+    const storage = global.getPropertyStr(ctx, name);
+    defer storage.deinit(ctx);
+    if (storage.isException()) {
+        clearPendingException(ctx);
+        return;
+    }
+    if (!storage.isObject()) return;
+
+    const clear_fn = storage.getPropertyStr(ctx, "clear");
+    defer clear_fn.deinit(ctx);
+    if (clear_fn.isException()) {
+        clearPendingException(ctx);
+        return;
+    }
+    if (!clear_fn.isFunction(ctx)) return;
+
+    const clear_result = clear_fn.call(ctx, storage, &.{});
+    defer clear_result.deinit(ctx);
+    if (clear_result.isException()) {
+        clearPendingException(ctx);
+    }
+}
+
+fn clearPendingException(ctx: *quickjs.Context) void {
+    const exception = ctx.getException();
+    exception.deinit(ctx);
 }
 
 fn setFunction(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]const u8, comptime func: quickjs.cfunc.Func, arg_count: i32) HostRunnerError!void {

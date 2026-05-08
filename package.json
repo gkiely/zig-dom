@@ -11,7 +11,8 @@
     "build:packages": "bun run scripts/build-native-packages.ts",
     "build": "bun run build:packages",
     "test": "zig build run -- test --dom tests/runner/*.test.* tests/integration",
-    "test:wpt": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests"
+    "test:wpt": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests",
+    "test:perf": "zig-out/bin/zig-dom test --dom tests/runner/*.test.* tests/integration"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
