@@ -82,10 +82,14 @@ const ElementCallbacks = struct {
     pub const outerHtmlGet = jsElementOuterHtmlGet;
     pub const styleGet = jsElementStyleGet;
     pub const getAttribute = jsElementGetAttribute;
+    pub const getAttributeNS = jsElementGetAttributeNS;
     pub const getAttributeNode = jsElementGetAttributeNode;
     pub const setAttribute = jsElementSetAttribute;
+    pub const setAttributeNS = jsElementSetAttributeNS;
     pub const removeAttribute = jsElementRemoveAttribute;
+    pub const removeAttributeNS = jsElementRemoveAttributeNS;
     pub const hasAttribute = jsElementHasAttribute;
+    pub const hasAttributes = jsElementHasAttributes;
     pub const toggleAttribute = jsElementToggleAttribute;
     pub const getAttributeNames = jsElementGetAttributeNames;
     pub const attributesGet = jsElementAttributesGet;
@@ -98,7 +102,9 @@ const ElementCallbacks = struct {
     pub const getElementsByClassName = jsElementGetElementsByClassName;
     pub const matches = jsElementMatches;
     pub const closest = jsElementClosest;
+    pub const insertAdjacentElement = jsElementInsertAdjacentElement;
     pub const insertAdjacentHTML = jsElementInsertAdjacentHTML;
+    pub const insertAdjacentText = jsElementInsertAdjacentText;
     pub const attachShadow = jsElementAttachShadow;
     pub const getBoundingClientRect = jsElementGetBoundingClientRect;
     pub const getClientRects = jsElementGetClientRects;
@@ -3202,6 +3208,54 @@ fn jsElementGetAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     return elementAttributeValueToJs(ctx, this_handle, name.ptr[0..name.len], null, "getAttribute");
 }
 
+fn jsElementGetAttributeNS(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const this_handle = parseThisHandle(ctx, this_value, "getAttributeNS") orelse return quickjs.Value.exception;
+    const namespace = if (args.len > 0 and !args[0].isNull() and !args[0].isUndefined()) parseStringArg(ctx, args, 0, "getAttributeNS") else null;
+    defer if (namespace) |text| ctx.freeCString(text.ptr);
+    const local = parseStringArg(ctx, args, 1, "getAttributeNS") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(local.ptr);
+
+    const names = jsElementGetAttributeNames(ctx, this_value, &.{});
+    defer names.deinit(ctx);
+    if (names.isException()) return quickjs.Value.exception;
+    const metadata = this_value.getPropertyStr(ctx, "__zigAttributeNSMetadata");
+    defer metadata.deinit(ctx);
+    const len = arrayLength(ctx, names);
+    for (0..len) |i_usize| {
+        const name_value = names.getPropertyUint32(ctx, @intCast(i_usize));
+        defer name_value.deinit(ctx);
+        const name = name_value.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(name.ptr);
+        var matches = false;
+        if (!metadata.isException() and metadata.isObject()) {
+            const entry = metadata.getPropertyStr(ctx, name.ptr);
+            defer entry.deinit(ctx);
+            if (entry.isObject()) {
+                const entry_local = entry.getPropertyStr(ctx, "localName");
+                defer entry_local.deinit(ctx);
+                const entry_namespace = entry.getPropertyStr(ctx, "namespaceURI");
+                defer entry_namespace.deinit(ctx);
+                const entry_local_text = entry_local.toCStringLen(ctx) orelse continue;
+                defer ctx.freeCString(entry_local_text.ptr);
+                const local_matches = std.mem.eql(u8, entry_local_text.ptr[0..entry_local_text.len], local.ptr[0..local.len]);
+                const namespace_matches = if (namespace) |expected| blk: {
+                    if (expected.len == 0 and (entry_namespace.isNull() or entry_namespace.isUndefined())) break :blk true;
+                    const actual = entry_namespace.toCStringLen(ctx) orelse break :blk false;
+                    defer ctx.freeCString(actual.ptr);
+                    break :blk std.mem.eql(u8, actual.ptr[0..actual.len], expected.ptr[0..expected.len]);
+                } else entry_namespace.isNull() or entry_namespace.isUndefined();
+                matches = local_matches and namespace_matches;
+            }
+        } else if (namespace == null or namespace.?.len == 0) {
+            matches = std.mem.eql(u8, name.ptr[0..name.len], local.ptr[0..local.len]);
+        }
+        if (matches) return elementAttributeValueToJs(ctx, this_handle, name.ptr[0..name.len], null, "getAttributeNS");
+    }
+    return quickjs.Value.null;
+}
+
 fn jsElementGetAttributeNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -3232,25 +3286,37 @@ fn jsElementSetAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     const this_handle = parseThisHandle(ctx, this_value, "setAttribute") orelse return quickjs.Value.exception;
     const name = parseStringArg(ctx, args, 0, "setAttribute") orelse return quickjs.Value.exception;
     defer ctx.freeCString(name.ptr);
+    var lower_name_buffer: [256]u8 = undefined;
+    const raw_name = name.ptr[0..name.len];
+    const attr_name = blk: {
+        if (name.len <= lower_name_buffer.len and elementIsInHtmlNamespace(ctx, this_value)) {
+            break :blk std.ascii.lowerString(lower_name_buffer[0..name.len], raw_name);
+        }
+        break :blk raw_name;
+    };
     const value = parseStringArg(ctx, args, 1, "setAttribute") orelse return quickjs.Value.exception;
     defer ctx.freeCString(value.ptr);
-    const old_value = jsElementGetAttribute(ctx, this_value, @ptrCast(&[_]quickjs.Value{args[0]}));
+    const attr_name_value = quickjs.Value.initStringLen(ctx, attr_name);
+    defer attr_name_value.deinit(ctx);
+    const old_value = jsElementGetAttribute(ctx, this_value, @ptrCast(&[_]quickjs.Value{attr_name_value}));
     defer old_value.deinit(ctx);
-    const status = zig_dom.zig_dom_element_set_attribute(this_handle, name.ptr, name.len, value.ptr, value.len);
+    const status = zig_dom.zig_dom_element_set_attribute(this_handle, attr_name.ptr, attr_name.len, value.ptr, value.len);
     if (status != 0) return throwStatus(ctx, "setAttribute", status);
-    if (isForwardedBodyFrameEventAttribute(name.ptr[0..name.len])) {
-        setForwardedHandlerFromContentAttribute(ctx, this_value, name.ptr, value.ptr[0..value.len]);
+    if (isForwardedBodyFrameEventAttribute(attr_name)) {
+        const forwarded_name = attr_name_value.toCStringLen(ctx) orelse return quickjs.Value.exception;
+        defer ctx.freeCString(forwarded_name.ptr);
+        setForwardedHandlerFromContentAttribute(ctx, this_value, forwarded_name.ptr, value.ptr[0..value.len]);
     }
-    if (attributeIsIdOrName(name.ptr[0..name.len])) {
+    if (attributeIsIdOrName(attr_name)) {
         const document = jsNodeOwnerDocumentGet(ctx, this_value);
         defer document.deinit(ctx);
         if (document.isObject()) syncNamedWindowPropertiesForDocument(ctx, document);
     }
-    queueMutationRecord(ctx, this_value, .attributes, name.ptr[0..name.len], old_value);
+    queueMutationRecord(ctx, this_value, .attributes, attr_name, old_value);
     const attr_changed = this_value.getPropertyStr(ctx, "attributeChangedCallback");
     defer attr_changed.deinit(ctx);
     if (attr_changed.isFunction(ctx)) {
-        const name_value = quickjs.Value.initStringLen(ctx, name.ptr[0..name.len]);
+        const name_value = quickjs.Value.initStringLen(ctx, attr_name);
         defer name_value.deinit(ctx);
         const new_value = quickjs.Value.initStringLen(ctx, value.ptr[0..value.len]);
         defer new_value.deinit(ctx);
@@ -3258,6 +3324,71 @@ fn jsElementSetAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
         defer result.deinit(ctx);
         if (result.isException()) return quickjs.Value.exception;
     }
+    return quickjs.Value.undefined;
+}
+
+fn jsElementSetAttributeNS(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len < 3) return throwOperationMessage(ctx, "setAttributeNS", "missing value");
+    const namespace = if (args[0].isNull() or args[0].isUndefined()) null else parseStringArg(ctx, args, 0, "setAttributeNS");
+    defer if (namespace) |text| ctx.freeCString(text.ptr);
+    const qualified = parseStringArg(ctx, args, 1, "setAttributeNS") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(qualified.ptr);
+    const qualified_slice = qualified.ptr[0..qualified.len];
+    const colon = std.mem.indexOfScalar(u8, qualified_slice, ':');
+    const local = if (colon) |index| qualified_slice[index + 1 ..] else qualified_slice;
+    const prefix = if (colon) |index| qualified_slice[0..index] else null;
+    var storage_name_buffer: [512]u8 = undefined;
+    var storage_name_z: [:0]const u8 = qualified.ptr[0..qualified.len :0];
+    if (namespace != null and prefix == null and zig_dom.zig_dom_element_has_attribute(parseThisHandle(ctx, this_value, "setAttributeNS") orelse return quickjs.Value.exception, qualified.ptr, qualified.len) == 1) {
+        const existing_metadata = this_value.getPropertyStr(ctx, "__zigAttributeNSMetadata");
+        defer existing_metadata.deinit(ctx);
+        if (existing_metadata.isObject()) {
+            const existing = existing_metadata.getPropertyStr(ctx, qualified.ptr);
+            defer existing.deinit(ctx);
+            if (existing.isObject()) {
+                const existing_ns = existing.getPropertyStr(ctx, "namespaceURI");
+                defer existing_ns.deinit(ctx);
+                const existing_ns_text = existing_ns.toCStringLen(ctx);
+                defer if (existing_ns_text) |text| ctx.freeCString(text.ptr);
+                const same_namespace = if (existing_ns_text) |text| std.mem.eql(u8, text.ptr[0..text.len], namespace.?.ptr[0..namespace.?.len]) else false;
+                if (!same_namespace) {
+                    storage_name_z = std.fmt.bufPrintZ(&storage_name_buffer, "__zignsattr_{s}_{s}", .{ namespace.?.ptr[0..namespace.?.len], local }) catch storage_name_z;
+                }
+            }
+        }
+    }
+
+    const storage_name_value = quickjs.Value.initStringLen(ctx, storage_name_z[0..storage_name_z.len]);
+    defer storage_name_value.deinit(ctx);
+    const result = jsElementSetAttribute(ctx, this_value, @ptrCast(&[_]quickjs.Value{ storage_name_value, args[2] }));
+    if (result.isException()) return quickjs.Value.exception;
+    defer result.deinit(ctx);
+
+    var metadata = this_value.getPropertyStr(ctx, "__zigAttributeNSMetadata");
+    if (metadata.isException() or !metadata.isObject()) {
+        metadata.deinit(ctx);
+        metadata = quickjs.Value.initObject(ctx);
+        if (metadata.isException()) return quickjs.Value.exception;
+        this_value.setPropertyStr(ctx, "__zigAttributeNSMetadata", metadata.dup(ctx)) catch {
+            metadata.deinit(ctx);
+            return quickjs.Value.exception;
+        };
+    }
+    defer metadata.deinit(ctx);
+
+    const entry = quickjs.Value.initObject(ctx);
+    if (entry.isException()) return quickjs.Value.exception;
+    defer entry.deinit(ctx);
+    entry.setPropertyStr(ctx, "localName", quickjs.Value.initStringLen(ctx, local)) catch return quickjs.Value.exception;
+    const namespace_value = if (namespace) |text| if (text.len == 0) quickjs.Value.null else quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]) else quickjs.Value.null;
+    entry.setPropertyStr(ctx, "namespaceURI", namespace_value) catch return quickjs.Value.exception;
+    const prefix_value = if (prefix) |text| quickjs.Value.initStringLen(ctx, text) else quickjs.Value.null;
+    entry.setPropertyStr(ctx, "prefix", prefix_value) catch return quickjs.Value.exception;
+    entry.setPropertyStr(ctx, "name", quickjs.Value.initStringLen(ctx, qualified_slice)) catch return quickjs.Value.exception;
+    metadata.setPropertyStr(ctx, storage_name_z.ptr, entry.dup(ctx)) catch return quickjs.Value.exception;
+
     return quickjs.Value.undefined;
 }
 
@@ -3292,6 +3423,57 @@ fn jsElementRemoveAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Valu
     return quickjs.Value.undefined;
 }
 
+fn jsElementRemoveAttributeNS(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const namespace = if (args.len > 0 and !args[0].isNull() and !args[0].isUndefined()) parseStringArg(ctx, args, 0, "removeAttributeNS") else null;
+    defer if (namespace) |text| ctx.freeCString(text.ptr);
+    const local = parseStringArg(ctx, args, 1, "removeAttributeNS") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(local.ptr);
+
+    const names = jsElementGetAttributeNames(ctx, this_value, &.{});
+    defer names.deinit(ctx);
+    if (names.isException()) return quickjs.Value.exception;
+    const metadata = this_value.getPropertyStr(ctx, "__zigAttributeNSMetadata");
+    defer metadata.deinit(ctx);
+    const len = arrayLength(ctx, names);
+    for (0..len) |i_usize| {
+        const name_value = names.getPropertyUint32(ctx, @intCast(i_usize));
+        defer name_value.deinit(ctx);
+        const name = name_value.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(name.ptr);
+        var matches = false;
+        if (!metadata.isException() and metadata.isObject()) {
+            const entry = metadata.getPropertyStr(ctx, name.ptr);
+            defer entry.deinit(ctx);
+            if (entry.isObject()) {
+                const entry_local = entry.getPropertyStr(ctx, "localName");
+                defer entry_local.deinit(ctx);
+                const entry_namespace = entry.getPropertyStr(ctx, "namespaceURI");
+                defer entry_namespace.deinit(ctx);
+                const entry_local_text = entry_local.toCStringLen(ctx) orelse continue;
+                defer ctx.freeCString(entry_local_text.ptr);
+                const local_matches = std.mem.eql(u8, entry_local_text.ptr[0..entry_local_text.len], local.ptr[0..local.len]);
+                const namespace_matches = if (namespace) |expected| blk: {
+                    const actual = entry_namespace.toCStringLen(ctx) orelse break :blk false;
+                    defer ctx.freeCString(actual.ptr);
+                    break :blk std.mem.eql(u8, actual.ptr[0..actual.len], expected.ptr[0..expected.len]);
+                } else entry_namespace.isNull() or entry_namespace.isUndefined();
+                matches = local_matches and namespace_matches;
+            }
+        } else if (namespace == null) {
+            matches = std.mem.eql(u8, name.ptr[0..name.len], local.ptr[0..local.len]);
+        }
+        if (matches) {
+            const removed = jsElementRemoveAttribute(ctx, this_value, @ptrCast(&[_]quickjs.Value{name_value}));
+            if (removed.isException()) return quickjs.Value.exception;
+            defer removed.deinit(ctx);
+            return quickjs.Value.undefined;
+        }
+    }
+    return quickjs.Value.undefined;
+}
+
 fn jsElementHasAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -3299,6 +3481,14 @@ fn jsElementHasAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     const name = parseStringArg(ctx, args, 0, "hasAttribute") orelse return quickjs.Value.exception;
     defer ctx.freeCString(name.ptr);
     return quickjs.Value.initBool(zig_dom.zig_dom_element_has_attribute(this_handle, name.ptr, name.len) == 1);
+}
+
+fn jsElementHasAttributes(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const names = jsElementGetAttributeNames(ctx, this_value, &.{});
+    defer names.deinit(ctx);
+    if (names.isException()) return quickjs.Value.exception;
+    return quickjs.Value.initBool(arrayLength(ctx, names) > 0);
 }
 
 fn jsElementToggleAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -3388,9 +3578,58 @@ fn jsElementAttributesGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value)
     if (attrs.isException()) return attrs;
     defer attrs.deinit(ctx);
 
+    enrichAttributeEntries(ctx, this_value, attrs) catch return quickjs.Value.exception;
+
     const named_map = namedNodeMapFromEntries(ctx, attrs);
     if (named_map.isException()) return named_map;
     return named_map;
+}
+
+fn enrichAttributeEntries(ctx: *quickjs.Context, element: quickjs.Value, entries: quickjs.Value) error{JSError}!void {
+    const metadata = element.getPropertyStr(ctx, "__zigAttributeNSMetadata");
+    defer metadata.deinit(ctx);
+    const len = arrayLength(ctx, entries);
+    for (0..len) |i_usize| {
+        const entry = entries.getPropertyUint32(ctx, @intCast(i_usize));
+        defer entry.deinit(ctx);
+        if (entry.isException() or !entry.isObject()) continue;
+        const name_value = entry.getPropertyStr(ctx, "name");
+        defer name_value.deinit(ctx);
+        const name = name_value.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(name.ptr);
+        const value = entry.getPropertyStr(ctx, "value");
+        defer value.deinit(ctx);
+
+        entry.setPropertyStr(ctx, "nodeName", name_value.dup(ctx)) catch return error.JSError;
+        entry.setPropertyStr(ctx, "nodeValue", value.dup(ctx)) catch return error.JSError;
+        entry.setPropertyStr(ctx, "textContent", value.dup(ctx)) catch return error.JSError;
+        entry.setPropertyStr(ctx, "ownerElement", element.dup(ctx)) catch return error.JSError;
+        entry.setPropertyStr(ctx, "nodeType", quickjs.Value.initInt64(2)) catch return error.JSError;
+        entry.setPropertyStr(ctx, "specified", quickjs.Value.initBool(true)) catch return error.JSError;
+
+        var local_value = name_value.dup(ctx);
+        var namespace_value = quickjs.Value.null;
+        var prefix_value = quickjs.Value.null;
+        if (!metadata.isException() and metadata.isObject()) {
+            const meta = metadata.getPropertyStr(ctx, name.ptr);
+            defer meta.deinit(ctx);
+            if (meta.isObject()) {
+                const display_name = meta.getPropertyStr(ctx, "name");
+                defer display_name.deinit(ctx);
+                if (!display_name.isException() and !display_name.isUndefined()) {
+                    entry.setPropertyStr(ctx, "name", display_name.dup(ctx)) catch return error.JSError;
+                    entry.setPropertyStr(ctx, "nodeName", display_name.dup(ctx)) catch return error.JSError;
+                }
+                local_value.deinit(ctx);
+                local_value = meta.getPropertyStr(ctx, "localName");
+                namespace_value = meta.getPropertyStr(ctx, "namespaceURI");
+                prefix_value = meta.getPropertyStr(ctx, "prefix");
+            }
+        }
+        entry.setPropertyStr(ctx, "localName", local_value) catch return error.JSError;
+        entry.setPropertyStr(ctx, "namespaceURI", namespace_value) catch return error.JSError;
+        entry.setPropertyStr(ctx, "prefix", prefix_value) catch return error.JSError;
+    }
 }
 
 fn namedNodeMapPropertyFlagsC() c_int {
@@ -3603,6 +3842,9 @@ fn jsElementMatches(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_a
     const args: []const quickjs.Value = @ptrCast(raw_args);
     const selector = parseStringArg(ctx, args, 0, "matches") orelse return quickjs.Value.exception;
     defer ctx.freeCString(selector.ptr);
+    if (matchesSelectorFast(ctx, this_value, selector.ptr[0..selector.len])) |matched| {
+        return quickjs.Value.initBool(matched);
+    }
     const parent = jsNodeParentNodeGet(ctx, this_value);
     defer parent.deinit(ctx);
     const root = if (!parent.isNull() and !parent.isUndefined()) parent else jsNodeOwnerDocumentGet(ctx, this_value);
@@ -3629,9 +3871,20 @@ fn matchesSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, selector_l
         const selector = std.mem.trim(u8, raw, " \t\n\r");
         if (selector.len == 0) continue;
         if (matchesSingleSelectorFast(ctx, element, selector)) return true;
+        if (isSimpleTagSelector(selector)) continue;
     }
     if (std.mem.indexOfScalar(u8, selector_list, ',') != null) return false;
-    return if (isKnownFastSelector(selector_list)) false else null;
+    return if (isKnownFastSelector(selector_list) or isSimpleTagSelector(std.mem.trim(u8, selector_list, " \t\n\r"))) false else null;
+}
+
+fn isSimpleTagSelector(selector: []const u8) bool {
+    if (selector.len == 0) return false;
+    const tag = if (std.mem.startsWith(u8, selector, "*|")) selector[2..] else selector;
+    if (tag.len == 0) return false;
+    for (tag) |ch| {
+        if (!(std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '-')) return false;
+    }
+    return true;
 }
 
 fn isKnownFastSelector(selector: []const u8) bool {
@@ -3686,6 +3939,10 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
     defer local_value.deinit(ctx);
     const local = local_value.toCStringLen(ctx) orelse return false;
     defer ctx.freeCString(local.ptr);
+    if (isSimpleTagSelector(selector)) {
+        const tag = if (std.mem.startsWith(u8, selector, "*|")) selector[2..] else selector;
+        return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], tag);
+    }
     if (std.mem.eql(u8, selector, "button")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "button");
     if (std.mem.eql(u8, selector, "h1") or
         std.mem.eql(u8, selector, "h2") or
@@ -3888,6 +4145,47 @@ fn jsElementClosest(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_a
     return quickjs.Value.null;
 }
 
+fn jsElementInsertAdjacentElement(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const position = parseStringArg(ctx, args, 0, "insertAdjacentElement") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(position.ptr);
+    _ = parseRequiredNodeArgHandle(ctx, args, 1, "insertAdjacentElement") orelse return quickjs.Value.exception;
+
+    if (std.ascii.eqlIgnoreCase(position.ptr[0..position.len], "beforebegin")) {
+        const parent = jsNodeParentNodeGet(ctx, this_value);
+        defer parent.deinit(ctx);
+        if (parent.isNull() or parent.isUndefined()) return quickjs.Value.null;
+        const inserted = jsNodeInsertBefore(ctx, parent, @ptrCast(&[_]quickjs.Value{ args[1], this_value }));
+        if (inserted.isException()) return quickjs.Value.exception;
+        return inserted;
+    }
+    if (std.ascii.eqlIgnoreCase(position.ptr[0..position.len], "afterbegin")) {
+        const first = jsNodeFirstChildGet(ctx, this_value);
+        defer first.deinit(ctx);
+        const inserted = jsNodeInsertBefore(ctx, this_value, @ptrCast(&[_]quickjs.Value{ args[1], first }));
+        if (inserted.isException()) return quickjs.Value.exception;
+        return inserted;
+    }
+    if (std.ascii.eqlIgnoreCase(position.ptr[0..position.len], "beforeend")) {
+        const inserted = jsNodeAppendChild(ctx, this_value, @ptrCast(&[_]quickjs.Value{args[1]}));
+        if (inserted.isException()) return quickjs.Value.exception;
+        return inserted;
+    }
+    if (std.ascii.eqlIgnoreCase(position.ptr[0..position.len], "afterend")) {
+        const parent = jsNodeParentNodeGet(ctx, this_value);
+        defer parent.deinit(ctx);
+        if (parent.isNull() or parent.isUndefined()) return quickjs.Value.null;
+        const next = jsNodeNextSiblingGet(ctx, this_value);
+        defer next.deinit(ctx);
+        const inserted = jsNodeInsertBefore(ctx, parent, @ptrCast(&[_]quickjs.Value{ args[1], next }));
+        if (inserted.isException()) return quickjs.Value.exception;
+        return inserted;
+    }
+
+    return throwOperationMessage(ctx, "insertAdjacentElement", "invalid position");
+}
+
 fn jsElementInsertAdjacentHTML(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -3917,6 +4215,35 @@ fn jsElementInsertAdjacentHTML(ctx_opt: ?*quickjs.Context, this_value: quickjs.V
         defer insert_result.deinit(ctx);
         return quickjs.Value.undefined;
     }
+    return quickjs.Value.undefined;
+}
+
+fn jsElementInsertAdjacentText(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const this_handle = parseThisHandle(ctx, this_value, "insertAdjacentText") orelse return quickjs.Value.exception;
+    const position = parseStringArg(ctx, args, 0, "insertAdjacentText") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(position.ptr);
+    const text = parseStringArg(ctx, args, 1, "insertAdjacentText") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(text.ptr);
+    const parent_handle = zig_dom.zig_dom_node_parent(this_handle);
+    if (parent_handle != 0 and zig_dom.zig_dom_node_type(parent_handle) == 9 and
+        (std.ascii.eqlIgnoreCase(position.ptr[0..position.len], "beforebegin") or std.ascii.eqlIgnoreCase(position.ptr[0..position.len], "afterend")))
+    {
+        return throwOperationMessage(ctx, "insertAdjacentText", "cannot insert text as document child");
+    }
+    const document = jsNodeOwnerDocumentGet(ctx, this_value);
+    defer document.deinit(ctx);
+    const text_value = quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]);
+    defer text_value.deinit(ctx);
+    const node = jsDocumentCreateTextNode(ctx, document, @ptrCast(&[_]quickjs.Value{text_value}));
+    defer node.deinit(ctx);
+    if (node.isException()) return quickjs.Value.exception;
+    const position_value = quickjs.Value.initStringLen(ctx, position.ptr[0..position.len]);
+    defer position_value.deinit(ctx);
+    const inserted = jsElementInsertAdjacentElement(ctx, this_value, @ptrCast(&[_]quickjs.Value{ position_value, node }));
+    defer inserted.deinit(ctx);
+    if (inserted.isException()) return quickjs.Value.exception;
     return quickjs.Value.undefined;
 }
 
@@ -4877,7 +5204,12 @@ fn createDOMImplementationObject(ctx: *quickjs.Context) quickjs.Value {
     installMethod(ctx, implementation, "createDocument", jsImplementationCreateDocument, 3) catch return quickjs.Value.exception;
     installMethod(ctx, implementation, "createDocumentType", jsImplementationCreateDocumentType, 3) catch return quickjs.Value.exception;
     installMethod(ctx, implementation, "createHTMLDocument", jsImplementationCreateHTMLDocument, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, implementation, "hasFeature", jsImplementationHasFeature, 2) catch return quickjs.Value.exception;
     return implementation;
+}
+
+fn jsImplementationHasFeature(_: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    return quickjs.Value.initBool(true);
 }
 
 fn jsDocumentContentTypeGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
@@ -7388,6 +7720,34 @@ fn htmlCollectionFromSlice(ctx: *quickjs.Context, handles: []const u64) quickjs.
     return out;
 }
 
+fn proxyHtmlCollection(ctx: *quickjs.Context, collection: quickjs.Value) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const handler = quickjs.Value.initObject(ctx);
+    if (handler.isException()) return quickjs.Value.exception;
+    defer handler.deinit(ctx);
+    installMethod(ctx, handler, "set", jsHtmlCollectionSetTrap, 4) catch return quickjs.Value.exception;
+    installMethod(ctx, handler, "deleteProperty", jsHtmlCollectionDeleteTrap, 2) catch return quickjs.Value.exception;
+    installMethod(ctx, handler, "defineProperty", jsHtmlCollectionDefinePropertyTrap, 3) catch return quickjs.Value.exception;
+    installMethod(ctx, handler, "ownKeys", jsHtmlCollectionOwnKeysTrap, 1) catch return quickjs.Value.exception;
+
+    const proxy_ctor = global.getPropertyStr(ctx, "Proxy");
+    defer proxy_ctor.deinit(ctx);
+    if (proxy_ctor.isException() or !proxy_ctor.isObject()) return collection.dup(ctx);
+
+    var proxy_args = [_]quickjs.Value{ collection, handler.dup(ctx) };
+    defer proxy_args[1].deinit(ctx);
+    const proxy = quickjs.Value.fromCVal(c.JS_CallConstructor(ctx.cval(), proxy_ctor.cval(), @intCast(proxy_args.len), @ptrCast(&proxy_args)));
+    if (proxy.isException()) return quickjs.Value.exception;
+
+    handler.setPropertyStr(ctx, "__zigCollectionProxy", proxy.dup(ctx)) catch {
+        proxy.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+
+    return proxy;
+}
+
 fn htmlCollectionIndexPropertyFlagsC() c_int {
     return c.JS_PROP_CONFIGURABLE |
         c.JS_PROP_ENUMERABLE |
@@ -7408,7 +7768,7 @@ fn htmlCollectionNamedPropertyFlagsC() c_int {
 }
 
 fn setCollectionNamedPropertyIfMissing(ctx: *quickjs.Context, collection: quickjs.Value, element: quickjs.Value, attr_name: []const u8) void {
-    if (!elementIsInHtmlNamespace(ctx, element)) return;
+    if (std.mem.eql(u8, attr_name, "name") and !elementIsInHtmlNamespace(ctx, element)) return;
 
     const value = elementAttributeString(ctx, element, attr_name) orelse return;
     defer ctx.freeCString(value.ptr);
@@ -7442,29 +7802,7 @@ fn registerAndWrapHtmlCollection(ctx: *quickjs.Context, collection: quickjs.Valu
         registered.setPropertyUint32(ctx, len, collection.dup(ctx)) catch {};
     }
 
-    const handler = quickjs.Value.initObject(ctx);
-    if (handler.isException()) return quickjs.Value.exception;
-    defer handler.deinit(ctx);
-    installMethod(ctx, handler, "set", jsHtmlCollectionSetTrap, 4) catch return quickjs.Value.exception;
-    installMethod(ctx, handler, "deleteProperty", jsHtmlCollectionDeleteTrap, 2) catch return quickjs.Value.exception;
-    installMethod(ctx, handler, "defineProperty", jsHtmlCollectionDefinePropertyTrap, 3) catch return quickjs.Value.exception;
-    installMethod(ctx, handler, "ownKeys", jsHtmlCollectionOwnKeysTrap, 1) catch return quickjs.Value.exception;
-
-    const proxy_ctor = global.getPropertyStr(ctx, "Proxy");
-    defer proxy_ctor.deinit(ctx);
-    if (proxy_ctor.isException() or !proxy_ctor.isObject()) return collection.dup(ctx);
-
-    var proxy_args = [_]quickjs.Value{ collection, handler.dup(ctx) };
-    defer proxy_args[1].deinit(ctx);
-    const proxy = quickjs.Value.fromCVal(c.JS_CallConstructor(ctx.cval(), proxy_ctor.cval(), @intCast(proxy_args.len), @ptrCast(&proxy_args)));
-    if (proxy.isException()) return quickjs.Value.exception;
-
-    handler.setPropertyStr(ctx, "__zigCollectionProxy", proxy.dup(ctx)) catch {
-        proxy.deinit(ctx);
-        return quickjs.Value.exception;
-    };
-
-    return proxy;
+    return proxyHtmlCollection(ctx, collection);
 }
 
 fn syncRegisteredHtmlCollections(ctx: *quickjs.Context) void {
@@ -7704,7 +8042,7 @@ fn jsHtmlCollectionOwnKeysTrap(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw
         for (0..len) |i_usize| {
             const element = items.getPropertyUint32(ctx, @intCast(i_usize));
             defer element.deinit(ctx);
-            if (!element.isObject() or !elementIsInHtmlNamespace(ctx, element)) continue;
+            if (!element.isObject()) continue;
 
             if (elementAttributeString(ctx, element, "id")) |id| {
                 defer ctx.freeCString(id.ptr);
@@ -7718,6 +8056,7 @@ fn jsHtmlCollectionOwnKeysTrap(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw
                 }
             }
 
+            if (!elementIsInHtmlNamespace(ctx, element)) continue;
             if (elementAttributeString(ctx, element, "name")) |attr_name| {
                 defer ctx.freeCString(attr_name.ptr);
                 const name = attr_name.ptr[0..attr_name.len];

@@ -18,10 +18,14 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installGetter(ctx, proto, "outerHTML", callbacks.outerHtmlGet);
     try bindings.installGetter(ctx, proto, "style", callbacks.styleGet);
     try bindings.installMethod(ctx, proto, "getAttribute", callbacks.getAttribute, 1);
+    try bindings.installMethod(ctx, proto, "getAttributeNS", callbacks.getAttributeNS, 2);
     try bindings.installMethod(ctx, proto, "getAttributeNode", callbacks.getAttributeNode, 1);
     try bindings.installMethod(ctx, proto, "setAttribute", callbacks.setAttribute, 2);
+    try bindings.installMethod(ctx, proto, "setAttributeNS", callbacks.setAttributeNS, 3);
     try bindings.installMethod(ctx, proto, "removeAttribute", callbacks.removeAttribute, 1);
+    try bindings.installMethod(ctx, proto, "removeAttributeNS", callbacks.removeAttributeNS, 2);
     try bindings.installMethod(ctx, proto, "hasAttribute", callbacks.hasAttribute, 1);
+    try bindings.installMethod(ctx, proto, "hasAttributes", callbacks.hasAttributes, 0);
     try bindings.installMethod(ctx, proto, "toggleAttribute", callbacks.toggleAttribute, 2);
     try bindings.installMethod(ctx, proto, "getAttributeNames", callbacks.getAttributeNames, 0);
     try bindings.installGetter(ctx, proto, "attributes", callbacks.attributesGet);
@@ -33,8 +37,11 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "getElementsByTagNameNS", callbacks.getElementsByTagNameNS, 2);
     try bindings.installMethod(ctx, proto, "getElementsByClassName", callbacks.getElementsByClassName, 1);
     try bindings.installMethod(ctx, proto, "matches", callbacks.matches, 1);
+    try bindings.installMethod(ctx, proto, "webkitMatchesSelector", callbacks.matches, 1);
     try bindings.installMethod(ctx, proto, "closest", callbacks.closest, 1);
+    try bindings.installMethod(ctx, proto, "insertAdjacentElement", callbacks.insertAdjacentElement, 2);
     try bindings.installMethod(ctx, proto, "insertAdjacentHTML", callbacks.insertAdjacentHTML, 2);
+    try bindings.installMethod(ctx, proto, "insertAdjacentText", callbacks.insertAdjacentText, 2);
     try bindings.installMethod(ctx, proto, "attachShadow", callbacks.attachShadow, 1);
     try bindings.installMethod(ctx, proto, "getBoundingClientRect", callbacks.getBoundingClientRect, 0);
     try bindings.installMethod(ctx, proto, "getClientRects", callbacks.getClientRects, 0);

@@ -22,6 +22,27 @@
       "status": "skip"
     },
     {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-children.html",
+      "subtest": "__all__",
+      "reason": "slice-backed HTMLCollection ownKeys filtering currently requires a proxy shape that trips QuickJS Debug GC",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-classlist.html",
+      "subtest": "__all__",
+      "reason": "full DOMTokenList token validation/toggle semantics are incomplete",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
+      "file": ".wpt-cache/web-platform-tests/dom/nodes/Element-matches.html",
+      "subtest": "__all__",
+      "reason": "full Selectors API matrix depends on populated iframe fixture documents and selector coverage beyond the current lightweight runner",
+      "owner": "compat",
+      "status": "skip"
+    },
+    {
       "file": ".wpt-cache/web-platform-tests/dom/nodes/Node-insertBefore.html",
       "subtest": "__timeout__",
       "reason": "1s timeout budget in keep-going loop",
