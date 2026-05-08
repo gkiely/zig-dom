@@ -411,17 +411,24 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     try installMethod(ctx, event_proto, "stopImmediatePropagation", jsEventStopImmediatePropagation, 0);
     try installMethod(ctx, event_proto, "composedPath", jsEventComposedPath, 0);
     try installMethod(ctx, event_proto, "initEvent", jsEventInitEvent, 3);
+    try installGetter(ctx, event_proto, "timeStamp", jsEventTimeStampGet);
     try installAccessor(ctx, event_proto, "cancelBubble", jsEventCancelBubbleGet, jsEventCancelBubbleSet);
     try installAccessor(ctx, event_proto, "returnValue", jsEventReturnValueGet, jsEventReturnValueSet);
     const custom_event_proto = try installConstructor(ctx, global, "CustomEvent", jsConstructCustomEvent);
     custom_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
     try installMethod(ctx, custom_event_proto, "initCustomEvent", jsCustomEventInitCustomEvent, 4);
+    const gamepad_event_proto = try installConstructor(ctx, global, "GamepadEvent", jsConstructGamepadEvent);
+    gamepad_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
     const ui_event_proto = try installConstructor(ctx, global, "UIEvent", jsConstructUIEvent);
     ui_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
     try installMethod(ctx, ui_event_proto, "initUIEvent", jsUIEventInitUIEvent, 5);
+    const focus_event_proto = try installConstructor(ctx, global, "FocusEvent", jsConstructFocusEvent);
+    focus_event_proto.setPrototype(ctx, ui_event_proto) catch return error.PropertyAccessFailed;
     const mouse_event_proto = try installConstructor(ctx, global, "MouseEvent", jsConstructMouseEvent);
     mouse_event_proto.setPrototype(ctx, ui_event_proto) catch return error.PropertyAccessFailed;
     try installMethod(ctx, mouse_event_proto, "initMouseEvent", jsMouseEventInitMouseEvent, 15);
+    const wheel_event_proto = try installConstructor(ctx, global, "WheelEvent", jsConstructWheelEvent);
+    wheel_event_proto.setPrototype(ctx, mouse_event_proto) catch return error.PropertyAccessFailed;
     const keyboard_event_proto = try installConstructor(ctx, global, "KeyboardEvent", jsConstructKeyboardEvent);
     keyboard_event_proto.setPrototype(ctx, ui_event_proto) catch return error.PropertyAccessFailed;
     try installMethod(ctx, keyboard_event_proto, "initKeyboardEvent", jsKeyboardEventInitKeyboardEvent, 9);
@@ -459,8 +466,11 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     window_proto.deinit(ctx);
     event_proto.deinit(ctx);
     custom_event_proto.deinit(ctx);
+    gamepad_event_proto.deinit(ctx);
     ui_event_proto.deinit(ctx);
+    focus_event_proto.deinit(ctx);
     mouse_event_proto.deinit(ctx);
+    wheel_event_proto.deinit(ctx);
     keyboard_event_proto.deinit(ctx);
     error_event_proto.deinit(ctx);
     xhr_proto.deinit(ctx);
@@ -1075,16 +1085,34 @@ fn jsConstructCustomEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value,
     return createEventObject(ctx, this_value, args, .custom);
 }
 
+fn jsConstructGamepadEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return createEventObject(ctx, this_value, args, .event);
+}
+
 fn jsConstructUIEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
     return createEventObject(ctx, this_value, args, .ui);
 }
 
+fn jsConstructFocusEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return createEventObject(ctx, this_value, args, .focus);
+}
+
 fn jsConstructMouseEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
     return createEventObject(ctx, this_value, args, .mouse);
+}
+
+fn jsConstructWheelEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return createEventObject(ctx, this_value, args, .wheel);
 }
 
 fn jsConstructKeyboardEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -1152,6 +1180,16 @@ fn jsEventComposedPath(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _:
     defer path.deinit(ctx);
     if (!path.isException() and path.isObject()) return path.dup(ctx);
     return quickjs.Value.initArray(ctx);
+}
+
+fn jsEventTimeStampGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const stored = this_value.getPropertyStr(ctx, "_timeStamp");
+    defer stored.deinit(ctx);
+    if (!stored.isException() and !stored.isUndefined() and !stored.isNull()) {
+        return stored.dup(ctx);
+    }
+    return quickjs.Value.initFloat64(0);
 }
 
 fn eventDispatchInProgress(ctx: *quickjs.Context, this_value: quickjs.Value) bool {
@@ -1338,7 +1376,35 @@ fn jsKeyboardEventInitKeyboardEvent(ctx_opt: ?*quickjs.Context, this_value: quic
     return quickjs.Value.undefined;
 }
 
-const EventKind = enum { event, custom, ui, mouse, keyboard, error_event, input, composition };
+const EventKind = enum { event, custom, ui, focus, mouse, wheel, keyboard, error_event, input, composition };
+
+fn eventTimeStampNowMs(ctx: *quickjs.Context) f64 {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const performance = global.getPropertyStr(ctx, "performance");
+    defer performance.deinit(ctx);
+    if (!performance.isException() and performance.isObject()) {
+        const now_fn = performance.getPropertyStr(ctx, "now");
+        defer now_fn.deinit(ctx);
+        if (now_fn.isFunction(ctx)) {
+            const now_value = now_fn.call(ctx, performance, &.{});
+            defer now_value.deinit(ctx);
+            if (!now_value.isException()) {
+                const raw = now_value.toFloat64(ctx) catch 0;
+                return @round(raw * 200.0) / 200.0;
+            }
+        }
+    }
+
+    var tv: std.c.timeval = undefined;
+    if (std.c.gettimeofday(&tv, null) == 0) {
+        const seconds: f64 = @floatFromInt(tv.sec);
+        const micros: f64 = @floatFromInt(tv.usec);
+        const raw = (seconds * 1000.0) + (micros / 1000.0);
+        return @round(raw * 200.0) / 200.0;
+    }
+    return 0;
+}
 
 fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []const quickjs.Value, kind: EventKind) quickjs.Value {
     const proto = constructor.getPropertyStr(ctx, "prototype");
@@ -1355,6 +1421,7 @@ fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []
     obj.setPropertyStr(ctx, "_target", quickjs.Value.null) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "_currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "_eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "_timeStamp", quickjs.Value.initFloat64(eventTimeStampNowMs(ctx))) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "_canceled", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "_stopped", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "_immediateStopped", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
@@ -1364,14 +1431,23 @@ fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []
     obj.setPropertyStr(ctx, "eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "isTrusted", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "defaultPrevented", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
-    if (kind == .ui or kind == .mouse or kind == .keyboard or kind == .input or kind == .composition) {
-        obj.setPropertyStr(ctx, "view", optionValueOrNull(ctx, args, "view")) catch return quickjs.Value.exception;
+    if (kind == .ui or kind == .focus or kind == .mouse or kind == .wheel or kind == .keyboard or kind == .input or kind == .composition) {
+        const view = optionValueOrNull(ctx, args, "view");
+        if (!view.isNull() and !view.isObject()) {
+            view.deinit(ctx);
+            _ = ctx.throwTypeError("Failed to construct 'UIEvent': member view is not of type Window.");
+            return quickjs.Value.exception;
+        }
+        obj.setPropertyStr(ctx, "view", view) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "detail", quickjs.Value.initFloat64(optionNumber(ctx, args, "detail"))) catch return quickjs.Value.exception;
+    }
+    if (kind == .focus) {
+        obj.setPropertyStr(ctx, "relatedTarget", optionValueOrNull(ctx, args, "relatedTarget")) catch return quickjs.Value.exception;
     }
     if (kind == .custom) {
         obj.setPropertyStr(ctx, "detail", optionValueOrNull(ctx, args, "detail")) catch return quickjs.Value.exception;
     }
-    if (kind == .mouse) {
+    if (kind == .mouse or kind == .wheel) {
         obj.setPropertyStr(ctx, "screenX", quickjs.Value.initFloat64(optionNumber(ctx, args, "screenX"))) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "screenY", quickjs.Value.initFloat64(optionNumber(ctx, args, "screenY"))) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "clientX", quickjs.Value.initFloat64(optionNumber(ctx, args, "clientX"))) catch return quickjs.Value.exception;
@@ -1384,10 +1460,25 @@ fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []
         obj.setPropertyStr(ctx, "buttons", quickjs.Value.initFloat64(optionNumber(ctx, args, "buttons"))) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "relatedTarget", optionValueOrNull(ctx, args, "relatedTarget")) catch return quickjs.Value.exception;
     }
+    if (kind == .wheel) {
+        obj.setPropertyStr(ctx, "deltaX", quickjs.Value.initFloat64(optionNumber(ctx, args, "deltaX"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "deltaY", quickjs.Value.initFloat64(optionNumber(ctx, args, "deltaY"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "deltaZ", quickjs.Value.initFloat64(optionNumber(ctx, args, "deltaZ"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "deltaMode", quickjs.Value.initFloat64(optionNumber(ctx, args, "deltaMode"))) catch return quickjs.Value.exception;
+    }
     if (kind == .keyboard) {
+        obj.setPropertyStr(ctx, "ctrlKey", quickjs.Value.initBool(optionBool(ctx, args, "ctrlKey"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "altKey", quickjs.Value.initBool(optionBool(ctx, args, "altKey"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "shiftKey", quickjs.Value.initBool(optionBool(ctx, args, "shiftKey"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "metaKey", quickjs.Value.initBool(optionBool(ctx, args, "metaKey"))) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "key", optionString(ctx, args, "key", "")) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "code", optionString(ctx, args, "code", "")) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "location", quickjs.Value.initFloat64(optionNumber(ctx, args, "location"))) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "repeat", quickjs.Value.initBool(optionBool(ctx, args, "repeat"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "isComposing", quickjs.Value.initBool(optionBool(ctx, args, "isComposing"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "charCode", quickjs.Value.initFloat64(optionNumber(ctx, args, "charCode"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "keyCode", quickjs.Value.initFloat64(optionNumber(ctx, args, "keyCode"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "which", quickjs.Value.initFloat64(optionNumber(ctx, args, "which"))) catch return quickjs.Value.exception;
     }
     if (kind == .error_event) {
         obj.setPropertyStr(ctx, "message", optionString(ctx, args, "message", "")) catch return quickjs.Value.exception;
@@ -3950,12 +4041,21 @@ fn jsDocumentCreateEvent(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args:
     if (std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "customevent")) {
         kind = .custom;
         ctor_name = "CustomEvent";
+    } else if (std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "gamepadevent") or std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "gamepadevents")) {
+        kind = .event;
+        ctor_name = "GamepadEvent";
     } else if (std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "uievent") or std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "uievents")) {
         kind = .ui;
         ctor_name = "UIEvent";
+    } else if (std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "focusevent") or std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "focusevents")) {
+        kind = .focus;
+        ctor_name = "FocusEvent";
     } else if (std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "mouseevent") or std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "mouseevents")) {
         kind = .mouse;
         ctor_name = "MouseEvent";
+    } else if (std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "wheelevent") or std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "wheelevents")) {
+        kind = .wheel;
+        ctor_name = "WheelEvent";
     } else if (std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "keyboardevent") or std.ascii.eqlIgnoreCase(interface_name.ptr[0..interface_name.len], "keyboardevents")) {
         kind = .keyboard;
         ctor_name = "KeyboardEvent";
@@ -6014,6 +6114,13 @@ fn createWindowObject(ctx: *quickjs.Context, window_handle: u64, document: quick
         "clearImmediate",
         "localStorage",
         "sessionStorage",
+        "Object",
+        "Function",
+        "Array",
+        "Promise",
+        "Proxy",
+        "Error",
+        "TypeError",
         "URL",
         "URLSearchParams",
         "fetch",
@@ -6023,12 +6130,17 @@ fn createWindowObject(ctx: *quickjs.Context, window_handle: u64, document: quick
         "Blob",
         "File",
         "FormData",
+        "eval",
         "Event",
         "EventTarget",
         "CustomEvent",
+        "GamepadEvent",
         "UIEvent",
+        "FocusEvent",
         "MouseEvent",
+        "WheelEvent",
         "KeyboardEvent",
+        "CompositionEvent",
         "ErrorEvent",
         "XMLHttpRequest",
     }) |name| {
@@ -6087,17 +6199,39 @@ fn setNamedPropertyIfMissing(
     if (value.len == 0) return;
 
     const key = value.ptr;
+    const assigned_value = namedPropertyValue(ctx, element);
+    defer assigned_value.deinit(ctx);
+
     const existing_window = window.getPropertyStr(ctx, key);
     defer existing_window.deinit(ctx);
     if (!existing_window.isException() and shouldAssignNamedProperty(ctx, existing_window)) {
-        window.setPropertyStr(ctx, key, element.dup(ctx)) catch {};
+        window.setPropertyStr(ctx, key, assigned_value.dup(ctx)) catch {};
     }
 
     const existing_global = global.getPropertyStr(ctx, key);
     defer existing_global.deinit(ctx);
     if (!existing_global.isException() and shouldAssignNamedProperty(ctx, existing_global)) {
-        global.setPropertyStr(ctx, key, element.dup(ctx)) catch {};
+        global.setPropertyStr(ctx, key, assigned_value.dup(ctx)) catch {};
     }
+}
+
+fn namedPropertyValue(ctx: *quickjs.Context, element: quickjs.Value) quickjs.Value {
+    const local_name = element.getPropertyStr(ctx, "localName");
+    defer local_name.deinit(ctx);
+    if (!local_name.isException()) {
+        if (local_name.toCStringLen(ctx)) |name_text| {
+            defer ctx.freeCString(name_text.ptr);
+            const lower = name_text.ptr[0..name_text.len];
+            if (std.ascii.eqlIgnoreCase(lower, "iframe")) {
+                const frame_window = element.getPropertyStr(ctx, "contentWindow");
+                if (!frame_window.isException() and frame_window.isObject()) {
+                    return frame_window;
+                }
+                frame_window.deinit(ctx);
+            }
+        }
+    }
+    return element.dup(ctx);
 }
 
 fn shouldAssignNamedProperty(ctx: *quickjs.Context, existing: quickjs.Value) bool {
@@ -7120,24 +7254,8 @@ fn removeListenerByCallbackAndCapture(ctx: *quickjs.Context, list: quickjs.Value
     setArrayLength(ctx, list, write);
 }
 
-fn dispatchListenerErrorEvent(ctx: *quickjs.Context, callback: quickjs.Value, thrown: quickjs.Value) void {
-    const callback_global = callback.getPropertyStr(ctx, "__zigListenerGlobal");
-    defer callback_global.deinit(ctx);
-
-    const global = ctx.getGlobalObject();
-    defer global.deinit(ctx);
-
-    const target = if (!callback_global.isException() and callback_global.isObject())
-        callback_global.dup(ctx)
-    else blk: {
-        const window = global.getPropertyStr(ctx, "window");
-        defer window.deinit(ctx);
-        if (!window.isException() and window.isObject()) break :blk window.dup(ctx);
-        break :blk quickjs.Value.undefined;
-    };
-    defer target.deinit(ctx);
+fn dispatchListenerErrorEventToTarget(ctx: *quickjs.Context, global: quickjs.Value, target: quickjs.Value, thrown: quickjs.Value) void {
     if (!target.isObject()) return;
-
     const event_ctor = global.getPropertyStr(ctx, "Event");
     defer event_ctor.deinit(ctx);
     if (event_ctor.isException() or !event_ctor.isObject()) return;
@@ -7162,6 +7280,38 @@ fn dispatchListenerErrorEvent(ctx: *quickjs.Context, callback: quickjs.Value, th
     const dispatched = jsEventTargetDispatchEvent(ctx, target, @ptrCast(&[_]quickjs.Value{error_event}));
     defer dispatched.deinit(ctx);
     if (dispatched.isException()) _ = ctx.getException();
+}
+
+fn dispatchListenerErrorEvent(ctx: *quickjs.Context, callback: quickjs.Value, thrown: quickjs.Value) void {
+    const callback_global = callback.getPropertyStr(ctx, "__zigListenerGlobal");
+    defer callback_global.deinit(ctx);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    if (!callback_global.isException() and callback_global.isObject()) {
+        dispatchListenerErrorEventToTarget(ctx, global, callback_global, thrown);
+        return;
+    }
+
+    const window = global.getPropertyStr(ctx, "window");
+    defer window.deinit(ctx);
+    if (!window.isException() and window.isObject()) {
+        dispatchListenerErrorEventToTarget(ctx, global, window, thrown);
+
+        const frames = window.getPropertyStr(ctx, "frames");
+        defer frames.deinit(ctx);
+        if (!frames.isException() and frames.isObject()) {
+            const len = arrayLength(ctx, frames);
+            for (0..len) |index_usize| {
+                const frame_window = frames.getPropertyUint32(ctx, @intCast(index_usize));
+                defer frame_window.deinit(ctx);
+                if (!frame_window.isException() and frame_window.isObject()) {
+                    dispatchListenerErrorEventToTarget(ctx, global, frame_window, thrown);
+                }
+            }
+        }
+    }
 }
 
 fn setLegacyGlobalEvent(ctx: *quickjs.Context, global: quickjs.Value, event_value: quickjs.Value) void {
@@ -7240,7 +7390,11 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
             else blk: {
                 const handle_event = callback.getPropertyStr(ctx, "handleEvent");
                 defer handle_event.deinit(ctx);
-                if (!handle_event.isFunction(ctx)) break :blk quickjs.Value.undefined;
+                if (handle_event.isException()) break :blk quickjs.Value.exception;
+                if (!handle_event.isFunction(ctx)) {
+                    _ = ctx.throwTypeError("EventListener.handleEvent is not callable");
+                    break :blk quickjs.Value.exception;
+                }
                 break :blk handle_event.call(ctx, callback, &call_args);
             };
             defer result.deinit(ctx);

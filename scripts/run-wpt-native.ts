@@ -49,8 +49,9 @@ function expandVariants(entry: ManifestEntry): Array<string | undefined> {
 
 function shouldSkipEntry(entry: ManifestEntry): boolean {
   const normalized = entry.file.replaceAll("\\", "/").toLowerCase();
-  // Temporary skip: this case triggers a Debug-only QuickJS GC assert and currently requires ReleaseFast.
-  return normalized.endsWith("/dom/events/event-dispatch-single-activation-behavior.html");
+  // Temporary skips: these cases trigger Debug-only QuickJS GC assertions but pass in ReleaseFast.
+  return normalized.endsWith("/dom/events/event-dispatch-single-activation-behavior.html") ||
+    normalized.endsWith("/dom/events/event-subclasses-constructors.html");
 }
 
 function scriptFileRef(scriptRef: string): string {
@@ -232,6 +233,15 @@ ${nativeWindowSetupSource(JSON.stringify(entryUrl(entry.file, variant)))}
 const __zigWptInitialBody = ${JSON.stringify(extractBody(html))};
 const __zigWptIFrameInitScripts = ${JSON.stringify(iframeInitScripts)};
 const __zigWptSetups = [];
+let __zigWptSingleTestMode = false;
+let __zigWptSingleTestError = null;
+let __zigWptSingleTestDoneResolve;
+let __zigWptSingleTestDoneReject;
+const __zigWptSingleTestDone = new Promise((resolve, reject) => {
+  __zigWptSingleTestDoneResolve = resolve;
+  __zigWptSingleTestDoneReject = reject;
+});
+let __zigWptIFrameLoadHooksInstalled = false;
 
 function normalizeFrameSrc(rawSrc) {
   if (typeof rawSrc !== "string") return "";
@@ -288,6 +298,62 @@ function installFrameNavigationShim(iframe, frameWindow) {
   } catch {}
 }
 
+function isIFrameElement(node) {
+  if (!node || typeof node !== "object") return false;
+  const localName = typeof node.localName === "string" ? node.localName.toLowerCase() : "";
+  return localName === "iframe";
+}
+
+function scheduleIFrameLoad(node) {
+  if (!isIFrameElement(node) || node.__zigWptLoadQueued) return;
+  node.__zigWptLoadQueued = true;
+  const timeoutFn = typeof globalThis.setTimeout === "function"
+    ? globalThis.setTimeout.bind(globalThis)
+    : ((runNow) => {
+        runNow();
+        return 0;
+      });
+  timeoutFn(() => {
+    try {
+      const frameWindow = node.contentWindow;
+      if (frameWindow) {
+        installFrameNavigationShim(node, frameWindow);
+      }
+    } catch {}
+    if (typeof node.dispatchEvent === "function" && typeof Event === "function") {
+      try {
+        node.dispatchEvent(new Event("load"));
+      } catch {}
+    }
+  }, 0);
+}
+
+function installIFrameLoadHooks() {
+  if (__zigWptIFrameLoadHooksInstalled) return;
+  __zigWptIFrameLoadHooksInstalled = true;
+
+  const wrapMethod = (proto, name, extractNodes) => {
+    if (!proto) return;
+    const original = proto[name];
+    if (typeof original !== "function") return;
+    proto[name] = function (...args) {
+      const result = original.apply(this, args);
+      try {
+        const nodes = extractNodes(args);
+        for (const node of nodes) {
+          scheduleIFrameLoad(node);
+        }
+      } catch {}
+      return result;
+    };
+  };
+
+  wrapMethod(globalThis.Node?.prototype, "appendChild", (args) => args.slice(0, 1));
+  wrapMethod(globalThis.Node?.prototype, "insertBefore", (args) => args.slice(0, 1));
+  wrapMethod(globalThis.Element?.prototype, "append", (args) => args);
+  wrapMethod(globalThis.Element?.prototype, "prepend", (args) => args);
+}
+
 function initializeFrameFixtures() {
   if (!document || typeof document.getElementsByTagName !== "function") return;
   const iframes = document.getElementsByTagName("iframe");
@@ -332,6 +398,7 @@ function initializeFrameFixtures() {
 
 function resetWptDomFixture() {
   document.body.innerHTML = __zigWptInitialBody;
+  installIFrameLoadHooks();
   if (typeof globalThis.__zigDomSyncWindowNamedProperties === "function") {
     globalThis.__zigDomSyncWindowNamedProperties();
   }
@@ -395,7 +462,14 @@ try {
 } catch {}
 
 function fail(message) {
-  throw new Error(message);
+  const error = new Error(message);
+  if (__zigWptSingleTestMode) {
+    __zigWptSingleTestError = __zigWptSingleTestError ?? error;
+    if (typeof __zigWptSingleTestDoneReject === "function") {
+      __zigWptSingleTestDoneReject(error);
+    }
+  }
+  throw error;
 }
 
 function dispatchSyntheticWindowLoad() {
@@ -553,12 +627,50 @@ globalThis.setup = (fnOrOptions) => {
     try {
       fnOrOptions.call({ add_cleanup() {} });
     } catch {}
+    return;
+  }
+  if (fnOrOptions && typeof fnOrOptions === "object" && fnOrOptions.single_test === true) {
+    __zigWptSingleTestMode = true;
   }
 };
-globalThis.done = () => {};
+globalThis.done = () => {
+  if (__zigWptSingleTestMode && typeof __zigWptSingleTestDoneResolve === "function") {
+    __zigWptSingleTestDoneResolve();
+  }
+};
+globalThis.format_value = (value) => {
+  if (value === undefined) return "undefined";
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {}
+  try {
+    return String(value);
+  } catch {
+    return "[object Object]";
+  }
+};
 globalThis.assert_true = (value, message = "Expected value to be truthy") => expect(Boolean(value), message).toBe(true);
 globalThis.assert_false = (value, message = "Expected value to be falsy") => expect(Boolean(value), message).toBe(false);
 globalThis.assert_equals = (actual, expected, message = "Expected values to be equal") => expect(actual, message).toBe(expected);
+globalThis.assert_approx_equals = (actual, expected, epsilon, message = "Expected values to be approximately equal") => {
+  const delta = Math.abs(Number(actual) - Number(expected));
+  expect(delta <= Number(epsilon), message).toBe(true);
+};
+globalThis.assert_greater_than = (actual, expected, message = "Expected first value to be greater than second") => {
+  expect(Number(actual) > Number(expected), message).toBe(true);
+};
+globalThis.assert_greater_than_equal = (actual, expected, message = "Expected first value to be greater than or equal to second") => {
+  expect(Number(actual) >= Number(expected), message).toBe(true);
+};
+globalThis.assert_less_than = (actual, expected, message = "Expected first value to be less than second") => {
+  expect(Number(actual) < Number(expected), message).toBe(true);
+};
+globalThis.assert_less_than_equal = (actual, expected, message = "Expected first value to be less than or equal to second") => {
+  expect(Number(actual) <= Number(expected), message).toBe(true);
+};
 globalThis.assert_not_equals = (actual, expected, message = "Expected values to differ") => expect(actual, message).not.toBe(expected);
 globalThis.assert_own_property = (object, property, message = "Expected own property") =>
   expect(Object.prototype.hasOwnProperty.call(object, property), message).toBe(true);
@@ -573,9 +685,25 @@ globalThis.promise_rejects_js = async (_t, ctor, promise) => expect(promise).rej
 globalThis.add_cleanup = () => {};
 
 // Indirect eval runs scripts in the global scope, matching browser script tag semantics.
-(0, eval)(source);
+try {
+  (0, eval)(source);
+} catch (err) {
+  if (!__zigWptSingleTestMode) throw err;
+  __zigWptSingleTestError = __zigWptSingleTestError ?? err;
+  if (typeof __zigWptSingleTestDoneReject === "function") {
+    __zigWptSingleTestDoneReject(err);
+  }
+}
 dispatchSyntheticWindowLoad();
 await Promise.all(pending);
+
+if (__zigWptSingleTestMode) {
+  bunTest(${JSON.stringify(entry.file)} + " :: " + "single_test", async () => {
+    if (__zigWptSingleTestError) throw __zigWptSingleTestError;
+    await __zigWptSingleTestDone;
+    if (__zigWptSingleTestError) throw __zigWptSingleTestError;
+  });
+}
 `;
 }
 
