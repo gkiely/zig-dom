@@ -214,6 +214,7 @@ pub const HostRunner = struct {
             \\    if (doc.body) doc.body.innerHTML = "";
             \\    if (doc.head) doc.head.innerHTML = "";
             \\  } catch {}
+            \\  try { doc.__zigCookie = ""; } catch {}
             \\  try { globalThis.localStorage?.clear?.(); } catch {}
             \\  try { globalThis.sessionStorage?.clear?.(); } catch {}
             \\});

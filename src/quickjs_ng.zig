@@ -96,6 +96,7 @@ pub const Runtime = struct {
             active_mocks.clearHooks();
             active_mocks.clearMockStates();
         }
+        platform.reset(self.ctx);
         self.clearRuntimeGlobalsForShutdown();
         self.rt.runGC();
         self.ctx.deinit();

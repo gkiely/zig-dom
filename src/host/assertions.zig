@@ -433,7 +433,7 @@ fn jsMatcher(
         .toHaveTextContent => matcherToHaveTextContent(ctx, received, args),
         .toHaveBeenNthCalledWith => matcherToHaveBeenNthCalledWith(ctx, received, args),
         .toBeTruthy => matcherToBeTruthy(ctx, received),
-        .toBeTrue => matcherToBeTrue(received),
+        .toBeTrue => matcherToBeTrue(ctx, received),
         .toBeNull => matcherToBeNull(received),
         .toBeDefined => matcherToBeDefined(received),
         .toBeUndefined => matcherToBeUndefined(received),
@@ -840,8 +840,8 @@ fn matcherToBeTruthy(ctx: *quickjs.Context, received: quickjs.Value) !bool {
     return received.toBool(ctx) catch false;
 }
 
-fn matcherToBeTrue(received: quickjs.Value) !bool {
-    return received.isBool() and received.toBoolNoCtx();
+fn matcherToBeTrue(ctx: *quickjs.Context, received: quickjs.Value) !bool {
+    return received.isBool() and (received.toBool(ctx) catch false);
 }
 
 fn matcherToBeNull(received: quickjs.Value) !bool {

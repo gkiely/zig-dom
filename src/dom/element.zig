@@ -11,6 +11,8 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installAccessor(ctx, proto, "className", callbacks.classNameGet, callbacks.classNameSet);
     try bindings.installAccessor(ctx, proto, "title", callbacks.titleGet, callbacks.titleSet);
     try bindings.installAccessor(ctx, proto, "htmlFor", callbacks.htmlForGet, callbacks.htmlForSet);
+    try bindings.installGetter(ctx, proto, "control", callbacks.controlGet);
+    try bindings.installGetter(ctx, proto, "labels", callbacks.labelsGet);
     try bindings.installAccessor(ctx, proto, "innerHTML", callbacks.innerHtmlGet, callbacks.innerHtmlSet);
     try bindings.installGetter(ctx, proto, "outerHTML", callbacks.outerHtmlGet);
     try bindings.installGetter(ctx, proto, "style", callbacks.styleGet);
@@ -45,4 +47,5 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installGetter(ctx, proto, "form", callbacks.formGet);
     try bindings.installGetter(ctx, proto, "elements", callbacks.formElementsGet);
     try bindings.installGetter(ctx, proto, "options", callbacks.optionsGet);
+    try bindings.installMethod(ctx, proto, "reset", callbacks.reset, 0);
 }

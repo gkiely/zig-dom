@@ -928,75 +928,32 @@ fn serializeNode(window: *Window, node_handle: u64, output: *std.ArrayListUnmana
     }
 }
 
-const SimpleSelector = struct {
-    tag: ?[]const u8 = null,
-    id: ?[]const u8 = null,
-    class_name: ?[]const u8 = null,
-    attr_name: ?[]const u8 = null,
-    attr_value: ?[]const u8 = null,
-    any: bool = false,
+const SelectorCombinator = enum {
+    descendant,
+    child,
+    adjacent,
+    sibling,
 };
 
-fn parseSimpleSelector(input: []const u8) SimpleSelector {
-    var selector = SimpleSelector{};
-    const trimmed = std.mem.trim(u8, input, " \t\n\r\x0c");
-    if (trimmed.len == 0) return selector;
-    if (std.mem.eql(u8, trimmed, "*")) {
-        selector.any = true;
-        return selector;
-    }
+const SelectorStep = struct {
+    // Relation between the previous selector step and this one.
+    combinator: SelectorCombinator = .descendant,
+    compound: []const u8,
+};
 
-    var i: usize = 0;
-    while (i < trimmed.len and trimmed[i] != '#' and trimmed[i] != '.' and trimmed[i] != '[') {
-        i += 1;
-    }
-    if (i > 0) selector.tag = trimmed[0..i];
+const SelectorChain = struct {
+    steps: []SelectorStep,
+};
 
-    while (i < trimmed.len) {
-        switch (trimmed[i]) {
-            '#' => {
-                i += 1;
-                const start = i;
-                while (i < trimmed.len and trimmed[i] != '.' and trimmed[i] != '[' and trimmed[i] != '#') {
-                    i += 1;
-                }
-                selector.id = trimmed[start..i];
-            },
-            '.' => {
-                i += 1;
-                const start = i;
-                while (i < trimmed.len and trimmed[i] != '.' and trimmed[i] != '[' and trimmed[i] != '#') {
-                    i += 1;
-                }
-                selector.class_name = trimmed[start..i];
-            },
-            '[' => {
-                i += 1;
-                const name_start = i;
-                while (i < trimmed.len and trimmed[i] != '=' and trimmed[i] != ']') {
-                    i += 1;
-                }
-                selector.attr_name = std.mem.trim(u8, trimmed[name_start..i], " \t\n\r\x0c");
-                if (i < trimmed.len and trimmed[i] == '=') {
-                    i += 1;
-                    const value_start = i;
-                    while (i < trimmed.len and trimmed[i] != ']') {
-                        i += 1;
-                    }
-                    const value = std.mem.trim(u8, trimmed[value_start..i], " \t\n\r\x0c\"");
-                    selector.attr_value = value;
-                }
-                while (i < trimmed.len and trimmed[i] != ']') {
-                    i += 1;
-                }
-                if (i < trimmed.len and trimmed[i] == ']') i += 1;
-            },
-            else => i += 1,
-        }
-    }
-
-    return selector;
-}
+const AttrOperator = enum {
+    exists,
+    equals,
+    includes,
+    dash_match,
+    prefix,
+    suffix,
+    substring,
+};
 
 fn classContains(class_attr: []const u8, expected: []const u8) bool {
     var iter = std.mem.tokenizeAny(u8, class_attr, " \t\n\r\x0c");
@@ -1006,104 +963,576 @@ fn classContains(class_attr: []const u8, expected: []const u8) bool {
     return false;
 }
 
-fn matchesSimpleSelector(window: *Window, node_handle: u64, selector: SimpleSelector) bool {
-    const node = resolveNode(window, node_handle) orelse return false;
-    if (node.kind != .element) return false;
+fn isSelectorWhitespace(ch: u8) bool {
+    return ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r' or ch == '\x0c';
+}
 
-    if (!selector.any) {
-        if (selector.tag) |tag| {
-            if (!std.ascii.eqlIgnoreCase(node.name, tag)) {
-                return false;
+fn isCombinatorChar(ch: u8) bool {
+    return ch == '>' or ch == '+' or ch == '~';
+}
+
+fn selectorCombinatorFromChar(ch: u8) SelectorCombinator {
+    return switch (ch) {
+        '>' => .child,
+        '+' => .adjacent,
+        '~' => .sibling,
+        else => .descendant,
+    };
+}
+
+fn isSelectorIdentChar(ch: u8) bool {
+    return std.ascii.isAlphanumeric(ch) or ch == '-' or ch == '_';
+}
+
+fn consumeSelectorWhitespace(input: []const u8, cursor: *usize) bool {
+    const start = cursor.*;
+    while (cursor.* < input.len and isSelectorWhitespace(input[cursor.*])) {
+        cursor.* += 1;
+    }
+    return cursor.* > start;
+}
+
+fn parseSelectorChain(group: []const u8, output: *std.ArrayListUnmanaged(SelectorStep)) !void {
+    var i: usize = 0;
+    var pending_combinator: ?SelectorCombinator = null;
+
+    while (i < group.len) {
+        const had_whitespace = consumeSelectorWhitespace(group, &i);
+        if (i >= group.len) break;
+
+        if (output.items.len > 0) {
+            if (isCombinatorChar(group[i])) {
+                pending_combinator = selectorCombinatorFromChar(group[i]);
+                i += 1;
+                _ = consumeSelectorWhitespace(group, &i);
+            } else if (had_whitespace and pending_combinator == null) {
+                pending_combinator = .descendant;
             }
         }
+
+        const start = i;
+        var bracket_depth: usize = 0;
+        var paren_depth: usize = 0;
+        var quote: u8 = 0;
+        while (i < group.len) {
+            const ch = group[i];
+            if (quote != 0) {
+                if (ch == quote) quote = 0;
+                i += 1;
+                continue;
+            }
+            switch (ch) {
+                '\'', '"' => {
+                    quote = ch;
+                    i += 1;
+                },
+                '[' => {
+                    bracket_depth += 1;
+                    i += 1;
+                },
+                ']' => {
+                    if (bracket_depth > 0) bracket_depth -= 1;
+                    i += 1;
+                },
+                '(' => {
+                    paren_depth += 1;
+                    i += 1;
+                },
+                ')' => {
+                    if (paren_depth > 0) paren_depth -= 1;
+                    i += 1;
+                },
+                '>', '+', '~' => {
+                    if (bracket_depth == 0 and paren_depth == 0) break;
+                    i += 1;
+                },
+                ' ', '\t', '\n', '\r', '\x0c' => {
+                    if (bracket_depth == 0 and paren_depth == 0) break;
+                    i += 1;
+                },
+                else => i += 1,
+            }
+        }
+
+        const compound = std.mem.trim(u8, group[start..i], " \t\n\r\x0c");
+        if (compound.len == 0) continue;
+        try output.append(c_allocator, .{
+            .combinator = pending_combinator orelse .descendant,
+            .compound = compound,
+        });
+        pending_combinator = null;
+    }
+}
+
+fn deinitSelectorChains(chains: *std.ArrayListUnmanaged(SelectorChain)) void {
+    for (chains.items) |chain| {
+        c_allocator.free(chain.steps);
+    }
+    chains.deinit(c_allocator);
+}
+
+fn parseSelectorList(query: []const u8, output: *std.ArrayListUnmanaged(SelectorChain)) !void {
+    var start: usize = 0;
+    var i: usize = 0;
+    var bracket_depth: usize = 0;
+    var paren_depth: usize = 0;
+    var quote: u8 = 0;
+
+    while (i <= query.len) {
+        const at_end = i == query.len;
+        var split = at_end;
+
+        if (!at_end) {
+            const ch = query[i];
+            if (quote != 0) {
+                if (ch == quote) quote = 0;
+            } else {
+                switch (ch) {
+                    '\'', '"' => quote = ch,
+                    '[' => bracket_depth += 1,
+                    ']' => {
+                        if (bracket_depth > 0) bracket_depth -= 1;
+                    },
+                    '(' => paren_depth += 1,
+                    ')' => {
+                        if (paren_depth > 0) paren_depth -= 1;
+                    },
+                    ',' => {
+                        if (bracket_depth == 0 and paren_depth == 0) split = true;
+                    },
+                    else => {},
+                }
+            }
+        }
+
+        if (split) {
+            const group = std.mem.trim(u8, query[start..i], " \t\n\r\x0c");
+            if (group.len > 0) {
+                var steps: std.ArrayListUnmanaged(SelectorStep) = .empty;
+                defer steps.deinit(c_allocator);
+                try parseSelectorChain(group, &steps);
+                if (steps.items.len > 0) {
+                    const owned_steps = try c_allocator.dupe(SelectorStep, steps.items);
+                    try output.append(c_allocator, .{ .steps = owned_steps });
+                }
+            }
+            start = i + 1;
+        }
+
+        i += 1;
+    }
+}
+
+fn previousElementSibling(window: *Window, node_handle: u64) u64 {
+    const node = resolveNode(window, node_handle) orelse return 0;
+    var cursor = node.prev_sibling;
+    while (cursor != 0) {
+        const candidate = resolveNode(window, cursor) orelse return 0;
+        if (candidate.kind == .element) return cursor;
+        cursor = candidate.prev_sibling;
+    }
+    return 0;
+}
+
+fn elementParent(window: *Window, node_handle: u64) u64 {
+    const node = resolveNode(window, node_handle) orelse return 0;
+    var cursor = node.parent;
+    while (cursor != 0) {
+        const candidate = resolveNode(window, cursor) orelse return 0;
+        if (candidate.kind == .element) return cursor;
+        cursor = candidate.parent;
+    }
+    return 0;
+}
+
+fn isFirstElementChild(window: *Window, node_handle: u64) bool {
+    const node = resolveNode(window, node_handle) orelse return false;
+    const parent = resolveNode(window, node.parent) orelse return false;
+    var cursor = parent.first_child;
+    while (cursor != 0) {
+        const child = resolveNode(window, cursor) orelse return false;
+        if (child.kind == .element) return cursor == node_handle;
+        cursor = child.next_sibling;
+    }
+    return false;
+}
+
+fn isLastElementChild(window: *Window, node_handle: u64) bool {
+    const node = resolveNode(window, node_handle) orelse return false;
+    const parent = resolveNode(window, node.parent) orelse return false;
+    var cursor = parent.last_child;
+    while (cursor != 0) {
+        const child = resolveNode(window, cursor) orelse return false;
+        if (child.kind == .element) return cursor == node_handle;
+        cursor = child.prev_sibling;
+    }
+    return false;
+}
+
+fn elementChildIndex(window: *Window, node_handle: u64) ?usize {
+    const node = resolveNode(window, node_handle) orelse return null;
+    const parent = resolveNode(window, node.parent) orelse return null;
+    var cursor = parent.first_child;
+    var index: usize = 0;
+    while (cursor != 0) {
+        const child = resolveNode(window, cursor) orelse return null;
+        if (child.kind == .element) {
+            index += 1;
+            if (cursor == node_handle) return index;
+        }
+        cursor = child.next_sibling;
+    }
+    return null;
+}
+
+fn parseIdentifierEnd(input: []const u8, start: usize) usize {
+    var i = start;
+    while (i < input.len and isSelectorIdentChar(input[i])) {
+        i += 1;
+    }
+    return i;
+}
+
+fn parseParenthesized(input: []const u8, open_index: usize, out_end: *usize) ?[]const u8 {
+    if (open_index >= input.len or input[open_index] != '(') return null;
+    var i: usize = open_index + 1;
+    var depth: usize = 1;
+    var quote: u8 = 0;
+    const content_start = i;
+    while (i < input.len) {
+        const ch = input[i];
+        if (quote != 0) {
+            if (ch == quote) quote = 0;
+            i += 1;
+            continue;
+        }
+        switch (ch) {
+            '\'', '"' => {
+                quote = ch;
+                i += 1;
+            },
+            '(' => {
+                depth += 1;
+                i += 1;
+            },
+            ')' => {
+                depth -= 1;
+                if (depth == 0) {
+                    out_end.* = i + 1;
+                    return input[content_start..i];
+                }
+                i += 1;
+            },
+            else => i += 1,
+        }
+    }
+    return null;
+}
+
+fn containsTopLevelCombinatorOrComma(input: []const u8) bool {
+    var i: usize = 0;
+    var bracket_depth: usize = 0;
+    var paren_depth: usize = 0;
+    var quote: u8 = 0;
+    while (i < input.len) : (i += 1) {
+        const ch = input[i];
+        if (quote != 0) {
+            if (ch == quote) quote = 0;
+            continue;
+        }
+        switch (ch) {
+            '\'', '"' => quote = ch,
+            '[' => bracket_depth += 1,
+            ']' => {
+                if (bracket_depth > 0) bracket_depth -= 1;
+            },
+            '(' => paren_depth += 1,
+            ')' => {
+                if (paren_depth > 0) paren_depth -= 1;
+            },
+            ',', '>', '+', '~' => {
+                if (bracket_depth == 0 and paren_depth == 0) return true;
+            },
+            ' ', '\t', '\n', '\r', '\x0c' => {
+                if (bracket_depth == 0 and paren_depth == 0) return true;
+            },
+            else => {},
+        }
+    }
+    return false;
+}
+
+fn attributeMatches(node: *Node, name: []const u8, op: AttrOperator, expected: []const u8) bool {
+    const actual = getAttribute(node, name) orelse return false;
+    return switch (op) {
+        .exists => true,
+        .equals => std.mem.eql(u8, actual, expected),
+        .includes => classContains(actual, expected),
+        .dash_match => std.mem.eql(u8, actual, expected) or
+            (actual.len > expected.len and std.mem.startsWith(u8, actual, expected) and actual[expected.len] == '-'),
+        .prefix => std.mem.startsWith(u8, actual, expected),
+        .suffix => std.mem.endsWith(u8, actual, expected),
+        .substring => std.mem.indexOf(u8, actual, expected) != null,
+    };
+}
+
+fn matchesCompoundSelector(window: *Window, node_handle: u64, compound_raw: []const u8) bool {
+    const node = resolveNode(window, node_handle) orelse return false;
+    if (node.kind != .element) return false;
+    const compound = std.mem.trim(u8, compound_raw, " \t\n\r\x0c");
+    if (compound.len == 0) return false;
+
+    var i: usize = 0;
+    if (compound[i] == '*') {
+        i += 1;
+    } else if (isSelectorIdentChar(compound[i])) {
+        const tag_end = parseIdentifierEnd(compound, i);
+        if (!std.ascii.eqlIgnoreCase(node.name, compound[i..tag_end])) return false;
+        i = tag_end;
     }
 
-    if (selector.id) |expected_id| {
-        const actual = getAttribute(node, "id") orelse return false;
-        if (!std.mem.eql(u8, actual, expected_id)) return false;
-    }
+    while (i < compound.len) {
+        const ch = compound[i];
+        switch (ch) {
+            '#' => {
+                i += 1;
+                const end = parseIdentifierEnd(compound, i);
+                if (end == i) return false;
+                const actual = getAttribute(node, "id") orelse return false;
+                if (!std.mem.eql(u8, actual, compound[i..end])) return false;
+                i = end;
+            },
+            '.' => {
+                i += 1;
+                const end = parseIdentifierEnd(compound, i);
+                if (end == i) return false;
+                const class_attr = getAttribute(node, "class") orelse return false;
+                if (!classContains(class_attr, compound[i..end])) return false;
+                i = end;
+            },
+            '[' => {
+                var end = i + 1;
+                var quote: u8 = 0;
+                while (end < compound.len) : (end += 1) {
+                    const attr_ch = compound[end];
+                    if (quote != 0) {
+                        if (attr_ch == quote) quote = 0;
+                        continue;
+                    }
+                    if (attr_ch == '\'' or attr_ch == '"') {
+                        quote = attr_ch;
+                        continue;
+                    }
+                    if (attr_ch == ']') break;
+                }
+                if (end >= compound.len or compound[end] != ']') return false;
 
-    if (selector.class_name) |expected_class| {
-        const class_attr = getAttribute(node, "class") orelse return false;
-        if (!classContains(class_attr, expected_class)) return false;
-    }
+                const attr_expr = std.mem.trim(u8, compound[i + 1 .. end], " \t\n\r\x0c");
+                if (attr_expr.len == 0) return false;
 
-    if (selector.attr_name) |attr_name| {
-        const actual = getAttribute(node, attr_name) orelse return false;
-        if (selector.attr_value) |expected_value| {
-            if (!std.mem.eql(u8, actual, expected_value)) return false;
+                var attr_i: usize = 0;
+                _ = consumeSelectorWhitespace(attr_expr, &attr_i);
+                const name_start = attr_i;
+                while (attr_i < attr_expr.len and isSelectorIdentChar(attr_expr[attr_i])) {
+                    attr_i += 1;
+                }
+                if (attr_i == name_start) return false;
+                const attr_name = attr_expr[name_start..attr_i];
+
+                _ = consumeSelectorWhitespace(attr_expr, &attr_i);
+                var op: AttrOperator = .exists;
+                var value: []const u8 = "";
+                if (attr_i < attr_expr.len) {
+                    if (attr_expr[attr_i] == '=') {
+                        op = .equals;
+                        attr_i += 1;
+                    } else if (attr_i + 1 < attr_expr.len and attr_expr[attr_i + 1] == '=') {
+                        op = switch (attr_expr[attr_i]) {
+                            '~' => .includes,
+                            '|' => .dash_match,
+                            '^' => .prefix,
+                            '$' => .suffix,
+                            '*' => .substring,
+                            else => return false,
+                        };
+                        attr_i += 2;
+                    } else {
+                        return false;
+                    }
+
+                    _ = consumeSelectorWhitespace(attr_expr, &attr_i);
+                    if (attr_i >= attr_expr.len) return false;
+                    if (attr_expr[attr_i] == '\'' or attr_expr[attr_i] == '"') {
+                        const quote_ch = attr_expr[attr_i];
+                        attr_i += 1;
+                        const value_start = attr_i;
+                        while (attr_i < attr_expr.len and attr_expr[attr_i] != quote_ch) {
+                            attr_i += 1;
+                        }
+                        if (attr_i >= attr_expr.len) return false;
+                        value = attr_expr[value_start..attr_i];
+                        attr_i += 1;
+                    } else {
+                        const value_start = attr_i;
+                        while (attr_i < attr_expr.len and !isSelectorWhitespace(attr_expr[attr_i])) {
+                            attr_i += 1;
+                        }
+                        value = attr_expr[value_start..attr_i];
+                    }
+
+                    _ = consumeSelectorWhitespace(attr_expr, &attr_i);
+                    if (attr_i != attr_expr.len) return false;
+                }
+
+                if (!attributeMatches(node, attr_name, op, value)) return false;
+                i = end + 1;
+            },
+            ':' => {
+                i += 1;
+                const name_end = parseIdentifierEnd(compound, i);
+                if (name_end == i) return false;
+                const pseudo_name = compound[i..name_end];
+                i = name_end;
+
+                if (std.mem.eql(u8, pseudo_name, "first-child")) {
+                    if (!isFirstElementChild(window, node_handle)) return false;
+                } else if (std.mem.eql(u8, pseudo_name, "last-child")) {
+                    if (!isLastElementChild(window, node_handle)) return false;
+                } else if (std.mem.eql(u8, pseudo_name, "nth-child")) {
+                    if (i >= compound.len or compound[i] != '(') return false;
+                    var close_index: usize = 0;
+                    const inside = parseParenthesized(compound, i, &close_index) orelse return false;
+                    i = close_index;
+                    const ordinal_text = std.mem.trim(u8, inside, " \t\n\r\x0c");
+                    const ordinal = std.fmt.parseUnsigned(usize, ordinal_text, 10) catch return false;
+                    const actual_index = elementChildIndex(window, node_handle) orelse return false;
+                    if (actual_index != ordinal) return false;
+                } else if (std.mem.eql(u8, pseudo_name, "not")) {
+                    if (i >= compound.len or compound[i] != '(') return false;
+                    var close_index: usize = 0;
+                    const inside = parseParenthesized(compound, i, &close_index) orelse return false;
+                    i = close_index;
+                    const inner = std.mem.trim(u8, inside, " \t\n\r\x0c");
+                    if (inner.len == 0 or containsTopLevelCombinatorOrComma(inner)) return false;
+                    if (matchesCompoundSelector(window, node_handle, inner)) return false;
+                } else {
+                    return false;
+                }
+            },
+            '*', ' ', '\t', '\n', '\r', '\x0c' => {
+                // Whitespace within a compound selector is invalid for this parser.
+                return false;
+            },
+            else => return false,
         }
     }
 
     return true;
 }
 
-fn matchesSelectorChain(window: *Window, node_handle: u64, selectors: []const SimpleSelector) bool {
-    if (selectors.len == 0) return false;
-    if (!matchesSimpleSelector(window, node_handle, selectors[selectors.len - 1])) {
+fn matchesSelectorChain(window: *Window, node_handle: u64, steps: []const SelectorStep) bool {
+    if (steps.len == 0) return false;
+    if (!matchesCompoundSelector(window, node_handle, steps[steps.len - 1].compound)) {
         return false;
     }
 
-    if (selectors.len == 1) return true;
+    if (steps.len == 1) return true;
 
     var cursor = node_handle;
-    var index: usize = selectors.len - 1;
+    var index: usize = steps.len - 1;
 
     while (index > 0) {
+        const relation = steps[index].combinator;
         index -= 1;
-        const current = resolveNode(window, cursor) orelse return false;
-        var parent_handle = current.parent;
-        var matched = false;
-        while (parent_handle != 0) {
-            if (matchesSimpleSelector(window, parent_handle, selectors[index])) {
+        switch (relation) {
+            .descendant => {
+                var ancestor = elementParent(window, cursor);
+                var matched = false;
+                while (ancestor != 0) {
+                    if (matchesCompoundSelector(window, ancestor, steps[index].compound)) {
+                        cursor = ancestor;
+                        matched = true;
+                        break;
+                    }
+                    ancestor = elementParent(window, ancestor);
+                }
+                if (!matched) return false;
+            },
+            .child => {
+                const current = resolveNode(window, cursor) orelse return false;
+                const parent_handle = current.parent;
+                if (parent_handle == 0) return false;
+                const parent = resolveNode(window, parent_handle) orelse return false;
+                if (parent.kind != .element) return false;
+                if (!matchesCompoundSelector(window, parent_handle, steps[index].compound)) return false;
                 cursor = parent_handle;
-                matched = true;
-                break;
-            }
-            const parent = resolveNode(window, parent_handle) orelse return false;
-            parent_handle = parent.parent;
+            },
+            .adjacent => {
+                const sibling = previousElementSibling(window, cursor);
+                if (sibling == 0 or !matchesCompoundSelector(window, sibling, steps[index].compound)) return false;
+                cursor = sibling;
+            },
+            .sibling => {
+                var sibling = previousElementSibling(window, cursor);
+                var matched = false;
+                while (sibling != 0) {
+                    if (matchesCompoundSelector(window, sibling, steps[index].compound)) {
+                        cursor = sibling;
+                        matched = true;
+                        break;
+                    }
+                    sibling = previousElementSibling(window, sibling);
+                }
+                if (!matched) return false;
+            },
         }
-        if (!matched) return false;
     }
 
     return true;
 }
 
-fn collectElements(window: *Window, root_handle: u64, selectors: []const SimpleSelector, output: *std.ArrayListUnmanaged(u64)) !void {
+fn matchesAnySelectorChain(window: *Window, node_handle: u64, chains: []const SelectorChain) bool {
+    for (chains) |chain| {
+        if (matchesSelectorChain(window, node_handle, chain.steps)) return true;
+    }
+    return false;
+}
+
+fn collectElements(window: *Window, root_handle: u64, chains: []const SelectorChain, output: *std.ArrayListUnmanaged(u64)) !void {
     const node = resolveNode(window, root_handle) orelse return;
 
-    if (node.kind == .element and matchesSelectorChain(window, root_handle, selectors)) {
+    if (node.kind == .element and matchesAnySelectorChain(window, root_handle, chains)) {
         try output.append(c_allocator, root_handle);
     }
 
     var cursor = node.first_child;
     while (cursor != 0) {
-        try collectElements(window, cursor, selectors, output);
+        try collectElements(window, cursor, chains, output);
         const child = resolveNode(window, cursor) orelse break;
         cursor = child.next_sibling;
     }
 }
 
-fn collectDescendantElements(window: *Window, root_handle: u64, selectors: []const SimpleSelector, output: *std.ArrayListUnmanaged(u64)) !void {
+fn collectDescendantElements(window: *Window, root_handle: u64, chains: []const SelectorChain, output: *std.ArrayListUnmanaged(u64)) !void {
     const root = resolveNode(window, root_handle) orelse return;
     var cursor = root.first_child;
     while (cursor != 0) {
-        try collectElements(window, cursor, selectors, output);
+        try collectElements(window, cursor, chains, output);
         const child = resolveNode(window, cursor) orelse break;
         cursor = child.next_sibling;
     }
 }
 
-fn findFirstElement(window: *Window, root_handle: u64, selectors: []const SimpleSelector) ?u64 {
+fn findFirstElement(window: *Window, root_handle: u64, chains: []const SelectorChain) ?u64 {
     const node = resolveNode(window, root_handle) orelse return null;
 
-    if (node.kind == .element and matchesSelectorChain(window, root_handle, selectors)) {
+    if (node.kind == .element and matchesAnySelectorChain(window, root_handle, chains)) {
         return root_handle;
     }
 
     var cursor = node.first_child;
     while (cursor != 0) {
-        if (findFirstElement(window, cursor, selectors)) |match| {
+        if (findFirstElement(window, cursor, chains)) |match| {
             return match;
         }
         const child = resolveNode(window, cursor) orelse break;
@@ -1113,11 +1542,11 @@ fn findFirstElement(window: *Window, root_handle: u64, selectors: []const Simple
     return null;
 }
 
-fn findFirstDescendantElement(window: *Window, root_handle: u64, selectors: []const SimpleSelector) ?u64 {
+fn findFirstDescendantElement(window: *Window, root_handle: u64, chains: []const SelectorChain) ?u64 {
     const root = resolveNode(window, root_handle) orelse return null;
     var cursor = root.first_child;
     while (cursor != 0) {
-        if (findFirstElement(window, cursor, selectors)) |match| {
+        if (findFirstElement(window, cursor, chains)) |match| {
             return match;
         }
         const child = resolveNode(window, cursor) orelse break;
@@ -1125,13 +1554,6 @@ fn findFirstDescendantElement(window: *Window, root_handle: u64, selectors: []co
     }
 
     return null;
-}
-
-fn parseSelectorList(query: []const u8, output: *std.ArrayListUnmanaged(SimpleSelector)) !void {
-    var token_iter = std.mem.tokenizeAny(u8, query, " \t\n\r\x0c");
-    while (token_iter.next()) |token| {
-        try output.append(c_allocator, parseSimpleSelector(token));
-    }
 }
 
 fn outputString(bytes: []const u8, out_ptr: *[*c]u8, out_len: *usize) u32 {
@@ -1684,8 +2106,8 @@ pub export fn zig_dom_document_query_selector(document: u64, selector_ptr: [*]co
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
 
-    var selectors: std.ArrayListUnmanaged(SimpleSelector) = .empty;
-    defer selectors.deinit(c_allocator);
+    var selectors: std.ArrayListUnmanaged(SelectorChain) = .empty;
+    defer deinitSelectorChains(&selectors);
 
     parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
     if (selectors.items.len == 0) {
@@ -1702,8 +2124,8 @@ pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
 
-    var selectors: std.ArrayListUnmanaged(SimpleSelector) = .empty;
-    defer selectors.deinit(c_allocator);
+    var selectors: std.ArrayListUnmanaged(SelectorChain) = .empty;
+    defer deinitSelectorChains(&selectors);
 
     parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
     if (selectors.items.len == 0) {
@@ -1732,8 +2154,8 @@ pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const 
         return STATUS_INVALID_ARGUMENT;
     }
 
-    var selectors: std.ArrayListUnmanaged(SimpleSelector) = .empty;
-    defer selectors.deinit(c_allocator);
+    var selectors: std.ArrayListUnmanaged(SelectorChain) = .empty;
+    defer deinitSelectorChains(&selectors);
     parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
 
     var matches: std.ArrayListUnmanaged(u64) = .empty;
@@ -1750,8 +2172,8 @@ pub export fn zig_dom_node_query_selector(root: u64, selector_ptr: [*]const u8, 
         return STATUS_INVALID_ARGUMENT;
     }
 
-    var selectors: std.ArrayListUnmanaged(SimpleSelector) = .empty;
-    defer selectors.deinit(c_allocator);
+    var selectors: std.ArrayListUnmanaged(SelectorChain) = .empty;
+    defer deinitSelectorChains(&selectors);
     parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
 
     out_handle.* = findFirstDescendantElement(window, root, selectors.items) orelse 0;

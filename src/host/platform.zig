@@ -1,9 +1,41 @@
 const std = @import("std");
 const quickjs = @import("quickjs");
+const c_allocator = std.heap.c_allocator;
 
 pub const PlatformError = error{
     JSError,
 };
+
+const NativeTimerKind = enum {
+    timeout,
+    interval,
+};
+
+const NativeTimer = struct {
+    id: i32,
+    kind: NativeTimerKind,
+    callback: quickjs.Value,
+    args: std.ArrayListUnmanaged(quickjs.Value) = .empty,
+    remaining_turns: u32,
+    interval_turns: u32,
+
+    fn deinit(self: *NativeTimer, ctx: *quickjs.Context) void {
+        self.callback.deinit(ctx);
+        for (self.args.items) |value| value.deinit(ctx);
+        self.args.deinit(c_allocator);
+    }
+};
+
+var native_timer_ctx: ?*quickjs.Context = null;
+var native_timers: std.ArrayListUnmanaged(NativeTimer) = .empty;
+var native_next_timer_id: i32 = 1;
+
+pub fn reset(ctx: *quickjs.Context) void {
+    if (native_timer_ctx != ctx) return;
+    clearNativeTimers(ctx);
+    native_timer_ctx = null;
+    native_next_timer_id = 1;
+}
 
 pub fn install(ctx: *quickjs.Context) PlatformError!void {
     const global = ctx.getGlobalObject();
@@ -221,13 +253,20 @@ fn installGlobals(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
 }
 
 fn installTimers(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
-    try setFunctionIfMissing(ctx, global, "queueMicrotask", jsCallFirstArg, 1);
-    try setFunctionIfMissing(ctx, global, "setTimeout", jsCallFirstArg, 1);
-    try setFunctionIfMissing(ctx, global, "setInterval", jsCallFirstArg, 1);
-    try setFunctionIfMissing(ctx, global, "setImmediate", jsCallFirstArg, 1);
-    try setFunctionIfMissing(ctx, global, "clearTimeout", jsNoop, 1);
-    try setFunctionIfMissing(ctx, global, "clearInterval", jsNoop, 1);
-    try setFunctionIfMissing(ctx, global, "clearImmediate", jsNoop, 1);
+    if (native_timer_ctx != null and native_timer_ctx != ctx) {
+        // Existing timer state is context-specific. Reset on context switch.
+        native_timers = .empty;
+        native_next_timer_id = 1;
+    }
+    native_timer_ctx = ctx;
+
+    try setFunction(ctx, global, "queueMicrotask", jsQueueMicrotask, 1);
+    try setFunction(ctx, global, "setTimeout", jsSetTimeout, 2);
+    try setFunction(ctx, global, "clearTimeout", jsClearTimeout, 1);
+    try setFunction(ctx, global, "setInterval", jsSetInterval, 2);
+    try setFunction(ctx, global, "clearInterval", jsClearInterval, 1);
+    try setFunction(ctx, global, "setImmediate", jsSetImmediate, 1);
+    try setFunction(ctx, global, "clearImmediate", jsClearImmediate, 1);
 }
 
 fn setFunctionIfMissing(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]const u8, comptime func: quickjs.cfunc.Func, arg_count: i32) PlatformError!void {
@@ -393,22 +432,207 @@ fn jsNoop(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) 
     return quickjs.Value.undefined;
 }
 
-fn jsCallFirstArg(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
-    const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    if (args.len == 0) return quickjs.Value.initInt32(1);
-    const callback = quickjs.Value.fromCVal(args[0]);
-    if (callback.isFunction(ctx)) {
-        var call_args_buf: [8]quickjs.Value = undefined;
-        const count = @min(args.len - 1, call_args_buf.len);
-        for (0..count) |index| {
-            call_args_buf[index] = quickjs.Value.fromCVal(args[index + 1]).dup(ctx);
-        }
-        defer for (call_args_buf[0..count]) |value| value.deinit(ctx);
-        const result = callback.call(ctx, quickjs.Value.undefined, call_args_buf[0..count]);
-        defer result.deinit(ctx);
-        if (result.isException()) return quickjs.Value.exception;
+fn clearNativeTimers(ctx: *quickjs.Context) void {
+    for (native_timers.items) |*timer| timer.deinit(ctx);
+    native_timers.deinit(c_allocator);
+    native_timers = .empty;
+}
+
+fn findNativeTimerIndex(id: i32) ?usize {
+    for (native_timers.items, 0..) |timer, index| {
+        if (timer.id == id) return index;
     }
-    return quickjs.Value.initInt32(1);
+    return null;
+}
+
+fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
+    var timer = native_timers.swapRemove(index);
+    timer.deinit(ctx);
+}
+
+fn delayToTimerTurns(delay_ms: f64) u32 {
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 1;
+    const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 5.0)));
+    return @intCast(@max(1, @min(turns, 10_000)));
+}
+
+fn timerDelayFromArgs(ctx: *quickjs.Context, args: []const quickjs.c.JSValue) u32 {
+    if (args.len < 2) return 1;
+    const delay = quickjs.Value.fromCVal(args[1]).toFloat64(ctx) catch 0;
+    return delayToTimerTurns(delay);
+}
+
+fn enqueueMicrotaskCallback(ctx: *quickjs.Context, callback: quickjs.Value) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const promise_ctor = global.getPropertyStr(ctx, "Promise");
+    defer promise_ctor.deinit(ctx);
+    if (!promise_ctor.isObject()) return false;
+
+    const resolve = promise_ctor.getPropertyStr(ctx, "resolve");
+    defer resolve.deinit(ctx);
+    if (!resolve.isFunction(ctx)) return false;
+
+    const resolved = resolve.call(ctx, promise_ctor, &.{});
+    defer resolved.deinit(ctx);
+    if (resolved.isException()) return false;
+
+    const then = resolved.getPropertyStr(ctx, "then");
+    defer then.deinit(ctx);
+    if (!then.isFunction(ctx)) return false;
+
+    var callback_args = [_]quickjs.Value{callback.dup(ctx)};
+    defer callback_args[0].deinit(ctx);
+    const chained = then.call(ctx, resolved, &callback_args);
+    defer chained.deinit(ctx);
+    return !chained.isException();
+}
+
+fn scheduleNativeTimerTick(ctx: *quickjs.Context, id: i32) bool {
+    var data = [_]quickjs.Value{quickjs.Value.initInt32(id)};
+    defer data[0].deinit(ctx);
+
+    const tick = quickjs.Value.initCFunctionData2(ctx, jsNativeTimerTick, "__zigNativeTimerTick", 0, 0, &data);
+    defer tick.deinit(ctx);
+    if (tick.isException()) return false;
+
+    return enqueueMicrotaskCallback(ctx, tick);
+}
+
+fn invokeNativeTimer(ctx: *quickjs.Context, id: i32) quickjs.Value {
+    const initial_index = findNativeTimerIndex(id) orelse return quickjs.Value.undefined;
+    const timer = &native_timers.items[initial_index];
+    if (timer.remaining_turns > 1) {
+        timer.remaining_turns -= 1;
+        _ = scheduleNativeTimerTick(ctx, id);
+        return quickjs.Value.undefined;
+    }
+
+    const callback = timer.callback.dup(ctx);
+    defer callback.deinit(ctx);
+
+    var call_args = std.ArrayListUnmanaged(quickjs.Value).empty;
+    defer {
+        for (call_args.items) |value| value.deinit(ctx);
+        call_args.deinit(c_allocator);
+    }
+    call_args.ensureTotalCapacity(c_allocator, timer.args.items.len) catch return quickjs.Value.exception;
+    for (timer.args.items) |value| {
+        call_args.appendAssumeCapacity(value.dup(ctx));
+    }
+
+    const callback_result = callback.call(ctx, quickjs.Value.undefined, call_args.items);
+    defer callback_result.deinit(ctx);
+    const callback_failed = callback_result.isException();
+
+    const current_index = findNativeTimerIndex(id) orelse {
+        if (callback_failed) return quickjs.Value.exception;
+        return quickjs.Value.undefined;
+    };
+    const current = &native_timers.items[current_index];
+    switch (current.kind) {
+        .timeout => removeNativeTimerAt(ctx, current_index),
+        .interval => {
+            current.remaining_turns = current.interval_turns;
+            _ = scheduleNativeTimerTick(ctx, id);
+        },
+    }
+
+    if (callback_failed) return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn installNativeTimer(
+    ctx: *quickjs.Context,
+    args: []const quickjs.c.JSValue,
+    kind: NativeTimerKind,
+    explicit_delay_turns: ?u32,
+) quickjs.Value {
+    if (args.len == 0) return ctx.throwInternalError("Timer callback is required");
+    const callback = quickjs.Value.fromCVal(args[0]);
+    if (!callback.isFunction(ctx)) return ctx.throwInternalError("Timer callback must be a function");
+
+    const timer_turns = explicit_delay_turns orelse timerDelayFromArgs(ctx, args);
+
+    var timer = NativeTimer{
+        .id = native_next_timer_id,
+        .kind = kind,
+        .callback = callback.dup(ctx),
+        .remaining_turns = timer_turns,
+        .interval_turns = timer_turns,
+    };
+    errdefer timer.deinit(ctx);
+
+    timer.args.ensureTotalCapacity(c_allocator, if (args.len > 2) args.len - 2 else 0) catch return quickjs.Value.exception;
+    if (args.len > 2) {
+        for (args[2..]) |arg| {
+            timer.args.appendAssumeCapacity(quickjs.Value.fromCVal(arg).dup(ctx));
+        }
+    }
+
+    native_timers.append(c_allocator, timer) catch return quickjs.Value.exception;
+    const id = timer.id;
+    native_next_timer_id += 1;
+    _ = scheduleNativeTimerTick(ctx, id);
+    return quickjs.Value.initInt32(id);
+}
+
+fn clearNativeTimerByArgs(ctx: *quickjs.Context, args: []const quickjs.c.JSValue) void {
+    if (args.len == 0) return;
+    const id = quickjs.Value.fromCVal(args[0]).toInt32(ctx) catch return;
+    const index = findNativeTimerIndex(id) orelse return;
+    removeNativeTimerAt(ctx, index);
+}
+
+fn jsQueueMicrotask(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    if (args.len == 0) return ctx.throwInternalError("queueMicrotask callback is required");
+    const callback = quickjs.Value.fromCVal(args[0]);
+    if (!callback.isFunction(ctx)) return ctx.throwInternalError("queueMicrotask callback must be a function");
+    if (!enqueueMicrotaskCallback(ctx, callback)) return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsSetTimeout(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    return installNativeTimer(ctx, args, .timeout, null);
+}
+
+fn jsClearTimeout(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    clearNativeTimerByArgs(ctx, args);
+    return quickjs.Value.undefined;
+}
+
+fn jsSetInterval(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    return installNativeTimer(ctx, args, .interval, null);
+}
+
+fn jsClearInterval(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    return jsClearTimeout(maybe_ctx, quickjs.Value.undefined, args);
+}
+
+fn jsSetImmediate(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    return installNativeTimer(ctx, args, .timeout, 1);
+}
+
+fn jsClearImmediate(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    return jsClearTimeout(maybe_ctx, quickjs.Value.undefined, args);
+}
+
+fn jsNativeTimerTick(
+    maybe_ctx: ?*quickjs.Context,
+    _: quickjs.Value,
+    _: []const quickjs.c.JSValue,
+    _: i32,
+    data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const id = quickjs.Value.fromCVal(data[0]).toInt32(ctx) catch return quickjs.Value.undefined;
+    return invokeNativeTimer(ctx, id);
 }
 
 fn jsProcessCwd(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {

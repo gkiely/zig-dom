@@ -120,11 +120,7 @@ fn isSupportedTestFile(path: []const u8) bool {
     }
 
     const basename = std.fs.path.basename(path);
-    if (std.mem.startsWith(u8, basename, "_test_") or std.mem.startsWith(u8, basename, "_spec_")) {
-        return true;
-    }
-
-    return std.mem.indexOf(u8, basename, ".test.") != null or std.mem.indexOf(u8, basename, ".spec.") != null;
+    return std.mem.indexOf(u8, basename, ".test.") != null;
 }
 
 fn lessThanPath(_: void, left: []u8, right: []u8) bool {
@@ -145,10 +141,12 @@ test "discoverTests deduplicates and sorts" {
 
 test "isSupportedTestFile accepts expected patterns" {
     try std.testing.expect(isSupportedTestFile("foo/basic.test.js"));
-    try std.testing.expect(isSupportedTestFile("foo/basic.spec.ts"));
-    try std.testing.expect(isSupportedTestFile("foo/_test_alpha.tsx"));
-    try std.testing.expect(isSupportedTestFile("foo/_spec_beta.jsx"));
+    try std.testing.expect(isSupportedTestFile("foo/selectors.probe.test.ts"));
+    try std.testing.expect(isSupportedTestFile("foo/selectors-probe.test.ts"));
 
     try std.testing.expect(!isSupportedTestFile("foo/basic.js"));
+    try std.testing.expect(!isSupportedTestFile("foo/basic.spec.ts"));
+    try std.testing.expect(!isSupportedTestFile("foo/_test_alpha.tsx"));
+    try std.testing.expect(!isSupportedTestFile("foo/_spec_beta.jsx"));
     try std.testing.expect(!isSupportedTestFile("foo/basic.test.mjs"));
 }
