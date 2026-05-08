@@ -424,7 +424,8 @@ globalThis.assert_unreached = (message = "Reached unreachable code") => fail(mes
 globalThis.promise_rejects_js = async (_t, ctor, promise) => expect(promise).rejects.toThrow(ctor);
 globalThis.add_cleanup = () => {};
 
-new Function(source)();
+// Indirect eval runs scripts in the global scope, matching browser script tag semantics.
+(0, eval)(source);
 await Promise.all(pending);
 `;
 }

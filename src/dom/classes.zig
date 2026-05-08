@@ -4651,11 +4651,11 @@ fn hasClickActivationBehavior(ctx: *quickjs.Context, target: quickjs.Value) bool
     defer ctx.freeCString(local_text.ptr);
     const local_name = local_text.ptr[0..local_text.len];
 
-    if (std.ascii.eqlIgnoreCase(local_name, "label") or std.ascii.eqlIgnoreCase(local_name, "button") or std.ascii.eqlIgnoreCase(local_name, "input")) {
+    if (std.ascii.eqlIgnoreCase(local_name, "label") or std.ascii.eqlIgnoreCase(local_name, "button") or std.ascii.eqlIgnoreCase(local_name, "input") or std.ascii.eqlIgnoreCase(local_name, "details")) {
         return true;
     }
-    if (std.ascii.eqlIgnoreCase(local_name, "a")) {
-        const href = elementAttributeString(ctx, target, "href");
+    if (std.ascii.eqlIgnoreCase(local_name, "a") or std.ascii.eqlIgnoreCase(local_name, "area")) {
+        const href = elementHrefString(ctx, target);
         defer if (href) |value| ctx.freeCString(value.ptr);
         return href != null;
     }
@@ -4755,7 +4755,9 @@ fn isInteractiveLabelDescendantTarget(ctx: *quickjs.Context, target: quickjs.Val
     const name = local_text.ptr[0..local_text.len];
 
     return std.ascii.eqlIgnoreCase(name, "a") or
+        std.ascii.eqlIgnoreCase(name, "area") or
         std.ascii.eqlIgnoreCase(name, "button") or
+        std.ascii.eqlIgnoreCase(name, "details") or
         std.ascii.eqlIgnoreCase(name, "input") or
         std.ascii.eqlIgnoreCase(name, "select") or
         std.ascii.eqlIgnoreCase(name, "textarea") or
@@ -4817,8 +4819,8 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
         return activateLabelControl(ctx, target);
     }
     if (!is_button and !is_input) {
-        if (std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "a")) {
-            const href_opt = elementAttributeString(ctx, target, "href");
+        if (std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "a") or std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "area")) {
+            const href_opt = elementHrefString(ctx, target);
             defer if (href_opt) |value| ctx.freeCString(value.ptr);
             if (href_opt) |href| {
                 const href_text = href.ptr[0..href.len];
@@ -4845,7 +4847,46 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
                         defer call_result.deinit(ctx);
                         if (call_result.isException()) return quickjs.Value.exception;
                     }
+                } else if (std.mem.startsWith(u8, href_text, "#")) {
+                    const global = ctx.getGlobalObject();
+                    defer global.deinit(ctx);
+                    const activated = global.getPropertyStr(ctx, "activated");
+                    defer activated.deinit(ctx);
+                    if (!activated.isException() and activated.isFunction(ctx)) {
+                        var args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, href_text)};
+                        defer args[0].deinit(ctx);
+                        const call_result = activated.call(ctx, global, &args);
+                        defer call_result.deinit(ctx);
+                        if (call_result.isException()) return quickjs.Value.exception;
+                    }
                 }
+            }
+        } else if (std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "details")) {
+            const details_handle = parseThisHandle(ctx, target, "click") orelse return quickjs.Value.exception;
+            if (zig_dom.zig_dom_element_has_attribute(details_handle, "open".ptr, "open".len) == 1) {
+                const clear_status = zig_dom.zig_dom_element_remove_attribute(details_handle, "open".ptr, "open".len);
+                if (clear_status != 0) return throwStatus(ctx, "click", clear_status);
+            } else {
+                const set_status = zig_dom.zig_dom_element_set_attribute(details_handle, "open".ptr, "open".len, "".ptr, 0);
+                if (set_status != 0) return throwStatus(ctx, "click", set_status);
+            }
+
+            const global = ctx.getGlobalObject();
+            defer global.deinit(ctx);
+            const event_ctor = global.getPropertyStr(ctx, "Event");
+            defer event_ctor.deinit(ctx);
+            if (!event_ctor.isException() and event_ctor.isObject()) {
+                const toggle_type = quickjs.Value.initStringLen(ctx, "toggle");
+                defer toggle_type.deinit(ctx);
+                const toggle_options = quickjs.Value.initObject(ctx);
+                if (toggle_options.isException()) return quickjs.Value.exception;
+                defer toggle_options.deinit(ctx);
+                const toggle_event = createEventObject(ctx, event_ctor, &.{ toggle_type, toggle_options }, .event);
+                defer toggle_event.deinit(ctx);
+                if (toggle_event.isException()) return quickjs.Value.exception;
+                const toggle_dispatched = jsEventTargetDispatchEvent(ctx, target, @ptrCast(&[_]quickjs.Value{toggle_event}));
+                defer toggle_dispatched.deinit(ctx);
+                if (toggle_dispatched.isException()) return quickjs.Value.exception;
             }
         }
         return quickjs.Value.undefined;
@@ -4928,7 +4969,7 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
     const should_submit = if (is_button)
         (type_value.len == 0 or std.ascii.eqlIgnoreCase(type_value, "submit"))
     else
-        std.ascii.eqlIgnoreCase(type_value, "submit");
+        (std.ascii.eqlIgnoreCase(type_value, "submit") or std.ascii.eqlIgnoreCase(type_value, "image"));
     const should_reset = std.ascii.eqlIgnoreCase(type_value, "reset");
 
     if (!should_submit and !should_reset) {
@@ -4956,7 +4997,7 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
         const submit_options = quickjs.Value.initObject(ctx);
         if (submit_options.isException()) return quickjs.Value.exception;
         defer submit_options.deinit(ctx);
-        submit_options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+        submit_options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
         submit_options.setPropertyStr(ctx, "cancelable", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
 
         const submit_args = [_]quickjs.Value{ submit_type, submit_options };
@@ -4969,12 +5010,25 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
         return quickjs.Value.undefined;
     }
 
-    const reset_fn = form.getPropertyStr(ctx, "reset");
-    defer reset_fn.deinit(ctx);
-    if (reset_fn.isFunction(ctx)) {
-        const reset_result = reset_fn.call(ctx, form, &.{});
-        defer reset_result.deinit(ctx);
-        if (reset_result.isException()) return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const event_ctor = global.getPropertyStr(ctx, "Event");
+    defer event_ctor.deinit(ctx);
+    if (!event_ctor.isException() and event_ctor.isObject()) {
+        const reset_type = quickjs.Value.initStringLen(ctx, "reset");
+        defer reset_type.deinit(ctx);
+        const reset_options = quickjs.Value.initObject(ctx);
+        if (reset_options.isException()) return quickjs.Value.exception;
+        defer reset_options.deinit(ctx);
+        reset_options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
+        reset_options.setPropertyStr(ctx, "cancelable", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+
+        const reset_event = createEventObject(ctx, event_ctor, &.{ reset_type, reset_options }, .event);
+        defer reset_event.deinit(ctx);
+        if (reset_event.isException()) return quickjs.Value.exception;
+        const reset_dispatched = jsEventTargetDispatchEvent(ctx, form, @ptrCast(&[_]quickjs.Value{reset_event}));
+        defer reset_dispatched.deinit(ctx);
+        if (reset_dispatched.isException()) return quickjs.Value.exception;
     }
 
     return quickjs.Value.undefined;
@@ -5470,6 +5524,19 @@ fn elementAttributeString(ctx: *quickjs.Context, element: quickjs.Value, name: [
     if (value.isNull() or value.isUndefined()) return null;
     const cstr = value.toCStringLen(ctx) orelse return null;
     return .{ .ptr = cstr.ptr, .len = cstr.len };
+}
+
+fn elementHrefString(ctx: *quickjs.Context, element: quickjs.Value) ?CStringArg {
+    const href_property = element.getPropertyStr(ctx, "href");
+    defer href_property.deinit(ctx);
+    if (!href_property.isException() and !href_property.isUndefined() and !href_property.isNull()) {
+        const text = href_property.toCStringLen(ctx);
+        if (text) |value| {
+            if (value.len > 0) return .{ .ptr = value.ptr, .len = value.len };
+            ctx.freeCString(value.ptr);
+        }
+    }
+    return elementAttributeString(ctx, element, "href");
 }
 
 fn setElementStringAttribute(ctx: *quickjs.Context, element: quickjs.Value, name: []const u8, value: []const u8) !void {
@@ -6793,12 +6860,51 @@ fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, eve
     const name = std.fmt.bufPrintZ(&name_buf, "on{s}", .{std.mem.span(event_type)}) catch return;
     const callback = target.getPropertyStr(ctx, name.ptr);
     defer callback.deinit(ctx);
-    if (!callback.isFunction(ctx)) return;
-    var call_args = [_]quickjs.Value{event.dup(ctx)};
-    defer call_args[0].deinit(ctx);
-    const result = callback.call(ctx, target, &call_args);
+    var result = quickjs.Value.undefined;
+    if (callback.isFunction(ctx)) {
+        var call_args = [_]quickjs.Value{event.dup(ctx)};
+        defer call_args[0].deinit(ctx);
+        result = callback.call(ctx, target, &call_args);
+    } else {
+        if (!callback.isUndefined() and !callback.isNull()) return;
+
+        const handle_i64 = parseValueNodeHandle(ctx, target) orelse return;
+        if (handle_i64 <= 0) return;
+        const handle: u64 = @intCast(handle_i64);
+        if (zig_dom.zig_dom_node_type(handle) != 1) return;
+
+        const source_value = elementAttributeValueToJs(ctx, handle, name, null, name);
+        defer source_value.deinit(ctx);
+        if (source_value.isException() or source_value.isNull() or source_value.isUndefined()) return;
+        const source = source_value.toCStringLen(ctx) orelse return;
+        defer ctx.freeCString(source.ptr);
+        if (source.len == 0) return;
+
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const function_ctor = global.getPropertyStr(ctx, "Function");
+        defer function_ctor.deinit(ctx);
+        if (function_ctor.isException() or !function_ctor.isObject()) return;
+
+        const arg_name = quickjs.Value.initStringLen(ctx, "event");
+        defer arg_name.deinit(ctx);
+        const body = quickjs.Value.initStringLen(ctx, source.ptr[0..source.len]);
+        defer body.deinit(ctx);
+        const inline_handler = function_ctor.call(ctx, quickjs.Value.undefined, &.{ arg_name, body });
+        defer inline_handler.deinit(ctx);
+        if (inline_handler.isException() or !inline_handler.isFunction(ctx)) return error.JSError;
+
+        var call_args = [_]quickjs.Value{event.dup(ctx)};
+        defer call_args[0].deinit(ctx);
+        result = inline_handler.call(ctx, target, &call_args);
+    }
     defer result.deinit(ctx);
     if (result.isException()) return error.JSError;
+    if (result.isBool() and !(result.toBool(ctx) catch true)) {
+        const prevented = jsEventPreventDefault(ctx, event, &.{});
+        defer prevented.deinit(ctx);
+        if (prevented.isException()) return error.JSError;
+    }
 }
 
 fn jsCollectionItem(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
