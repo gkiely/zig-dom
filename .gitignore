@@ -12,7 +12,8 @@ bun.lockb
 zig-cache/
 zig-pkg/
 zig-out/
-wpt/
+wpt/.native-generated
+wpt/.native-probe
 
 # Build output
 dist/
