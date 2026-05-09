@@ -17,6 +17,16 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installAccessor(ctx, proto, "innerHTML", callbacks.innerHtmlGet, callbacks.innerHtmlSet);
     try bindings.installGetter(ctx, proto, "outerHTML", callbacks.outerHtmlGet);
     try bindings.installGetter(ctx, proto, "style", callbacks.styleGet);
+    try bindings.installGetter(ctx, proto, "clientWidth", callbacks.clientWidthGet);
+    try bindings.installGetter(ctx, proto, "clientHeight", callbacks.clientHeightGet);
+    try bindings.installGetter(ctx, proto, "offsetWidth", callbacks.offsetWidthGet);
+    try bindings.installGetter(ctx, proto, "offsetHeight", callbacks.offsetHeightGet);
+    try bindings.installGetter(ctx, proto, "scrollWidth", callbacks.scrollWidthGet);
+    try bindings.installGetter(ctx, proto, "scrollHeight", callbacks.scrollHeightGet);
+    try bindings.installGetter(ctx, proto, "validity", callbacks.validityGet);
+    try bindings.installMethod(ctx, proto, "checkValidity", callbacks.checkValidity, 0);
+    try bindings.installMethod(ctx, proto, "reportValidity", callbacks.reportValidity, 0);
+    try bindings.installMethod(ctx, proto, "setCustomValidity", callbacks.setCustomValidity, 1);
     try bindings.installMethod(ctx, proto, "getAttribute", callbacks.getAttribute, 1);
     try bindings.installMethod(ctx, proto, "getAttributeNS", callbacks.getAttributeNS, 2);
     try bindings.installMethod(ctx, proto, "getAttributeNode", callbacks.getAttributeNode, 1);

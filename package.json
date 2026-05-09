@@ -8,7 +8,7 @@
     "build:native": "bun run scripts/build-native.ts",
     "build:packages": "bun run scripts/build-native-packages.ts",
     "build": "bun run build:packages",
-    "test": "zig build test run -Doptimize=Debug --summary none -- test --root ../youneedawiki",
+    "test": "zig build run -Doptimize=Debug --summary none -- test --root ../youneedawiki",
     "test:wpt": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests",
     "test:wpt:slow": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --only-slow --timeout-ms 180000",
     "test:wpt:all": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --include-slow --timeout-ms 180000",

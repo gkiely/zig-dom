@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const quickjs = @import("quickjs");
 const zig_dom = @import("dom/dom.zig");
 const dom = @import("dom/classes.zig");
@@ -53,6 +54,12 @@ pub const Runtime = struct {
 
         const rt = quickjs.Runtime.init() catch return error.OutOfMemory;
         errdefer rt.deinit();
+        if (builtin.mode == .Debug) {
+            // React/MUI commit traversals can be deeply recursive in development mode.
+            // Raise the JS stack cap to avoid premature QuickJS stack overflows.
+            rt.setMaxStackSize(8 * 1024 * 1024);
+            rt.updateStackTop();
+        }
 
         const ctx = rt.newContext() catch return error.OutOfMemory;
         errdefer ctx.deinit();
@@ -120,6 +127,7 @@ pub const Runtime = struct {
         defer document.deinit(self.ctx);
         if (!document.isException() and document.isObject()) {
             _ = document.deletePropertyStr(self.ctx, "activeElement") catch {};
+            _ = document.deletePropertyStr(self.ctx, "__zigActiveElement") catch {};
         }
     }
 

@@ -1544,7 +1544,8 @@ const ModuleLoaderState = struct {
 
         const transformed = try yuku_transform.transformSource(self.allocator, module_id, source, loader);
         defer self.allocator.free(transformed);
-        return pruneUnusedImports(self.allocator, transformed);
+        const pruned = try pruneUnusedImports(self.allocator, transformed);
+        return pruned;
     }
 
     fn rewriteBarePackageNamedImports(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {

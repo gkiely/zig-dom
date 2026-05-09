@@ -29,6 +29,7 @@ const NativeTimer = struct {
 var native_timer_ctx: ?*quickjs.Context = null;
 var native_timers: std.ArrayListUnmanaged(NativeTimer) = .empty;
 var native_next_timer_id: i32 = 1;
+var native_timer_debug_fires: u64 = 0;
 var crypto_uuid_counter: u64 = 0;
 var crypto_uuid_state: u64 = 0xA409_3822_299F_31D0;
 var object_url_counter: u64 = 0;
@@ -105,6 +106,14 @@ pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
     try linkWindowProperty(ctx, global, window, "clearImmediate");
     try linkWindowProperty(ctx, global, window, "scrollTo");
     try linkWindowProperty(ctx, global, window, "scrollBy");
+    try linkWindowProperty(ctx, global, window, "innerWidth");
+    try linkWindowProperty(ctx, global, window, "innerHeight");
+    try linkWindowProperty(ctx, global, window, "outerWidth");
+    try linkWindowProperty(ctx, global, window, "outerHeight");
+    try linkWindowProperty(ctx, global, window, "scrollX");
+    try linkWindowProperty(ctx, global, window, "scrollY");
+    try linkWindowProperty(ctx, global, window, "pageXOffset");
+    try linkWindowProperty(ctx, global, window, "pageYOffset");
     try linkWindowProperty(ctx, global, window, "getComputedStyle");
 
     // Keep global location aligned with window.location.
@@ -171,14 +180,38 @@ fn installLocation(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!v
 fn installNavigator(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
     const current = global.getPropertyStr(ctx, "navigator");
     defer current.deinit(ctx);
-    if (!current.isUndefined() and !current.isNull()) return;
+    var navigator = current;
+    if (current.isUndefined() or current.isNull() or !current.isObject()) {
+        navigator = quickjs.Value.initObject(ctx);
+        if (navigator.isException()) return error.JSError;
+        errdefer navigator.deinit(ctx);
+    }
 
-    const navigator = quickjs.Value.initObject(ctx);
-    if (navigator.isException()) return error.JSError;
-    errdefer navigator.deinit(ctx);
     try setString(ctx, navigator, "userAgent", "zig-dom");
+    try installClipboard(ctx, navigator);
 
-    global.setPropertyStr(ctx, "navigator", navigator) catch return error.JSError;
+    if (current.isUndefined() or current.isNull() or !current.isObject()) {
+        global.setPropertyStr(ctx, "navigator", navigator) catch return error.JSError;
+    }
+}
+
+fn installClipboard(ctx: *quickjs.Context, navigator: quickjs.Value) PlatformError!void {
+    const current = navigator.getPropertyStr(ctx, "clipboard");
+    defer current.deinit(ctx);
+
+    var clipboard = current;
+    if (current.isUndefined() or current.isNull() or !current.isObject()) {
+        clipboard = quickjs.Value.initObject(ctx);
+        if (clipboard.isException()) return error.JSError;
+        errdefer clipboard.deinit(ctx);
+    }
+
+    try setFunctionIfMissing(ctx, clipboard, "readText", jsClipboardReadText, 0);
+    try setFunctionIfMissing(ctx, clipboard, "writeText", jsClipboardWriteText, 1);
+
+    if (current.isUndefined() or current.isNull() or !current.isObject()) {
+        navigator.setPropertyStr(ctx, "clipboard", clipboard) catch return error.JSError;
+    }
 }
 
 fn installCrypto(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -240,7 +273,7 @@ fn installObjectPrototypeHelpers(ctx: *quickjs.Context, global: quickjs.Value) P
     defer existing.deinit(ctx);
     if (!existing.isException() and existing.isFunction(ctx)) return;
 
-    try setFunction(ctx, object_prototype, "getAutoHeightDuration", jsObjectGetAutoHeightDuration, 1);
+    try setNonEnumerableFunction(ctx, object_prototype, "getAutoHeightDuration", jsObjectGetAutoHeightDuration, 1);
 }
 
 fn installImportMetaEnv(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -309,6 +342,14 @@ fn normalizeImportMetaEnvValue(ctx: *quickjs.Context, value: quickjs.Value) quic
 
 fn installGlobals(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
     global.setPropertyStr(ctx, "global", global.dup(ctx)) catch return error.JSError;
+    global.setPropertyStr(ctx, "innerWidth", quickjs.Value.initInt32(1024)) catch return error.JSError;
+    global.setPropertyStr(ctx, "innerHeight", quickjs.Value.initInt32(768)) catch return error.JSError;
+    global.setPropertyStr(ctx, "outerWidth", quickjs.Value.initInt32(1024)) catch return error.JSError;
+    global.setPropertyStr(ctx, "outerHeight", quickjs.Value.initInt32(768)) catch return error.JSError;
+    global.setPropertyStr(ctx, "scrollX", quickjs.Value.initInt32(0)) catch return error.JSError;
+    global.setPropertyStr(ctx, "scrollY", quickjs.Value.initInt32(0)) catch return error.JSError;
+    global.setPropertyStr(ctx, "pageXOffset", quickjs.Value.initInt32(0)) catch return error.JSError;
+    global.setPropertyStr(ctx, "pageYOffset", quickjs.Value.initInt32(0)) catch return error.JSError;
 
     var history = global.getPropertyStr(ctx, "history");
     defer history.deinit(ctx);
@@ -547,6 +588,34 @@ fn jsNoop(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) 
     return quickjs.Value.undefined;
 }
 
+fn jsClipboardReadText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    if (!this_value.isObject()) return quickjs.Value.initStringLen(ctx, "");
+
+    const value = this_value.getPropertyStr(ctx, "__zigClipboardText");
+    defer value.deinit(ctx);
+    if (value.isException() or value.isUndefined() or value.isNull()) return quickjs.Value.initStringLen(ctx, "");
+
+    const text = value.toCStringLen(ctx) orelse return quickjs.Value.initStringLen(ctx, "");
+    defer ctx.freeCString(text.ptr);
+    return quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]);
+}
+
+fn jsClipboardWriteText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    if (!this_value.isObject()) return quickjs.Value.undefined;
+
+    const text = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
+    if (text) |value| {
+        defer ctx.freeCString(value.ptr);
+        this_value.setPropertyStr(ctx, "__zigClipboardText", quickjs.Value.initStringLen(ctx, value.ptr[0..value.len])) catch return quickjs.Value.exception;
+    } else {
+        this_value.setPropertyStr(ctx, "__zigClipboardText", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    }
+
+    return quickjs.Value.undefined;
+}
+
 fn jsHistoryPushState(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     return quickjs.Value.undefined;
 }
@@ -753,6 +822,20 @@ fn invokeNativeTimer(ctx: *quickjs.Context, id: i32) quickjs.Value {
     const callback = timer.callback.dup(ctx);
     defer callback.deinit(ctx);
 
+    if (std.c.getenv("ZIG_DOM_DEBUG_TIMERS")) |raw| {
+        if (!std.mem.eql(u8, std.mem.span(raw), "0")) {
+            native_timer_debug_fires += 1;
+            if (native_timer_debug_fires <= 40) {
+                std.debug.print(
+                    "[zig-dom timer] fire id={d} kind={s} total={d}\n",
+                    .{ id, if (timer.kind == .interval) "interval" else "timeout", native_timer_debug_fires },
+                );
+            } else if (native_timer_debug_fires == 41) {
+                std.debug.print("[zig-dom timer] ...suppressed...\n", .{});
+            }
+        }
+    }
+
     var call_args = std.ArrayListUnmanaged(quickjs.Value).empty;
     defer {
         for (call_args.items) |value| value.deinit(ctx);
@@ -848,7 +931,10 @@ fn jsClearTimeout(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const 
 
 fn jsSetInterval(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    return installNativeTimer(ctx, args, .interval, null);
+    const base_turns = timerDelayFromArgs(ctx, args);
+    const scaled_turns = @as(u64, base_turns) * 250;
+    const interval_turns: u32 = @intCast(@max(@as(u64, 200), @min(scaled_turns, 1_000_000)));
+    return installNativeTimer(ctx, args, .interval, interval_turns);
 }
 
 fn jsRequestAnimationFrame(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
@@ -2126,4 +2212,18 @@ fn setFunction(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]
     const value = quickjs.Value.initCFunction(ctx, func, name, arg_count);
     if (value.isException()) return error.JSError;
     object.setPropertyStr(ctx, name, value) catch return error.JSError;
+}
+
+fn setNonEnumerableFunction(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]const u8, comptime func: quickjs.cfunc.Func, arg_count: i32) PlatformError!void {
+    const value = quickjs.Value.initCFunction(ctx, func, name, arg_count);
+    if (value.isException()) return error.JSError;
+    _ = object.definePropertyValueStr(ctx, name, value, .{
+        .configurable = true,
+        .writable = true,
+        .has_configurable = true,
+        .has_writable = true,
+        .has_enumerable = true,
+        .has_value = true,
+        .throw_flag = true,
+    }) catch return error.JSError;
 }

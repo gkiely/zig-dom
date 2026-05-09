@@ -268,6 +268,12 @@ pub const HostMocks = struct {
         try setFunction(ctx, bun_api, "$", jsBunShellTag, 0);
         try setFunction(ctx, bun_api, "file", jsBunFile, 1);
         global.setPropertyStr(ctx, "__zigBunApi", bun_api.dup(ctx)) catch return error.JSError;
+        if (std.c.getenv("ZIG_DOM_HIDE_BUN")) |raw| {
+            if (!std.mem.eql(u8, std.mem.span(raw), "0")) {
+                bun_api.deinit(ctx);
+                return;
+            }
+        }
         global.setPropertyStr(ctx, "Bun", bun_api) catch return error.JSError;
     }
 
@@ -413,10 +419,30 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
 
     const args_slice: []const quickjs.Value = if (argc > 0) @ptrCast(argv[0..@intCast(argc)]) else &.{};
     const once_length = state.once_implementations.getLength(real_ctx) catch 0;
+    const debug_request = blk: {
+        if (std.c.getenv("ZIG_DOM_DEBUG_MOCK_CALLS") == null) break :blk false;
+        if (!state.restore_property.isString()) break :blk false;
+        const property_text = state.restore_property.toCStringLen(real_ctx) orelse break :blk false;
+        defer real_ctx.freeCString(property_text.ptr);
+        break :blk std.mem.eql(u8, property_text.ptr[0..property_text.len], "request");
+    };
+    if (debug_request) {
+        std.debug.print(
+            "[zig-dom mockCall] request once_len={} has_return={} has_resolved={} has_rejected={} impl_is_fn={}\n",
+            .{
+                once_length,
+                state.has_return_value,
+                state.has_resolved_value,
+                state.has_rejected_value,
+                state.implementation.isFunction(real_ctx),
+            },
+        );
+    }
     if (once_length > 0) {
         const once_impl = shiftArrayValue(real_ctx, state.once_implementations) catch return quickjs.Value.exception.cval();
         defer once_impl.deinit(real_ctx);
         if (once_impl.isFunction(real_ctx)) {
+            if (debug_request) std.debug.print("[zig-dom mockCall] request branch=once-implementation\n", .{});
             return once_impl.call(real_ctx, wrapped_this, args_slice).cval();
         }
 
@@ -427,19 +453,39 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
             const once_value = once_impl.getPropertyStr(real_ctx, "value");
             defer once_value.deinit(real_ctx);
             switch (mode_raw) {
-                @intFromEnum(OnceMode.return_value) => return once_value.dup(real_ctx).cval(),
-                @intFromEnum(OnceMode.resolved_value) => return resolvedPromise(real_ctx, once_value).cval(),
-                @intFromEnum(OnceMode.rejected_value) => return rejectedPromise(real_ctx, once_value).cval(),
+                @intFromEnum(OnceMode.return_value) => {
+                    if (debug_request) std.debug.print("[zig-dom mockCall] request branch=once-return\n", .{});
+                    return once_value.dup(real_ctx).cval();
+                },
+                @intFromEnum(OnceMode.resolved_value) => {
+                    if (debug_request) std.debug.print("[zig-dom mockCall] request branch=once-resolved\n", .{});
+                    return resolvedPromise(real_ctx, once_value).cval();
+                },
+                @intFromEnum(OnceMode.rejected_value) => {
+                    if (debug_request) std.debug.print("[zig-dom mockCall] request branch=once-rejected\n", .{});
+                    return rejectedPromise(real_ctx, once_value).cval();
+                },
                 else => {},
             }
         }
     }
     if (state.implementation.isFunction(real_ctx)) {
+        if (debug_request) std.debug.print("[zig-dom mockCall] request branch=implementation\n", .{});
         return state.implementation.call(real_ctx, wrapped_this, args_slice).cval();
     }
-    if (state.has_return_value) return state.return_value.dup(real_ctx).cval();
-    if (state.has_resolved_value) return resolvedPromise(real_ctx, state.resolved_value).cval();
-    if (state.has_rejected_value) return rejectedPromise(real_ctx, state.rejected_value).cval();
+    if (state.has_return_value) {
+        if (debug_request) std.debug.print("[zig-dom mockCall] request branch=return\n", .{});
+        return state.return_value.dup(real_ctx).cval();
+    }
+    if (state.has_resolved_value) {
+        if (debug_request) std.debug.print("[zig-dom mockCall] request branch=resolved\n", .{});
+        return resolvedPromise(real_ctx, state.resolved_value).cval();
+    }
+    if (state.has_rejected_value) {
+        if (debug_request) std.debug.print("[zig-dom mockCall] request branch=rejected\n", .{});
+        return rejectedPromise(real_ctx, state.rejected_value).cval();
+    }
+    if (debug_request) std.debug.print("[zig-dom mockCall] request branch=undefined\n", .{});
     return quickjs.Value.undefined.cval();
 }
 
@@ -538,10 +584,43 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
 
     const current = target.getProperty(ctx, quickjs.Atom.fromValue(ctx, property_key));
     defer current.deinit(ctx);
+    const current_is_mock_callable = current.getOpaque(MockState, mocks.mock_class_id) != null;
+    const current_is_callable = current.isFunction(ctx) or current_is_mock_callable;
+    if (std.c.getenv("ZIG_DOM_DEBUG_SPYON")) |_| {
+        const key_text = property_key.toCStringLen(ctx);
+        defer if (key_text) |text| ctx.freeCString(text.ptr);
+        if (key_text) |text| {
+            std.debug.print(
+                "[zig-dom spyOn] property={s} callable={} is_function={} is_mock={}\n",
+                .{
+                    text.ptr[0..text.len],
+                    current_is_callable,
+                    current.isFunction(ctx),
+                    current_is_mock_callable,
+                },
+            );
+        }
+    }
 
     if (findExistingMockState(mocks, ctx, target, property_key)) |existing_state| {
         if (existing_state.mock_function.isObject()) {
             const existing_mock = existing_state.mock_function.dup(ctx);
+            if (std.c.getenv("ZIG_DOM_DEBUG_SPYON")) |_| {
+                const key_text = property_key.toCStringLen(ctx);
+                defer if (key_text) |text| ctx.freeCString(text.ptr);
+                if (key_text) |text| {
+                    const mock_return = existing_mock.getPropertyStr(ctx, "mockReturnValueOnce");
+                    defer mock_return.deinit(ctx);
+                    std.debug.print(
+                        "[zig-dom spyOn] existing property={s} has_mockReturnValueOnce={} is_fn={}\n",
+                        .{
+                            text.ptr[0..text.len],
+                            !mock_return.isUndefined(),
+                            mock_return.isFunction(ctx),
+                        },
+                    );
+                }
+            }
             const atom = quickjs.Atom.fromValue(ctx, property_key);
             defer atom.deinit(ctx);
             if (!setSpyTargetProperty(ctx, target, atom, existing_mock)) {
@@ -558,11 +637,27 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
 
     // Bun-compatible behavior: repeated spyOn on the same property should
     // return the existing mock wrapper instead of stacking nested wrappers.
-    if (current.isFunction(ctx) and current.getOpaque(MockState, mocks.mock_class_id) != null) {
+    if (current_is_mock_callable) {
+        if (std.c.getenv("ZIG_DOM_DEBUG_SPYON")) |_| {
+            const key_text = property_key.toCStringLen(ctx);
+            defer if (key_text) |text| ctx.freeCString(text.ptr);
+            if (key_text) |text| {
+                const mock_return = current.getPropertyStr(ctx, "mockReturnValueOnce");
+                defer mock_return.deinit(ctx);
+                std.debug.print(
+                    "[zig-dom spyOn] reuse property={s} has_mockReturnValueOnce={} is_fn={}\n",
+                    .{
+                        text.ptr[0..text.len],
+                        !mock_return.isUndefined(),
+                        mock_return.isFunction(ctx),
+                    },
+                );
+            }
+        }
         return current.dup(ctx);
     }
 
-    if (!current.isFunction(ctx)) {
+    if (!current_is_callable) {
         const descriptor = getOwnPropertyDescriptor(ctx, target, property_key);
         defer descriptor.deinit(ctx);
         const getter = descriptor.getPropertyStr(ctx, "get");
@@ -579,6 +674,22 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
 
     const wrapped = mocks.createMockFunction(current, current, target, property_key, current, true, false);
     if (wrapped.isException()) return quickjs.Value.exception;
+    if (std.c.getenv("ZIG_DOM_DEBUG_SPYON")) |_| {
+        const key_text = property_key.toCStringLen(ctx);
+        defer if (key_text) |text| ctx.freeCString(text.ptr);
+        if (key_text) |text| {
+            const mock_return = wrapped.getPropertyStr(ctx, "mockReturnValueOnce");
+            defer mock_return.deinit(ctx);
+            std.debug.print(
+                "[zig-dom spyOn] wrap property={s} has_mockReturnValueOnce={} is_fn={}\n",
+                .{
+                    text.ptr[0..text.len],
+                    !mock_return.isUndefined(),
+                    mock_return.isFunction(ctx),
+                },
+            );
+        }
+    }
     const atom = quickjs.Atom.fromValue(ctx, property_key);
     defer atom.deinit(ctx);
     if (!setSpyTargetProperty(ctx, target, atom, wrapped)) {
@@ -630,7 +741,13 @@ fn jsRestoreAllSpies(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const 
 }
 
 fn setSpyTargetProperty(ctx: *quickjs.Context, target: quickjs.Value, atom: quickjs.Atom, value: quickjs.Value) bool {
-    target.setProperty(ctx, atom, value.dup(ctx)) catch return false;
+    target.setProperty(ctx, atom, value.dup(ctx)) catch {
+        if (ctx.hasException()) {
+            const exception = ctx.getException();
+            exception.deinit(ctx);
+        }
+        return false;
+    };
 
     var current = target.getProperty(ctx, atom);
     defer current.deinit(ctx);
@@ -653,7 +770,13 @@ fn setSpyTargetProperty(ctx: *quickjs.Context, target: quickjs.Value, atom: quic
 
     current.deinit(ctx);
     current = target.getProperty(ctx, atom);
-    if (current.isException()) return false;
+    if (current.isException()) {
+        if (ctx.hasException()) {
+            const exception = ctx.getException();
+            exception.deinit(ctx);
+        }
+        return false;
+    }
     return current.isStrictEqual(ctx, value);
 }
 
