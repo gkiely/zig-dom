@@ -1000,6 +1000,16 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
             restoreMockState(ctx, state, this_value) catch return quickjs.Value.exception;
         },
     }
+    if (std.c.getenv("ZIG_DOM_DEBUG_MOCK_METHOD")) |_| {
+        if (method == .return_value_once) {
+            const next_method = this_value.getPropertyStr(ctx, "mockReturnValueOnce");
+            defer next_method.deinit(ctx);
+            std.debug.print(
+                "[zig-dom mockMethod] return_value_once this_is_fn={} next_is_fn={} args_len={d}\n",
+                .{ this_value.isFunction(ctx), next_method.isFunction(ctx), args.len },
+            );
+        }
+    }
     return this_value.dup(ctx);
 }
 

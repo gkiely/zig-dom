@@ -2196,22 +2196,184 @@ fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_ar
         class_perf_stats.computed_style_ns += classProfileNowNs() - start;
     };
 
-    if (args.len > 0 and args[0].isObject()) {
-        const inline_style = args[0].getPropertyStr(ctx, "style");
-        if (!inline_style.isException() and inline_style.isObject()) return inline_style;
-        inline_style.deinit(ctx);
-    }
-
     const style = quickjs.Value.initObject(ctx);
     if (style.isException()) return style;
     installMethod(ctx, style, "getPropertyValue", jsComputedStyleGetPropertyValue, 1) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "visibility", quickjs.Value.initStringLen(ctx, "visible")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "display", quickjs.Value.initStringLen(ctx, "block")) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "opacity", quickjs.Value.initStringLen(ctx, "1")) catch return quickjs.Value.exception;
+
+    if (args.len > 0 and args[0].isObject()) {
+        applyComputedStyleFromStylesheets(ctx, args[0], style);
+        applyComputedStyleFromInline(ctx, args[0], style);
+    }
     return style;
 }
 
-fn jsComputedStyleGetPropertyValue(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+fn applyComputedStyleFromStylesheets(ctx: *quickjs.Context, element: quickjs.Value, computed_style: quickjs.Value) void {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) return;
+
+    const head = document.getPropertyStr(ctx, "head");
+    defer head.deinit(ctx);
+    if (head.isException() or !head.isObject()) return;
+
+    const children = head.getPropertyStr(ctx, "children");
+    defer children.deinit(ctx);
+    if (children.isException() or !children.isObject()) return;
+
+    const length = arrayLength(ctx, children);
+    if (length == 0) return;
+
+    var index: u32 = 0;
+    while (index < length) : (index += 1) {
+        const child = children.getPropertyUint32(ctx, index);
+        defer child.deinit(ctx);
+        if (child.isException() or !child.isObject()) continue;
+
+        const tag_name = child.getPropertyStr(ctx, "tagName");
+        defer tag_name.deinit(ctx);
+        const tag = tag_name.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(tag.ptr);
+        if (!std.ascii.eqlIgnoreCase(tag.ptr[0..tag.len], "style")) continue;
+
+        const text_content = child.getPropertyStr(ctx, "textContent");
+        defer text_content.deinit(ctx);
+        if (text_content.isException() or text_content.isUndefined() or text_content.isNull()) continue;
+        const css_text = text_content.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(css_text.ptr);
+
+        applyStylesheetTextToComputedStyle(ctx, element, computed_style, css_text.ptr[0..css_text.len]);
+    }
+}
+
+fn applyStylesheetTextToComputedStyle(ctx: *quickjs.Context, element: quickjs.Value, computed_style: quickjs.Value, css_text: []const u8) void {
+    var cursor: usize = 0;
+    while (cursor < css_text.len) {
+        const open = std.mem.indexOfPos(u8, css_text, cursor, "{") orelse break;
+        const close = std.mem.indexOfPos(u8, css_text, open + 1, "}") orelse break;
+        const selector_text = std.mem.trim(u8, css_text[cursor..open], " \t\r\n");
+        const declarations = css_text[open + 1 .. close];
+        if (selectorListMatchesElement(ctx, element, selector_text)) {
+            applyCssDeclarationsToComputedStyle(ctx, computed_style, declarations);
+        }
+        cursor = close + 1;
+    }
+}
+
+fn selectorListMatchesElement(ctx: *quickjs.Context, element: quickjs.Value, selectors: []const u8) bool {
+    var selector_parts = std.mem.splitScalar(u8, selectors, ',');
+    while (selector_parts.next()) |selector_raw| {
+        if (simpleSelectorMatchesElement(ctx, element, selector_raw)) return true;
+    }
+    return false;
+}
+
+fn simpleSelectorMatchesElement(ctx: *quickjs.Context, element: quickjs.Value, selector_raw: []const u8) bool {
+    var selector = std.mem.trim(u8, selector_raw, " \t\r\n");
+    if (selector.len == 0) return false;
+    if (std.mem.indexOfAny(u8, selector, " >+~[")) |_| return false;
+
+    if (std.mem.indexOfScalar(u8, selector, ':')) |pseudo_index| {
+        selector = std.mem.trim(u8, selector[0..pseudo_index], " \t\r\n");
+        if (selector.len == 0) return false;
+    }
+
+    if (selector[0] == '.') {
+        var remaining = selector;
+        while (remaining.len > 0 and remaining[0] == '.') {
+            remaining = remaining[1..];
+            if (remaining.len == 0) return false;
+            const next_dot = std.mem.indexOfScalar(u8, remaining, '.') orelse remaining.len;
+            const class_name = remaining[0..next_dot];
+            if (class_name.len == 0 or !elementHasClassName(ctx, element, class_name)) return false;
+            remaining = remaining[next_dot..];
+        }
+        return remaining.len == 0;
+    }
+
+    const tag_name_value = element.getPropertyStr(ctx, "tagName");
+    defer tag_name_value.deinit(ctx);
+    const tag_name = tag_name_value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(tag_name.ptr);
+    return std.ascii.eqlIgnoreCase(tag_name.ptr[0..tag_name.len], selector);
+}
+
+fn elementHasClassName(ctx: *quickjs.Context, element: quickjs.Value, class_name: []const u8) bool {
+    const class_name_value = element.getPropertyStr(ctx, "className");
+    defer class_name_value.deinit(ctx);
+    if (class_name_value.isException() or class_name_value.isUndefined() or class_name_value.isNull()) return false;
+
+    const class_text = class_name_value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(class_text.ptr);
+    var parts = std.mem.tokenizeAny(u8, class_text.ptr[0..class_text.len], " \t\r\n");
+    while (parts.next()) |part| {
+        if (std.mem.eql(u8, part, class_name)) return true;
+    }
+    return false;
+}
+
+fn applyComputedStyleFromInline(ctx: *quickjs.Context, element: quickjs.Value, computed_style: quickjs.Value) void {
+    const inline_style = element.getPropertyStr(ctx, "style");
+    defer inline_style.deinit(ctx);
+    if (inline_style.isObject()) {
+        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "display");
+        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "visibility");
+        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "opacity");
+        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "transform");
+    }
+
+    const style_attr = elementAttributeGet(ctx, element, "style", "");
+    defer style_attr.deinit(ctx);
+    const style_text = style_attr.toCStringLen(ctx) orelse return;
+    defer ctx.freeCString(style_text.ptr);
+    applyCssDeclarationsToComputedStyle(ctx, computed_style, style_text.ptr[0..style_text.len]);
+}
+
+fn copyInlinePropertyToComputedStyle(
+    ctx: *quickjs.Context,
+    inline_style: quickjs.Value,
+    computed_style: quickjs.Value,
+    comptime name: [:0]const u8,
+) void {
+    const value = inline_style.getPropertyStr(ctx, name);
+    defer value.deinit(ctx);
+    if (value.isException() or value.isUndefined() or value.isNull()) return;
+    computed_style.setPropertyStr(ctx, name, value.dup(ctx)) catch {};
+}
+
+fn applyCssDeclarationsToComputedStyle(ctx: *quickjs.Context, computed_style: quickjs.Value, declarations: []const u8) void {
+    var parts = std.mem.splitScalar(u8, declarations, ';');
+    while (parts.next()) |part_raw| {
+        const part = std.mem.trim(u8, part_raw, " \t\r\n");
+        if (part.len == 0) continue;
+        const colon = std.mem.indexOfScalar(u8, part, ':') orelse continue;
+        const property_name = std.mem.trim(u8, part[0..colon], " \t\r\n");
+        const property_value = std.mem.trim(u8, part[colon + 1 ..], " \t\r\n");
+        if (property_name.len == 0 or property_value.len == 0) continue;
+        if (std.mem.eql(u8, property_name, "display")) {
+            computed_style.setPropertyStr(ctx, "display", quickjs.Value.initStringLen(ctx, property_value)) catch {};
+        } else if (std.mem.eql(u8, property_name, "visibility")) {
+            computed_style.setPropertyStr(ctx, "visibility", quickjs.Value.initStringLen(ctx, property_value)) catch {};
+        } else if (std.mem.eql(u8, property_name, "opacity")) {
+            computed_style.setPropertyStr(ctx, "opacity", quickjs.Value.initStringLen(ctx, property_value)) catch {};
+        } else if (std.mem.eql(u8, property_name, "transform")) {
+            computed_style.setPropertyStr(ctx, "transform", quickjs.Value.initStringLen(ctx, property_value)) catch {};
+        }
+    }
+}
+
+fn jsComputedStyleGetPropertyValue(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const name = parseStringArg(ctx, args, 0, "computedStyle.getPropertyValue") orelse return quickjs.Value.exception;
+    defer ctx.freeCString(name.ptr);
+    const value = this_value.getPropertyStr(ctx, name.ptr);
+    if (!value.isException() and !value.isUndefined() and !value.isNull()) return value;
+    value.deinit(ctx);
     return quickjs.Value.initStringLen(ctx, "");
 }
 

@@ -26,6 +26,7 @@ const Matcher = enum(i32) {
     toHaveBeenCalledWith = 20,
     toMatchObject = 21,
     toBeDisabled = 22,
+    toHaveBeenLastCalledWith = 23,
 };
 
 pub fn install(ctx: *quickjs.Context) AssertionError!void {
@@ -237,6 +238,7 @@ fn installBuiltinMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted
     try installMatcher(ctx, object, "toHaveBeenCalled", .toHaveBeenCalled, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toHaveBeenCalledTimes", .toHaveBeenCalledTimes, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toHaveBeenCalledWith", .toHaveBeenCalledWith, inverted, received.dup(ctx));
+    try installMatcher(ctx, object, "toHaveBeenLastCalledWith", .toHaveBeenLastCalledWith, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toContain", .toContain, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toMatch", .toMatch, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toMatchObject", .toMatchObject, inverted, received.dup(ctx));
@@ -463,6 +465,7 @@ fn jsMatcher(
         .toHaveBeenCalled => matcherToHaveBeenCalled(ctx, received),
         .toHaveBeenCalledTimes => matcherToHaveBeenCalledTimes(ctx, received, args),
         .toHaveBeenCalledWith => matcherToHaveBeenCalledWith(ctx, received, args),
+        .toHaveBeenLastCalledWith => matcherToHaveBeenLastCalledWith(ctx, received, args),
         .toContain => matcherToContain(ctx, received, args),
         .toMatch => matcherToMatch(ctx, received, args),
         .toMatchObject => matcherToMatchObject(ctx, received, args),
@@ -859,6 +862,52 @@ fn matcherToHaveBeenCalledWith(ctx: *quickjs.Context, received: quickjs.Value, a
     }
 
     return self_call_count == 0 and isRequestLikeObjectContainingExpected(ctx, args);
+}
+
+fn matcherToHaveBeenLastCalledWith(ctx: *quickjs.Context, received: quickjs.Value, args: []const quickjs.c.JSValue) !bool {
+    const mock = received.getPropertyStr(ctx, "mock");
+    defer mock.deinit(ctx);
+    if (mock.isException() or !mock.isObject()) return false;
+
+    const calls = mock.getPropertyStr(ctx, "calls");
+    defer calls.deinit(ctx);
+    if (calls.isException() or !calls.isObject()) return false;
+
+    const self_call_count_raw = getLength(ctx, calls);
+    const self_call_count: u32 = if (self_call_count_raw > 0) @intCast(self_call_count_raw) else 0;
+    if (self_call_count > 0) {
+        if (try callAtIndexMatchesExpectedArgs(ctx, calls, self_call_count - 1, args)) return true;
+    }
+
+    const related_collector = getRelatedSpyCallsCollector(ctx) catch return false;
+    defer related_collector.deinit(ctx);
+
+    var collector_args = [_]quickjs.Value{received.dup(ctx)};
+    defer collector_args[0].deinit(ctx);
+    const related = related_collector.call(ctx, quickjs.Value.undefined, &collector_args);
+    defer related.deinit(ctx);
+
+    var related_total_calls: u32 = 0;
+    if (!related.isException() and related.isObject()) {
+        const related_length_raw = getLength(ctx, related);
+        const related_length: u32 = if (related_length_raw > 0) @intCast(related_length_raw) else 0;
+        var related_index: u32 = 0;
+        while (related_index < related_length) : (related_index += 1) {
+            const related_calls = related.getPropertyUint32(ctx, related_index);
+            defer related_calls.deinit(ctx);
+            if (related_calls.isException() or !related_calls.isObject()) continue;
+
+            const related_call_count_raw = getLength(ctx, related_calls);
+            const related_call_count: u32 = if (related_call_count_raw > 0) @intCast(related_call_count_raw) else 0;
+            related_total_calls +|= related_call_count;
+        }
+    }
+
+    if (related_total_calls > 0 and try relatedSpyCallAtIndexMatchesExpectedArgs(ctx, received, related_total_calls - 1, args)) {
+        return true;
+    }
+
+    return self_call_count == 0 and related_total_calls == 0 and isRequestLikeObjectContainingExpected(ctx, args);
 }
 
 fn callAtIndexMatchesExpectedArgs(ctx: *quickjs.Context, calls: quickjs.Value, index: u32, expected_args: []const quickjs.c.JSValue) !bool {
@@ -1265,6 +1314,7 @@ fn throwMatcherError(ctx: *quickjs.Context, matcher: Matcher, inverted: bool) qu
         .toHaveTextContent => "toHaveTextContent",
         .toHaveBeenNthCalledWith => "toHaveBeenNthCalledWith",
         .toHaveBeenCalledWith => "toHaveBeenCalledWith",
+        .toHaveBeenLastCalledWith => "toHaveBeenLastCalledWith",
         .toBeTruthy => "toBeTruthy",
         .toBeTrue => "toBeTrue",
         .toBeNull => "toBeNull",

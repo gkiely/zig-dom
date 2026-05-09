@@ -117,6 +117,8 @@ const bun_specifier = "bun";
 const bun_test_specifier = "bun:test";
 const node_url_specifier = "url";
 const node_url_colon_specifier = "node:url";
+const node_assert_specifier = "assert";
+const node_assert_colon_specifier = "node:assert";
 const node_fs_specifier = "fs";
 const node_fs_colon_specifier = "node:fs";
 const node_path_specifier = "path";
@@ -796,6 +798,14 @@ const ModuleLoaderState = struct {
         const linked_source = try self.rewriteBarePackageNamedImports(module_id, raw_source);
         defer self.allocator.free(linked_source);
         const transformed = try yuku_transform.transformSource(self.allocator, module_id, linked_source, default_loader);
+        if (std.c.getenv("ZIG_DOM_DUMP_TRANSFORMED")) |dump_path_raw| {
+            if (std.mem.indexOf(u8, module_id, "Tree.test.tsx") != null) {
+                _ = std.Io.Dir.cwd().writeFile(self.io, .{
+                    .sub_path = std.mem.span(dump_path_raw),
+                    .data = transformed,
+                }) catch {};
+            }
+        }
         if (self.profile_enabled) {
             self.profile_transform_ns += self.profileNow() - start;
             self.profile_transform_count += 1;
@@ -914,7 +924,10 @@ const ModuleLoaderState = struct {
             \\
             \\});
             \\export { __zigCommonJSExports };
-            \\export default __zigCommonJSExports;
+            \\const __zigCommonJSDefault = (__zigCommonJSExports != null && __zigCommonJSExports.__esModule && Object.prototype.hasOwnProperty.call(__zigCommonJSExports, 'default'))
+            \\  ? __zigCommonJSExports.default
+            \\  : __zigCommonJSExports;
+            \\export default __zigCommonJSDefault;
             \\
         );
 
@@ -1234,7 +1247,7 @@ const ModuleLoaderState = struct {
             errdefer self.allocator.free(subpath_candidate);
 
             if (self.pathIsDirectory(subpath_candidate)) {
-                if (try self.resolveNodeModulePackageRoot(subpath_candidate)) |resolved_dir_entry| {
+                if (try self.resolveNodeModulePackageRootWithMode(subpath_candidate, .require)) |resolved_dir_entry| {
                     self.allocator.free(subpath_candidate);
                     return resolved_dir_entry;
                 }
@@ -1543,6 +1556,14 @@ const ModuleLoaderState = struct {
         defer self.allocator.free(source);
 
         const transformed = try yuku_transform.transformSource(self.allocator, module_id, source, loader);
+        if (std.c.getenv("ZIG_DOM_DUMP_TRANSFORMED")) |dump_path_raw| {
+            if (std.mem.indexOf(u8, module_id, "Tree.test.tsx") != null) {
+                _ = std.Io.Dir.cwd().writeFile(self.io, .{
+                    .sub_path = std.mem.span(dump_path_raw),
+                    .data = transformed,
+                }) catch {};
+            }
+        }
         defer self.allocator.free(transformed);
         const pruned = try pruneUnusedImports(self.allocator, transformed);
         return pruned;
@@ -2019,7 +2040,6 @@ const ModuleLoaderState = struct {
                 return resolved;
             }
         }
-
         if (jsonObjectString(root.object, "module")) |entry| {
             if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
                 return resolved;
@@ -3762,6 +3782,17 @@ fn loadNativeBuiltInModule(ctx: *ModuleContext, module_name: [:0]const u8) ?*Mod
         return module;
     }
 
+    if (std.mem.eql(u8, module_name, node_assert_specifier) or std.mem.eql(u8, module_name, node_assert_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeAssertModule) orelse return null;
+        if (!module.addExport(ctx, "default")) return null;
+        if (!module.addExport(ctx, "ok")) return null;
+        if (!module.addExport(ctx, "fail")) return null;
+        if (!module.addExport(ctx, "strictEqual")) return null;
+        if (!module.addExport(ctx, "notStrictEqual")) return null;
+        if (!module.addExport(ctx, "strict")) return null;
+        return module;
+    }
+
     if (std.mem.eql(u8, module_name, node_stream_web_specifier) or std.mem.eql(u8, module_name, node_stream_web_colon_specifier)) {
         const module = ModuleDef.init(ctx, module_name, initNativeNodeStreamWebModule) orelse return null;
         if (!module.addExport(ctx, "ReadableStream")) return null;
@@ -3795,6 +3826,78 @@ fn initNativeBunTestModule(ctx: *ModuleContext, module: *ModuleDef) bool {
 
 fn initNativeNodeStreamWebModule(ctx: *ModuleContext, module: *ModuleDef) bool {
     return exportGlobalMembersAsModule(ctx, module, &.{ "ReadableStream", "WritableStream", "TransformStream" });
+}
+
+fn initNativeNodeAssertModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const assert_fn = quickjs.Value.initCFunction(ctx, jsNodeAssert, "assert", 2);
+    defer assert_fn.deinit(ctx);
+    if (assert_fn.isException()) return false;
+
+    const fail_fn = quickjs.Value.initCFunction(ctx, jsNodeAssertFail, "fail", 1);
+    defer fail_fn.deinit(ctx);
+    if (fail_fn.isException()) return false;
+
+    const strict_equal_fn = quickjs.Value.initCFunction(ctx, jsNodeAssertStrictEqual, "strictEqual", 3);
+    defer strict_equal_fn.deinit(ctx);
+    if (strict_equal_fn.isException()) return false;
+
+    const not_strict_equal_fn = quickjs.Value.initCFunction(ctx, jsNodeAssertNotStrictEqual, "notStrictEqual", 3);
+    defer not_strict_equal_fn.deinit(ctx);
+    if (not_strict_equal_fn.isException()) return false;
+
+    assert_fn.setPropertyStr(ctx, "ok", assert_fn.dup(ctx)) catch return false;
+    assert_fn.setPropertyStr(ctx, "fail", fail_fn.dup(ctx)) catch return false;
+    assert_fn.setPropertyStr(ctx, "strictEqual", strict_equal_fn.dup(ctx)) catch return false;
+    assert_fn.setPropertyStr(ctx, "notStrictEqual", not_strict_equal_fn.dup(ctx)) catch return false;
+    assert_fn.setPropertyStr(ctx, "strict", assert_fn.dup(ctx)) catch return false;
+
+    if (!module.setExport(ctx, "default", assert_fn.dup(ctx))) return false;
+    if (!module.setExport(ctx, "ok", assert_fn.dup(ctx))) return false;
+    if (!module.setExport(ctx, "fail", fail_fn.dup(ctx))) return false;
+    if (!module.setExport(ctx, "strictEqual", strict_equal_fn.dup(ctx))) return false;
+    if (!module.setExport(ctx, "notStrictEqual", not_strict_equal_fn.dup(ctx))) return false;
+    if (!module.setExport(ctx, "strict", assert_fn.dup(ctx))) return false;
+    return true;
+}
+
+fn jsNodeAssert(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const condition = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toBool(ctx) catch false else false;
+    if (std.c.getenv("ZIG_DOM_DEBUG_NODE_ASSERT") != null) {
+        std.debug.print("[zig-dom assert] called truthy={}\n", .{condition});
+    }
+    if (condition) return quickjs.Value.undefined;
+    _ = quickjs.c.JS_ThrowInternalError(ctx.cval(), "Assertion failed");
+    return quickjs.Value.exception;
+}
+
+fn jsNodeAssertFail(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    _ = quickjs.c.JS_ThrowInternalError(ctx.cval(), "Assertion failed");
+    return quickjs.Value.exception;
+}
+
+fn jsNodeAssertStrictEqual(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len < 2) {
+        _ = quickjs.c.JS_ThrowInternalError(ctx.cval(), "Assertion failed");
+        return quickjs.Value.exception;
+    }
+    const left = quickjs.Value.fromCVal(args[0]);
+    const right = quickjs.Value.fromCVal(args[1]);
+    if (left.isStrictEqual(ctx, right)) return quickjs.Value.undefined;
+    _ = quickjs.c.JS_ThrowInternalError(ctx.cval(), "Assertion failed");
+    return quickjs.Value.exception;
+}
+
+fn jsNodeAssertNotStrictEqual(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len < 2) return quickjs.Value.undefined;
+    const left = quickjs.Value.fromCVal(args[0]);
+    const right = quickjs.Value.fromCVal(args[1]);
+    if (!left.isStrictEqual(ctx, right)) return quickjs.Value.undefined;
+    _ = quickjs.c.JS_ThrowInternalError(ctx.cval(), "Assertion failed");
+    return quickjs.Value.exception;
 }
 
 fn exportApiMembersAsModule(
@@ -3866,6 +3969,10 @@ fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
     }
 
     if (std.mem.eql(u8, module_name, bun_test_specifier)) {
+        return native_builtin_stub_source;
+    }
+
+    if (std.mem.eql(u8, module_name, node_assert_specifier) or std.mem.eql(u8, module_name, node_assert_colon_specifier)) {
         return native_builtin_stub_source;
     }
 
