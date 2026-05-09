@@ -2102,13 +2102,18 @@ fn jsConstructObserver(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _:
     return obj;
 }
 
-fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const cached = this_value.getPropertyStr(ctx, "__zigComputedStyle");
+    if (!cached.isException() and cached.isObject()) return cached;
+    cached.deinit(ctx);
+
     const style = quickjs.Value.initObject(ctx);
     if (style.isException()) return style;
     installMethod(ctx, style, "getPropertyValue", jsComputedStyleGetPropertyValue, 1) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "visibility", quickjs.Value.initStringLen(ctx, "visible")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "display", quickjs.Value.initStringLen(ctx, "block")) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "__zigComputedStyle", style.dup(ctx)) catch return quickjs.Value.exception;
     return style;
 }
 
@@ -4400,23 +4405,19 @@ fn isSimpleTagSelector(selector: []const u8) bool {
 fn isKnownFastSelector(selector: []const u8) bool {
     return std.mem.eql(u8, selector, "a[href]") or
         std.mem.eql(u8, selector, "a[href]:not([href=\"\"])") or
-        std.mem.eql(u8, selector, "button") or
         std.mem.eql(u8, selector, "h1") or
         std.mem.eql(u8, selector, "h2") or
         std.mem.eql(u8, selector, "h3") or
         std.mem.eql(u8, selector, "h4") or
         std.mem.eql(u8, selector, "h5") or
         std.mem.eql(u8, selector, "h6") or
-        std.mem.eql(u8, selector, "input") or
         std.mem.eql(u8, selector, "input:not([type])") or
         std.mem.eql(u8, selector, "input[type=\"text\"]") or
         std.mem.eql(u8, selector, "input[type=\"search\"]") or
         std.mem.eql(u8, selector, "input[name*=user i]") or
-        std.mem.eql(u8, selector, "img") or
         std.mem.eql(u8, selector, "a") or
         std.mem.eql(u8, selector, "area") or
         isRoleTokenSelector(selector) or
-        std.mem.eql(u8, selector, "[title]") or
         std.mem.eql(u8, selector, "svg > title") or
         std.mem.eql(u8, selector, ":scope > p") or
         std.mem.eql(u8, selector, ":scope > span") or
@@ -4808,6 +4809,7 @@ fn jsElementFocus(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []co
     if (!document.isException() and document.isObject()) {
         document.setPropertyStr(ctx, "activeElement", this_value.dup(ctx)) catch return quickjs.Value.exception;
     }
+    if (!hasDirectEventHandler(ctx, this_value, "focus", "onfocus")) return quickjs.Value.undefined;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const ctor = global.getPropertyStr(ctx, "Event");
@@ -4834,6 +4836,7 @@ fn jsElementBlur(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []con
             document.setPropertyStr(ctx, "activeElement", body.dup(ctx)) catch return quickjs.Value.exception;
         }
     }
+    if (!hasDirectEventHandler(ctx, this_value, "blur", "onblur")) return quickjs.Value.undefined;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const ctor = global.getPropertyStr(ctx, "Event");
@@ -4847,6 +4850,20 @@ fn jsElementBlur(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []con
         defer dispatched.deinit(ctx);
     }
     return quickjs.Value.undefined;
+}
+
+fn hasDirectEventHandler(ctx: *quickjs.Context, target: quickjs.Value, event_name: [*:0]const u8, property_name: [*:0]const u8) bool {
+    const listeners = target.getPropertyStr(ctx, "__zigEventListeners");
+    defer listeners.deinit(ctx);
+    if (!listeners.isException() and listeners.isObject()) {
+        const list = listeners.getPropertyStr(ctx, event_name);
+        defer list.deinit(ctx);
+        if (!list.isException() and list.isObject() and arrayLength(ctx, list) > 0) return true;
+    }
+
+    const property_handler = target.getPropertyStr(ctx, property_name);
+    defer property_handler.deinit(ctx);
+    return property_handler.isFunction(ctx);
 }
 
 fn jsElementSelect(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
@@ -4868,10 +4885,17 @@ fn jsElementGetBoundingClientRect(ctx_opt: ?*quickjs.Context, _: quickjs.Value, 
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
+    const cached = global.getPropertyStr(ctx, "__zigZeroDOMRect");
+    if (!cached.isException() and cached.isObject()) return cached;
+    cached.deinit(ctx);
+
     const ctor = global.getPropertyStr(ctx, "DOMRect");
     defer ctor.deinit(ctx);
     var args = [_]quickjs.Value{ quickjs.Value.initFloat64(0), quickjs.Value.initFloat64(0), quickjs.Value.initFloat64(0), quickjs.Value.initFloat64(0) };
-    return quickjs.Value.fromCVal(c.JS_CallConstructor(ctx.cval(), ctor.cval(), @intCast(args.len), @ptrCast(&args)));
+    const rect = quickjs.Value.fromCVal(c.JS_CallConstructor(ctx.cval(), ctor.cval(), @intCast(args.len), @ptrCast(&args)));
+    if (rect.isException()) return rect;
+    global.setPropertyStr(ctx, "__zigZeroDOMRect", rect.dup(ctx)) catch return quickjs.Value.exception;
+    return rect;
 }
 
 fn jsElementGetClientRects(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
@@ -9778,6 +9802,11 @@ fn handleArrayToJs(ctx: *quickjs.Context, handles: [*c]u64, len: usize) quickjs.
 fn handleCollectionToJs(ctx: *quickjs.Context, handles: [*c]u64, len: usize) quickjs.Value {
     const array = initNodeListArray(ctx);
     if (array.isException()) return array;
+    const items = nodeListItems(ctx, array) orelse {
+        array.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defer items.deinit(ctx);
     for (0..len) |i| {
         const wrapped = wrapNodeHandle(ctx, handles[i]);
         if (wrapped.isException()) {
@@ -9785,7 +9814,7 @@ fn handleCollectionToJs(ctx: *quickjs.Context, handles: [*c]u64, len: usize) qui
             return quickjs.Value.exception;
         }
         defer wrapped.deinit(ctx);
-        setNodeListIndexedProperty(ctx, array, @intCast(i), wrapped) catch {
+        setNodeListIndexedPropertyWithItems(ctx, array, items, @intCast(i), wrapped) catch {
             array.deinit(ctx);
             return quickjs.Value.exception;
         };
@@ -10468,6 +10497,10 @@ fn initNodeListArray(ctx: *quickjs.Context) quickjs.Value {
 fn setNodeListIndexedProperty(ctx: *quickjs.Context, list: quickjs.Value, index: u32, value: quickjs.Value) !void {
     const items = nodeListItems(ctx, list) orelse return error.JSError;
     defer items.deinit(ctx);
+    try setNodeListIndexedPropertyWithItems(ctx, list, items, index, value);
+}
+
+fn setNodeListIndexedPropertyWithItems(ctx: *quickjs.Context, list: quickjs.Value, items: quickjs.Value, index: u32, value: quickjs.Value) !void {
     try items.setPropertyUint32(ctx, index, value.dup(ctx));
     try defineIndexedCollectionProperty(ctx, list, index, value);
 }

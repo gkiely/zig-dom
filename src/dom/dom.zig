@@ -766,6 +766,48 @@ fn appendTextContent(window: *Window, node_handle: u64, output: *std.ArrayListUn
     }
 }
 
+fn textContentLength(window: *Window, node_handle: u64) usize {
+    const node = resolveNode(window, node_handle) orelse return 0;
+    switch (node.kind) {
+        .text => return node.data.len,
+        .comment => return if (node_handle == node.owner_document) node.data.len else 0,
+        else => {
+            var len: usize = 0;
+            var cursor = node.first_child;
+            while (cursor != 0) {
+                len += textContentLength(window, cursor);
+                const child = resolveNode(window, cursor) orelse break;
+                cursor = child.next_sibling;
+            }
+            return len;
+        },
+    }
+}
+
+fn writeTextContent(window: *Window, node_handle: u64, output: []u8, offset: *usize) void {
+    const node = resolveNode(window, node_handle) orelse return;
+    switch (node.kind) {
+        .text => {
+            @memcpy(output[offset.* .. offset.* + node.data.len], node.data);
+            offset.* += node.data.len;
+        },
+        .comment => {
+            if (node_handle == node.owner_document) {
+                @memcpy(output[offset.* .. offset.* + node.data.len], node.data);
+                offset.* += node.data.len;
+            }
+        },
+        else => {
+            var cursor = node.first_child;
+            while (cursor != 0) {
+                writeTextContent(window, cursor, output, offset);
+                const child = resolveNode(window, cursor) orelse break;
+                cursor = child.next_sibling;
+            }
+        },
+    }
+}
+
 fn clearChildren(window: *Window, node_handle: u64) Status {
     const node = resolveNode(window, node_handle) orelse return .invalid_handle;
     var cursor = node.first_child;
@@ -1563,12 +1605,106 @@ fn matchesAnySelectorChain(window: *Window, node_handle: u64, chains: []const Se
     return false;
 }
 
+const SimpleRoleSelectorList = struct {
+    role: ?[]const u8 = null,
+    tags: [32][]const u8 = undefined,
+    tag_count: usize = 0,
+
+    fn appendTag(self: *SimpleRoleSelectorList, tag: []const u8) bool {
+        if (self.tag_count >= self.tags.len) return false;
+        self.tags[self.tag_count] = tag;
+        self.tag_count += 1;
+        return true;
+    }
+};
+
+fn parseSimpleRoleSelectorList(selector: []const u8) ?SimpleRoleSelectorList {
+    if (std.mem.indexOfScalar(u8, selector, ',') == null) return null;
+
+    var list = SimpleRoleSelectorList{};
+    var parts = std.mem.splitScalar(u8, selector, ',');
+    while (parts.next()) |raw_part| {
+        const part = std.mem.trim(u8, raw_part, " \t\n\r\x0c");
+        if (part.len == 0) return null;
+
+        if (roleTokenSelectorValue(part)) |role| {
+            if (list.role != null) return null;
+            list.role = role;
+            continue;
+        }
+
+        const tag = if (std.mem.startsWith(u8, part, "*|")) part[2..] else part;
+        if (tag.len == 0) return null;
+        for (tag) |ch| {
+            if (!isSelectorIdentChar(ch)) return null;
+        }
+        if (!list.appendTag(tag)) return null;
+    }
+
+    if (list.role == null or list.tag_count == 0) return null;
+    return list;
+}
+
+fn roleTokenSelectorValue(selector: []const u8) ?[]const u8 {
+    const suffix = "\"]";
+    const star_prefix = "*[role~=\"";
+    const bare_prefix = "[role~=\"";
+
+    if (std.mem.startsWith(u8, selector, star_prefix) and std.mem.endsWith(u8, selector, suffix) and selector.len > star_prefix.len + suffix.len) {
+        return selector[star_prefix.len .. selector.len - suffix.len];
+    }
+    if (std.mem.startsWith(u8, selector, bare_prefix) and std.mem.endsWith(u8, selector, suffix) and selector.len > bare_prefix.len + suffix.len) {
+        return selector[bare_prefix.len .. selector.len - suffix.len];
+    }
+    return null;
+}
+
+fn roleAttributeContains(node: *const Node, expected: []const u8) bool {
+    const role = getAttribute(@constCast(node), "role") orelse return false;
+    var iter = std.mem.tokenizeAny(u8, role, " \t\n\r\x0c");
+    while (iter.next()) |token| {
+        if (std.mem.eql(u8, token, expected)) return true;
+    }
+    return false;
+}
+
+fn matchesSimpleRoleSelectorList(node: *const Node, selector: SimpleRoleSelectorList) bool {
+    if (node.kind != .element) return false;
+    if (selector.role) |role| {
+        if (roleAttributeContains(node, role)) return true;
+    }
+    for (selector.tags[0..selector.tag_count]) |tag| {
+        if (std.ascii.eqlIgnoreCase(node.name, tag)) return true;
+    }
+    return false;
+}
+
 fn pushChildrenReverse(window: *Window, node: *const Node, stack: *std.ArrayListUnmanaged(u64)) !void {
     var cursor = node.last_child;
     while (cursor != 0) {
         try stack.append(c_allocator, cursor);
         const child = resolveNode(window, cursor) orelse break;
         cursor = child.prev_sibling;
+    }
+}
+
+fn collectSimpleRoleSelectorElements(window: *Window, root_handle: u64, selector: SimpleRoleSelectorList, include_root: bool, output: *std.ArrayListUnmanaged(u64)) !void {
+    const root = resolveNode(window, root_handle) orelse return;
+    var stack: std.ArrayListUnmanaged(u64) = .empty;
+    defer stack.deinit(c_allocator);
+    if (include_root) {
+        try stack.append(c_allocator, root_handle);
+    } else {
+        try pushChildrenReverse(window, root, &stack);
+    }
+    while (stack.items.len > 0) {
+        const handle = stack.items[stack.items.len - 1];
+        stack.items.len -= 1;
+        const node = resolveNode(window, handle) orelse continue;
+        if (matchesSimpleRoleSelectorList(node, selector)) {
+            try output.append(c_allocator, handle);
+        }
+        try pushChildrenReverse(window, node, &stack);
     }
 }
 
@@ -1661,6 +1797,19 @@ fn outputHandleArray(handles: []const u64, out_ptr: *[*c]u64, out_len: *usize) u
     @memcpy(copy, handles);
     out_ptr.* = @ptrCast(copy.ptr);
     out_len.* = handles.len;
+    return STATUS_OK;
+}
+
+fn outputOwnedHandleArray(handles: *std.ArrayListUnmanaged(u64), out_ptr: *[*c]u64, out_len: *usize) u32 {
+    if (handles.items.len == 0) {
+        out_ptr.* = null;
+        out_len.* = 0;
+        return STATUS_OK;
+    }
+
+    const owned = handles.toOwnedSlice(c_allocator) catch return STATUS_OOM;
+    out_ptr.* = @ptrCast(owned.ptr);
+    out_len.* = owned.len;
     return STATUS_OK;
 }
 
@@ -2121,17 +2270,19 @@ pub export fn zig_dom_node_text_content(node: u64, out_ptr: *[*c]u8, out_len: *u
         return outputString(record.data, out_ptr, out_len);
     }
 
-    var buffer: std.ArrayListUnmanaged(u8) = .empty;
-    defer buffer.deinit(c_allocator);
-
-    var cursor = record.first_child;
-    while (cursor != 0) {
-        appendTextContent(window, cursor, &buffer) catch return STATUS_OOM;
-        const child = resolveNode(window, cursor) orelse break;
-        cursor = child.next_sibling;
+    const len = textContentLength(window, node);
+    if (len == 0) {
+        out_ptr.* = null;
+        out_len.* = 0;
+        return STATUS_OK;
     }
 
-    return outputString(buffer.items, out_ptr, out_len);
+    const buffer = c_allocator.alloc(u8, len) catch return STATUS_OOM;
+    var offset: usize = 0;
+    writeTextContent(window, node, buffer, &offset);
+    out_ptr.* = @ptrCast(buffer.ptr);
+    out_len.* = offset;
+    return STATUS_OK;
 }
 
 pub export fn zig_dom_node_set_text_content(node: u64, data_ptr: [*]const u8, data_len: usize) u32 {
@@ -2242,11 +2393,24 @@ pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
+    const selector = selector_ptr[0..selector_len];
+
+    if (parseSimpleRoleSelectorList(selector)) |simple_role_selector| {
+        var matches: std.ArrayListUnmanaged(u64) = .empty;
+        defer matches.deinit(c_allocator);
+        var cursor = doc_node.first_child;
+        while (cursor != 0) {
+            collectSimpleRoleSelectorElements(window, cursor, simple_role_selector, true, &matches) catch return STATUS_OOM;
+            const child = resolveNode(window, cursor) orelse break;
+            cursor = child.next_sibling;
+        }
+        return outputOwnedHandleArray(&matches, out_ptr, out_len);
+    }
 
     var selectors: std.ArrayListUnmanaged(SelectorChain) = .empty;
     defer deinitSelectorChains(&selectors);
 
-    parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
+    parseSelectorList(selector, &selectors) catch return STATUS_OOM;
     if (selectors.items.len == 0) {
         out_ptr.* = null;
         out_len.* = 0;
@@ -2263,7 +2427,7 @@ pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [
         cursor = child.next_sibling;
     }
 
-    return outputHandleArray(matches.items, out_ptr, out_len);
+    return outputOwnedHandleArray(&matches, out_ptr, out_len);
 }
 
 pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const u8, selector_len: usize, out_ptr: *[*c]u64, out_len: *usize) u32 {
@@ -2272,16 +2436,24 @@ pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const 
     if (root_node.kind != .element and root_node.kind != .document_fragment and root_node.kind != .document) {
         return STATUS_INVALID_ARGUMENT;
     }
+    const selector = selector_ptr[0..selector_len];
+
+    if (parseSimpleRoleSelectorList(selector)) |simple_role_selector| {
+        var matches: std.ArrayListUnmanaged(u64) = .empty;
+        defer matches.deinit(c_allocator);
+        collectSimpleRoleSelectorElements(window, root, simple_role_selector, false, &matches) catch return STATUS_OOM;
+        return outputOwnedHandleArray(&matches, out_ptr, out_len);
+    }
 
     var selectors: std.ArrayListUnmanaged(SelectorChain) = .empty;
     defer deinitSelectorChains(&selectors);
-    parseSelectorList(selector_ptr[0..selector_len], &selectors) catch return STATUS_OOM;
+    parseSelectorList(selector, &selectors) catch return STATUS_OOM;
 
     var matches: std.ArrayListUnmanaged(u64) = .empty;
     defer matches.deinit(c_allocator);
     collectDescendantElements(window, root, selectors.items, &matches) catch return STATUS_OOM;
 
-    return outputHandleArray(matches.items, out_ptr, out_len);
+    return outputOwnedHandleArray(&matches, out_ptr, out_len);
 }
 
 pub export fn zig_dom_node_query_selector(root: u64, selector_ptr: [*]const u8, selector_len: usize, out_handle: *u64) u32 {

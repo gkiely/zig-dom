@@ -413,7 +413,6 @@ pub const HostRunner = struct {
     }
 
     fn runTestEntry(self: *HostRunner, test_entry: *TestEntry, result: *RunResult, only_mode: bool) !void {
-        const profile_start = profileNowNs();
         const full_name = try self.testPath(test_entry);
         defer self.allocator.free(full_name);
         if (test_entry.todo or test_entry.skip or (only_mode and !test_entry.only)) {
@@ -438,7 +437,9 @@ pub const HostRunner = struct {
             return;
         }
 
+        const profile_start = profileNowNs();
         const test_outcome = try self.invokeCallback(test_entry.callback, test_entry.timeout_ms);
+        const elapsed_ms = @as(f64, @floatFromInt(profileNowNs() - profile_start)) / 1_000_000.0;
         defer if (test_outcome.error_text) |text| self.allocator.free(text);
         const after_outcome = try self.runHookList(after_each.items, test_entry.timeout_ms);
         defer if (after_outcome.error_text) |text| self.allocator.free(text);
@@ -459,7 +460,6 @@ pub const HostRunner = struct {
             return;
         }
         result.passed += 1;
-        const elapsed_ms = @as(f64, @floatFromInt(profileNowNs() - profile_start)) / 1_000_000.0;
         try reporter.printPassedLineStdout(self.allocator, self.io, full_name, elapsed_ms);
     }
 
