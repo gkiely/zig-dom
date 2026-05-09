@@ -752,9 +752,12 @@ const ModuleLoaderState = struct {
         const folded_source = try foldNodeEnvConditionals(self.allocator, source);
         defer self.allocator.free(folded_source);
 
+        const package_rewritten_source = try rewriteKnownCommonJsPackageImports(self, module_id, folded_source);
+        defer self.allocator.free(package_rewritten_source);
+
         const pruned_source = blk: {
-            const requested = self.requestedExportsFor(module_id) orelse break :blk try self.allocator.dupe(u8, folded_source);
-            break :blk try pruneUnrequestedCommonJsExports(self.allocator, folded_source, requested);
+            const requested = self.requestedExportsFor(module_id) orelse break :blk try self.allocator.dupe(u8, package_rewritten_source);
+            break :blk try pruneUnrequestedCommonJsExports(self.allocator, package_rewritten_source, requested);
         };
         defer self.allocator.free(pruned_source);
 
@@ -902,6 +905,8 @@ const ModuleLoaderState = struct {
     fn buildLazyCommonJsScriptSource(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
         const folded_source = try foldNodeEnvConditionals(self.allocator, source);
         defer self.allocator.free(folded_source);
+        const package_rewritten_source = try rewriteKnownCommonJsPackageImports(self, module_id, folded_source);
+        defer self.allocator.free(package_rewritten_source);
 
         const module_literal = try escapeJsSingleQuotedString(self.allocator, module_id);
         defer self.allocator.free(module_literal);
@@ -912,7 +917,7 @@ const ModuleLoaderState = struct {
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(self.allocator);
         try appendFmt(self.allocator, &out, "globalThis.__zigLoadCommonJS('{s}', '{s}', null, function(module, exports, require, __filename, __dirname, global) {{\n", .{ module_literal, dirname_literal });
-        try out.appendSlice(self.allocator, folded_source);
+        try out.appendSlice(self.allocator, package_rewritten_source);
         try out.appendSlice(self.allocator,
             \\
             \\});
@@ -3784,6 +3789,179 @@ fn foldNodeEnvConditionals(allocator: Allocator, source: []const u8) ![]u8 {
     }
 
     return out.toOwnedSlice(allocator);
+}
+
+fn rewriteKnownCommonJsPackageImports(state: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
+    if (try rewriteCommonJsRootBarrelRequire(state, module_id, source)) |rewritten| {
+        return rewritten;
+    }
+    return state.allocator.dupe(u8, source);
+}
+
+fn rewriteCommonJsRootBarrelRequire(state: *ModuleLoaderState, module_id: []const u8, source: []const u8) !?[]u8 {
+    const require_index = findBareRootRequire(source) orelse return null;
+    const specifier = parseRequireSpecifierAt(source, require_index) orelse return null;
+    const binding = findCommonJsRequireBinding(source, require_index) orelse return null;
+    const root_module_id = state.normalizeRequireSpecifier(module_id, specifier) catch return null;
+    defer state.allocator.free(root_module_id);
+    if (std.mem.eql(u8, root_module_id, module_id)) return null;
+
+    const root_source = state.readFileCached(root_module_id, max_module_source_bytes) catch return null;
+    if (!isCommonJsSource(root_module_id, root_source)) return null;
+
+    var rewrites: std.ArrayList(CommonJsBarrelPropertyRewrite) = .empty;
+    defer {
+        for (rewrites.items) |*rewrite| rewrite.deinit(state.allocator);
+        rewrites.deinit(state.allocator);
+    }
+
+    var cursor: usize = 0;
+    while (std.mem.indexOfPos(u8, source, cursor, binding)) |binding_index| {
+        const after_binding = binding_index + binding.len;
+        if ((binding_index == 0 or !isIdentifierContinue(source[binding_index - 1])) and
+            after_binding < source.len and
+            source[after_binding] == '.' and
+            after_binding + 1 < source.len and
+            isIdentifierContinue(source[after_binding + 1]))
+        {
+            const prop_start = after_binding + 1;
+            const prop_end = readIdentifierEnd(source, prop_start);
+            const name = source[prop_start..prop_end];
+            if (!barrelRewriteListContains(rewrites.items, name)) {
+                const rewrite = try commonJsBarrelRewriteForExport(state, root_module_id, root_source, name) orelse return null;
+                try rewrites.append(state.allocator, rewrite);
+            }
+            cursor = prop_end;
+            continue;
+        }
+        cursor = after_binding;
+    }
+
+    if (rewrites.items.len == 0) return null;
+
+    var replacement: std.ArrayList(u8) = .empty;
+    errdefer replacement.deinit(state.allocator);
+    try appendFmt(state.allocator, &replacement, "var {s} = {{", .{binding});
+    for (rewrites.items, 0..) |rewrite, index| {
+        if (index > 0) try replacement.appendSlice(state.allocator, ",");
+        try appendFmt(
+            state.allocator,
+            &replacement,
+            "\n  {s}: require(\"{s}\").{s}",
+            .{ rewrite.export_name, rewrite.resolved_specifier, rewrite.member_name },
+        );
+    }
+    try replacement.appendSlice(state.allocator, "\n}");
+    const replacement_source = try replacement.toOwnedSlice(state.allocator);
+    defer state.allocator.free(replacement_source);
+
+    const statement_start = findStatementStart(source, require_index);
+    const statement_end = findStatementEnd(source, statement_start);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(state.allocator);
+    try out.appendSlice(state.allocator, source[0..statement_start]);
+    try out.appendSlice(state.allocator, replacement_source);
+    if (statement_end < source.len and source[statement_end] == ';') {
+        try out.append(state.allocator, ';');
+        try out.appendSlice(state.allocator, source[statement_end + 1 ..]);
+    } else {
+        try out.appendSlice(state.allocator, source[statement_end..]);
+    }
+    return try out.toOwnedSlice(state.allocator);
+}
+
+fn findBareRootRequire(source: []const u8) ?usize {
+    var cursor: usize = 0;
+    while (std.mem.indexOfPos(u8, source, cursor, "require(")) |index| {
+        const specifier = parseRequireSpecifierAt(source, index) orelse {
+            cursor = index + "require(".len;
+            continue;
+        };
+        if (isBarePackageRootSpecifier(specifier) and findCommonJsRequireBinding(source, index) != null) {
+            return index;
+        }
+        cursor = index + "require(".len;
+    }
+    return null;
+}
+
+const CommonJsBarrelPropertyRewrite = struct {
+    export_name: []u8,
+    resolved_specifier: []u8,
+    member_name: []u8,
+
+    fn deinit(self: *CommonJsBarrelPropertyRewrite, allocator: Allocator) void {
+        allocator.free(self.export_name);
+        allocator.free(self.resolved_specifier);
+        allocator.free(self.member_name);
+    }
+};
+
+fn barrelRewriteListContains(items: []const CommonJsBarrelPropertyRewrite, name: []const u8) bool {
+    for (items) |item| {
+        if (std.mem.eql(u8, item.export_name, name)) return true;
+    }
+    return false;
+}
+
+fn commonJsBarrelRewriteForExport(
+    state: *ModuleLoaderState,
+    root_module_id: []const u8,
+    root_source: []const u8,
+    name: []const u8,
+) !?CommonJsBarrelPropertyRewrite {
+    const export_index = findDefinePropertyExport(root_source, name) orelse return null;
+    const statement_end = findStatementEnd(root_source, export_index);
+    const statement = root_source[export_index..statement_end];
+    const return_index = std.mem.indexOf(u8, statement, "return ") orelse return null;
+    const return_expr = std.mem.trim(u8, statement[return_index + "return ".len ..], " \t\r\n;");
+    const dot_index = std.mem.indexOfScalar(u8, return_expr, '.') orelse return null;
+    const local = return_expr[0..dot_index];
+    if (local.len == 0 or !std.mem.startsWith(u8, local, "_")) return null;
+    const member_start = dot_index + 1;
+    const member_end = readIdentifierEnd(return_expr, member_start);
+    if (member_end == member_start) return null;
+    const member = return_expr[member_start..member_end];
+    const required = findCommonJsLocalRequireSpecifier(root_source, local) orelse return null;
+    const resolved = try state.normalizeRequireSpecifier(root_module_id, required);
+    errdefer state.allocator.free(resolved);
+    return .{
+        .export_name = try state.allocator.dupe(u8, name),
+        .resolved_specifier = resolved,
+        .member_name = try state.allocator.dupe(u8, member),
+    };
+}
+
+fn findDefinePropertyExport(source: []const u8, name: []const u8) ?usize {
+    var cursor: usize = 0;
+    while (std.mem.indexOfPos(u8, source, cursor, "Object.defineProperty(exports,")) |index| {
+        if (parseDefinePropertyExportName(source[index..])) |export_name| {
+            if (std.mem.eql(u8, export_name, name)) return index;
+        }
+        cursor = index + "Object.defineProperty(exports,".len;
+    }
+    return null;
+}
+
+fn findCommonJsLocalRequireSpecifier(source: []const u8, local: []const u8) ?[]const u8 {
+    var cursor: usize = 0;
+    while (std.mem.indexOfPos(u8, source, cursor, "require(")) |require_index| {
+        const binding = findCommonJsRequireBinding(source, require_index) orelse {
+            cursor = require_index + "require(".len;
+            continue;
+        };
+        if (std.mem.eql(u8, binding, local)) {
+            return parseRequireSpecifierAt(source, require_index);
+        }
+        cursor = require_index + "require(".len;
+    }
+    return null;
+}
+
+fn findStatementStart(source: []const u8, index: usize) usize {
+    var cursor = index;
+    while (cursor > 0 and source[cursor - 1] != '\n' and source[cursor - 1] != ';') : (cursor -= 1) {}
+    return cursor;
 }
 
 const NodeEnvConditional = struct {
