@@ -175,6 +175,7 @@ fn installProcess(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
         process.setPropertyStr(ctx, "env", env.dup(ctx)) catch return error.JSError;
     }
     try setString(ctx, env, "ZIG_DOM_SKIP_TESTING_LIBRARY", "1");
+    try setString(ctx, env, "ZIG_DOM", "1");
 
     const argv = quickjs.Value.initArray(ctx);
     if (argv.isException()) return error.JSError;

@@ -323,14 +323,16 @@ pub const HostMocks = struct {
     }
 
     fn putMockModuleSource(self: *HostMocks, specifier: []const u8, source: []const u8) !void {
-        const key = try self.allocator.dupe(u8, specifier);
-        errdefer self.allocator.free(key);
         const value = try self.allocator.dupe(u8, source);
         errdefer self.allocator.free(value);
 
-        if (try self.mock_module_sources.fetchPut(key, value)) |previous| {
-            self.allocator.free(previous.key);
-            self.allocator.free(previous.value);
+        if (self.mock_module_sources.getEntry(specifier)) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+            entry.value_ptr.* = value;
+        } else {
+            const key = try self.allocator.dupe(u8, specifier);
+            errdefer self.allocator.free(key);
+            try self.mock_module_sources.put(key, value);
         }
 
         try self.publishMockModuleManifest();
