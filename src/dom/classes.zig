@@ -2326,16 +2326,7 @@ fn jsConstructObserver(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _:
     return obj;
 }
 
-fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
-    const ctx = ctx_opt orelse return quickjs.Value.exception;
-    const args: []const quickjs.Value = @ptrCast(raw_args);
-    const profile = classProfileEnabled();
-    const start = if (profile) classProfileNowNs() else 0;
-    defer if (profile) {
-        class_perf_stats.computed_style_calls += 1;
-        class_perf_stats.computed_style_ns += classProfileNowNs() - start;
-    };
-
+fn createComputedStyleObject(ctx: *quickjs.Context) quickjs.Value {
     const style = quickjs.Value.initObject(ctx);
     if (style.isException()) return style;
     installMethod(ctx, style, "getPropertyValue", jsComputedStyleGetPropertyValue, 1) catch return quickjs.Value.exception;
@@ -2346,13 +2337,57 @@ fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_ar
     style.setPropertyStr(ctx, "color", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "text-decoration", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "textDecoration", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    return style;
+}
 
-    if (args.len > 0 and args[0].isObject()) {
-        if (computedStyleStylesheetParsingEnabled()) {
-            applyComputedStyleFromStylesheets(ctx, args[0], style);
-        }
-        applyComputedStyleFromInline(ctx, args[0], style);
+fn defaultComputedStyleObject(ctx: *quickjs.Context) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const cached = global.getPropertyStr(ctx, "__zigDefaultComputedStyle");
+    if (!cached.isException() and cached.isObject()) return cached;
+    cached.deinit(ctx);
+
+    const style = createComputedStyleObject(ctx);
+    if (style.isException()) return style;
+    global.setPropertyStr(ctx, "__zigDefaultComputedStyle", style.dup(ctx)) catch return quickjs.Value.exception;
+    return style;
+}
+
+fn elementNeedsComputedStyleOverlay(ctx: *quickjs.Context, element: quickjs.Value) bool {
+    const element_handle = parseThisHandle(ctx, element, "getComputedStyle") orelse return false;
+    if (zig_dom.zig_dom_element_has_attribute(element_handle, "style", "style".len) == 1) return true;
+
+    const inline_style = element.getPropertyStr(ctx, "__zigStyle");
+    defer inline_style.deinit(ctx);
+    if (!inline_style.isObject()) return false;
+    return getBoolProperty(ctx, inline_style, "__zigHasMutations") orelse false;
+}
+
+fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const profile = classProfileEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.computed_style_calls += 1;
+        class_perf_stats.computed_style_ns += classProfileNowNs() - start;
+    };
+
+    if (args.len == 0 or !args[0].isObject()) {
+        return defaultComputedStyleObject(ctx);
     }
+
+    if (!computedStyleStylesheetParsingEnabled() and !elementNeedsComputedStyleOverlay(ctx, args[0])) {
+        return defaultComputedStyleObject(ctx);
+    }
+
+    const style = createComputedStyleObject(ctx);
+    if (style.isException()) return style;
+
+    if (computedStyleStylesheetParsingEnabled()) {
+        applyComputedStyleFromStylesheets(ctx, args[0], style);
+    }
+    applyComputedStyleFromInline(ctx, args[0], style);
     return style;
 }
 
@@ -4266,6 +4301,7 @@ fn jsElementStyleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quic
     installAccessor(ctx, style, "textDecoration", jsStyleTextDecorationGet, jsStyleTextDecorationSet) catch return quickjs.Value.exception;
     installAccessor(ctx, style, "color", jsStyleColorGet, jsStyleColorSet) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "cssText", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "__zigHasMutations", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "animation", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "transition", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     const current_style = elementAttributeGet(ctx, this_value, "style", "");
@@ -4275,6 +4311,9 @@ fn jsElementStyleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quic
     if (current_text) |text| {
         const declarations = text.ptr[0..text.len];
         style.setPropertyStr(ctx, "cssText", quickjs.Value.initStringLen(ctx, declarations)) catch return quickjs.Value.exception;
+        if (declarations.len > 0) {
+            style.setPropertyStr(ctx, "__zigHasMutations", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+        }
         applyCssDeclarationsToInlineStyle(ctx, style, declarations);
     }
     this_value.setPropertyStr(ctx, "__zigStyle", style.dup(ctx)) catch return quickjs.Value.exception;
@@ -4371,6 +4410,7 @@ fn jsStyleSetProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw
     } else {
         this_value.setPropertyStr(ctx, "__zigColor", quickjs.Value.initStringLen(ctx, next_value)) catch return quickjs.Value.exception;
     }
+    this_value.setPropertyStr(ctx, "__zigHasMutations", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
     return quickjs.Value.undefined;
 }
 
