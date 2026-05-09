@@ -2468,7 +2468,7 @@ fn elementHasClassName(ctx: *quickjs.Context, element: quickjs.Value, class_name
 }
 
 fn applyComputedStyleFromInline(ctx: *quickjs.Context, element: quickjs.Value, computed_style: quickjs.Value) void {
-    const inline_style = element.getPropertyStr(ctx, "style");
+    const inline_style = element.getPropertyStr(ctx, "__zigStyle");
     defer inline_style.deinit(ctx);
     if (inline_style.isObject()) {
         copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "display");
@@ -2485,6 +2485,9 @@ fn applyComputedStyleFromInline(ctx: *quickjs.Context, element: quickjs.Value, c
             computed_style.setPropertyStr(ctx, "text-decoration", text_decoration.dup(ctx)) catch {};
         }
     }
+
+    const element_handle = parseThisHandle(ctx, element, "getComputedStyle") orelse return;
+    if (zig_dom.zig_dom_element_has_attribute(element_handle, "style", "style".len) != 1) return;
 
     const style_attr = elementAttributeGet(ctx, element, "style", "");
     defer style_attr.deinit(ctx);
