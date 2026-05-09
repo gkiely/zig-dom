@@ -69,6 +69,44 @@ var debug_windows_destroyed: u64 = 0;
 var debug_nodes_created: u64 = 0;
 var debug_nodes_destroyed: u64 = 0;
 
+const DomPerfStats = struct {
+    query_selector_all_calls: u64 = 0,
+    query_selector_all_ns: i128 = 0,
+    role_selector_fast_calls: u64 = 0,
+    role_selector_fast_ns: i128 = 0,
+    text_content_calls: u64 = 0,
+    text_content_ns: i128 = 0,
+};
+
+var dom_perf_stats = DomPerfStats{};
+
+fn domProfileEnabled() bool {
+    const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM") orelse return false;
+    return !std.mem.eql(u8, std.mem.span(raw), "0");
+}
+
+fn profileNowNs() i128 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+    return (@as(i128, ts.sec) * 1_000_000_000) + @as(i128, ts.nsec);
+}
+
+fn printDomPerfStats() void {
+    if (!domProfileEnabled()) return;
+    std.debug.print(
+        "[zig-dom dom profile] qsa_calls={d} qsa_ms={d:.3} role_fast_calls={d} role_fast_ms={d:.3} text_content_calls={d} text_content_ms={d:.3}\n",
+        .{
+            dom_perf_stats.query_selector_all_calls,
+            @as(f64, @floatFromInt(dom_perf_stats.query_selector_all_ns)) / 1_000_000.0,
+            dom_perf_stats.role_selector_fast_calls,
+            @as(f64, @floatFromInt(dom_perf_stats.role_selector_fast_ns)) / 1_000_000.0,
+            dom_perf_stats.text_content_calls,
+            @as(f64, @floatFromInt(dom_perf_stats.text_content_ns)) / 1_000_000.0,
+        },
+    );
+    dom_perf_stats = .{};
+}
+
 fn resolveWindow(window_handle: u64) ?*Window {
     if (window_handle == 0) return null;
     const index: usize = @intCast(window_handle - 1);
@@ -1900,6 +1938,7 @@ pub export fn zig_dom_create_window(out_window: *u64) u32 {
 }
 
 pub export fn zig_dom_destroy_window(window: u64) void {
+    printDomPerfStats();
     destroyWindowInternal(window);
 }
 
@@ -2263,6 +2302,13 @@ pub export fn zig_dom_element_attributes_json(element: u64, out_ptr: *[*c]u8, ou
 }
 
 pub export fn zig_dom_node_text_content(node: u64, out_ptr: *[*c]u8, out_len: *usize) u32 {
+    const profile = domProfileEnabled();
+    const start = if (profile) profileNowNs() else 0;
+    defer if (profile) {
+        dom_perf_stats.text_content_calls += 1;
+        dom_perf_stats.text_content_ns += profileNowNs() - start;
+    };
+
     const window = resolveNodeWindow(node) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, node) orelse return STATUS_INVALID_HANDLE;
 
@@ -2390,12 +2436,25 @@ pub export fn zig_dom_document_query_selector(document: u64, selector_ptr: [*]co
 }
 
 pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [*]const u8, selector_len: usize, out_ptr: *[*c]u64, out_len: *usize) u32 {
+    const profile = domProfileEnabled();
+    const start = if (profile) profileNowNs() else 0;
+    defer if (profile) {
+        dom_perf_stats.query_selector_all_calls += 1;
+        dom_perf_stats.query_selector_all_ns += profileNowNs() - start;
+    };
+
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const doc_node = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (doc_node.kind != .document) return STATUS_INVALID_ARGUMENT;
     const selector = selector_ptr[0..selector_len];
 
     if (parseSimpleRoleSelectorList(selector)) |simple_role_selector| {
+        const role_start = if (profile) profileNowNs() else 0;
+        defer if (profile) {
+            dom_perf_stats.role_selector_fast_calls += 1;
+            dom_perf_stats.role_selector_fast_ns += profileNowNs() - role_start;
+        };
+
         var matches: std.ArrayListUnmanaged(u64) = .empty;
         defer matches.deinit(c_allocator);
         var cursor = doc_node.first_child;
@@ -2431,6 +2490,13 @@ pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [
 }
 
 pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const u8, selector_len: usize, out_ptr: *[*c]u64, out_len: *usize) u32 {
+    const profile = domProfileEnabled();
+    const start = if (profile) profileNowNs() else 0;
+    defer if (profile) {
+        dom_perf_stats.query_selector_all_calls += 1;
+        dom_perf_stats.query_selector_all_ns += profileNowNs() - start;
+    };
+
     const window = resolveNodeWindow(root) orelse return STATUS_INVALID_HANDLE;
     const root_node = resolveNode(window, root) orelse return STATUS_INVALID_HANDLE;
     if (root_node.kind != .element and root_node.kind != .document_fragment and root_node.kind != .document) {
@@ -2439,6 +2505,12 @@ pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const 
     const selector = selector_ptr[0..selector_len];
 
     if (parseSimpleRoleSelectorList(selector)) |simple_role_selector| {
+        const role_start = if (profile) profileNowNs() else 0;
+        defer if (profile) {
+            dom_perf_stats.role_selector_fast_calls += 1;
+            dom_perf_stats.role_selector_fast_ns += profileNowNs() - role_start;
+        };
+
         var matches: std.ArrayListUnmanaged(u64) = .empty;
         defer matches.deinit(c_allocator);
         collectSimpleRoleSelectorElements(window, root, simple_role_selector, false, &matches) catch return STATUS_OOM;

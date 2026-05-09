@@ -17,6 +17,52 @@ const installConstructor = bindings.installConstructor;
 const installGetter = bindings.installGetter;
 const installMethod = bindings.installMethod;
 
+const ClassPerfStats = struct {
+    handle_collection_calls: u64 = 0,
+    handle_collection_ns: i128 = 0,
+    dispatch_event_calls: u64 = 0,
+    dispatch_event_ns: i128 = 0,
+    computed_style_calls: u64 = 0,
+    computed_style_ns: i128 = 0,
+    bounding_rect_calls: u64 = 0,
+    bounding_rect_ns: i128 = 0,
+    focus_calls: u64 = 0,
+    focus_ns: i128 = 0,
+};
+
+var class_perf_stats = ClassPerfStats{};
+
+fn classProfileEnabled() bool {
+    const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM") orelse return false;
+    return !std.mem.eql(u8, std.mem.span(raw), "0");
+}
+
+fn classProfileNowNs() i128 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+    return (@as(i128, ts.sec) * 1_000_000_000) + @as(i128, ts.nsec);
+}
+
+fn printClassPerfStats() void {
+    if (!classProfileEnabled()) return;
+    std.debug.print(
+        "[zig-dom class profile] collections={d}/{d:.3}ms dispatch={d}/{d:.3}ms computed_style={d}/{d:.3}ms rect={d}/{d:.3}ms focus={d}/{d:.3}ms\n",
+        .{
+            class_perf_stats.handle_collection_calls,
+            @as(f64, @floatFromInt(class_perf_stats.handle_collection_ns)) / 1_000_000.0,
+            class_perf_stats.dispatch_event_calls,
+            @as(f64, @floatFromInt(class_perf_stats.dispatch_event_ns)) / 1_000_000.0,
+            class_perf_stats.computed_style_calls,
+            @as(f64, @floatFromInt(class_perf_stats.computed_style_ns)) / 1_000_000.0,
+            class_perf_stats.bounding_rect_calls,
+            @as(f64, @floatFromInt(class_perf_stats.bounding_rect_ns)) / 1_000_000.0,
+            class_perf_stats.focus_calls,
+            @as(f64, @floatFromInt(class_perf_stats.focus_ns)) / 1_000_000.0,
+        },
+    );
+    class_perf_stats = .{};
+}
+
 const EventTargetCallbacks = struct {
     pub const addEventListener = jsEventTargetAddEventListener;
     pub const removeEventListener = jsEventTargetRemoveEventListener;
@@ -187,6 +233,7 @@ pub const DomClasses = struct {
     }
 
     pub fn deinit(self: *DomClasses) void {
+        printClassPerfStats();
         self.* = .{
             .allocator = self.allocator,
         };
@@ -2104,6 +2151,13 @@ fn jsConstructObserver(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _:
 
 fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const profile = classProfileEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.computed_style_calls += 1;
+        class_perf_stats.computed_style_ns += classProfileNowNs() - start;
+    };
+
     const cached = this_value.getPropertyStr(ctx, "__zigComputedStyle");
     if (!cached.isException() and cached.isObject()) return cached;
     cached.deinit(ctx);
@@ -4403,29 +4457,39 @@ fn isSimpleTagSelector(selector: []const u8) bool {
 }
 
 fn isKnownFastSelector(selector: []const u8) bool {
-    return std.mem.eql(u8, selector, "a[href]") or
-        std.mem.eql(u8, selector, "a[href]:not([href=\"\"])") or
-        std.mem.eql(u8, selector, "h1") or
-        std.mem.eql(u8, selector, "h2") or
-        std.mem.eql(u8, selector, "h3") or
-        std.mem.eql(u8, selector, "h4") or
-        std.mem.eql(u8, selector, "h5") or
-        std.mem.eql(u8, selector, "h6") or
-        std.mem.eql(u8, selector, "input:not([type])") or
-        std.mem.eql(u8, selector, "input[type=\"text\"]") or
-        std.mem.eql(u8, selector, "input[type=\"search\"]") or
-        std.mem.eql(u8, selector, "input[name*=user i]") or
-        std.mem.eql(u8, selector, "a") or
-        std.mem.eql(u8, selector, "area") or
-        isRoleTokenSelector(selector) or
-        std.mem.eql(u8, selector, "svg > title") or
-        std.mem.eql(u8, selector, ":scope > p") or
-        std.mem.eql(u8, selector, ":scope > span") or
-        std.mem.eql(u8, selector, "section > p") or
-        std.mem.eql(u8, selector, "h1 + p") or
-        std.mem.eql(u8, selector, "#scope") or
-        std.mem.eql(u8, selector, ".copy") or
-        std.mem.eql(u8, selector, "[data-kind|='alpha']");
+    return isKnownLiteralSelector(selector) or isRoleTokenSelector(selector);
+}
+
+fn isKnownLiteralSelector(selector: []const u8) bool {
+    const selectors = comptime [_][]const u8{
+        "a",
+        "a[href]",
+        "a[href]:not([href=\"\"])",
+        "area",
+        "h1",
+        "h1 + p",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "input[name*=user i]",
+        "input:not([type])",
+        "input[type=\"search\"]",
+        "input[type=\"text\"]",
+        "svg > title",
+        ":scope > p",
+        ":scope > span",
+        "section > p",
+        "#scope",
+        ".copy",
+        "[data-kind|='alpha']",
+    };
+
+    inline for (selectors) |known| {
+        if (selector.len == known.len and std.mem.eql(u8, selector, known)) return true;
+    }
+    return false;
 }
 
 fn isRoleTokenSelector(selector: []const u8) bool {
@@ -4804,6 +4868,13 @@ fn jsElementAttachShadow(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
 
 fn jsElementFocus(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const profile = classProfileEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.focus_calls += 1;
+        class_perf_stats.focus_ns += classProfileNowNs() - start;
+    };
+
     const document = jsNodeOwnerDocumentGet(ctx, this_value);
     defer document.deinit(ctx);
     if (!document.isException() and document.isObject()) {
@@ -4883,6 +4954,13 @@ fn jsElementSelect(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []c
 
 fn jsElementGetBoundingClientRect(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const profile = classProfileEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.bounding_rect_calls += 1;
+        class_perf_stats.bounding_rect_ns += classProfileNowNs() - start;
+    };
+
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const cached = global.getPropertyStr(ctx, "__zigZeroDOMRect");
@@ -7076,6 +7154,13 @@ fn jsEventTargetRemoveEventListener(ctx_opt: ?*quickjs.Context, this_value: quic
 
 fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const profile = classProfileEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.dispatch_event_calls += 1;
+        class_perf_stats.dispatch_event_ns += classProfileNowNs() - start;
+    };
+
     const args: []const quickjs.Value = @ptrCast(raw_args);
     if (args.len == 0 or !args[0].isObject()) return throwOperationMessage(ctx, "dispatchEvent", "event argument must be an object");
     const event = args[0];
@@ -9800,6 +9885,13 @@ fn handleArrayToJs(ctx: *quickjs.Context, handles: [*c]u64, len: usize) quickjs.
 }
 
 fn handleCollectionToJs(ctx: *quickjs.Context, handles: [*c]u64, len: usize) quickjs.Value {
+    const profile = classProfileEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.handle_collection_calls += 1;
+        class_perf_stats.handle_collection_ns += classProfileNowNs() - start;
+    };
+
     const array = initNodeListArray(ctx);
     if (array.isException()) return array;
     const items = nodeListItems(ctx, array) orelse {
