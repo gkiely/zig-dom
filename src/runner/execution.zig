@@ -512,7 +512,7 @@ const ModuleLoaderState = struct {
             .requested_exports = std.StringHashMap(ExportNameSet).init(allocator),
             .path_alias_root = null,
             .path_aliases = .empty,
-            .profile_enabled = std.c.getenv("ZIG_DOM_PROFILE") != null,
+            .profile_enabled = std.c.getenv("ZIG_DOM_PROFILE") == null or !std.mem.eql(u8, std.mem.span(std.c.getenv("ZIG_DOM_PROFILE").?), "0"),
             .profile_transform_ns = 0,
             .profile_onload_ns = 0,
             .profile_compile_ns = 0,

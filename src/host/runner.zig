@@ -99,6 +99,12 @@ const CallbackOutcome = struct {
     error_text: ?[]u8 = null,
 };
 
+fn profileNowNs() i128 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+    return (@as(i128, ts.sec) * 1_000_000_000) + @as(i128, ts.nsec);
+}
+
 pub const HostRunner = struct {
     allocator: Allocator,
     rt: *quickjs.Runtime,
@@ -402,6 +408,7 @@ pub const HostRunner = struct {
     }
 
     fn runTestEntry(self: *HostRunner, test_entry: *TestEntry, result: *RunResult, only_mode: bool) !void {
+        const profile_start = profileNowNs();
         const full_name = try self.testPath(test_entry);
         defer self.allocator.free(full_name);
         if (test_entry.todo or test_entry.skip or (only_mode and !test_entry.only)) {
@@ -447,6 +454,8 @@ pub const HostRunner = struct {
             return;
         }
         result.passed += 1;
+        const elapsed_ms = @as(f64, @floatFromInt(profileNowNs() - profile_start)) / 1_000_000.0;
+        std.debug.print("[zig-dom test] {d:.3}ms {s}\n", .{ elapsed_ms, full_name });
     }
 
     fn collectBeforeEach(self: *HostRunner, scope: *Scope, out: *std.ArrayList(Hook)) !void {
