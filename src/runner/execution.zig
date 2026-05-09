@@ -480,6 +480,17 @@ const ModuleLoaderState = struct {
         target: []u8,
     };
 
+    const ProfileModuleKind = enum {
+        module,
+        cjs,
+    };
+
+    const ProfileModuleEntry = struct {
+        kind: ProfileModuleKind,
+        elapsed_ns: i128,
+        path: []u8,
+    };
+
     allocator: Allocator,
     io: std.Io,
     runtime: ?*Runtime,
@@ -490,6 +501,8 @@ const ModuleLoaderState = struct {
     path_alias_root: ?[]u8,
     path_aliases: std.ArrayList(PathAlias),
     profile_enabled: bool,
+    profile_modules_enabled: bool,
+    profile_module_entries: std.ArrayList(ProfileModuleEntry),
     profile_transform_ns: i128,
     profile_onload_ns: i128,
     profile_compile_ns: i128,
@@ -513,6 +526,8 @@ const ModuleLoaderState = struct {
             .path_alias_root = null,
             .path_aliases = .empty,
             .profile_enabled = std.c.getenv("ZIG_DOM_PROFILE") == null or !std.mem.eql(u8, std.mem.span(std.c.getenv("ZIG_DOM_PROFILE").?), "0"),
+            .profile_modules_enabled = std.c.getenv("ZIG_DOM_PROFILE_MODULES") != null,
+            .profile_module_entries = .empty,
             .profile_transform_ns = 0,
             .profile_onload_ns = 0,
             .profile_compile_ns = 0,
@@ -528,6 +543,11 @@ const ModuleLoaderState = struct {
 
     fn deinit(self: *ModuleLoaderState) void {
         self.clearPathAliases();
+
+        for (self.profile_module_entries.items) |entry| {
+            self.allocator.free(entry.path);
+        }
+        self.profile_module_entries.deinit(self.allocator);
 
         var mock_iterator = self.mock_module_sources.iterator();
         while (mock_iterator.next()) |entry| {
@@ -558,6 +578,36 @@ const ModuleLoaderState = struct {
 
     fn profileNow(self: *ModuleLoaderState) i128 {
         return std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
+    }
+
+    fn recordProfileModule(self: *ModuleLoaderState, kind: ProfileModuleKind, elapsed_ns: i128, path: []const u8) !void {
+        if (!self.profile_modules_enabled) return;
+        try self.profile_module_entries.append(self.allocator, .{
+            .kind = kind,
+            .elapsed_ns = elapsed_ns,
+            .path = try self.allocator.dupe(u8, path),
+        });
+    }
+
+    fn printProfileModules(self: *ModuleLoaderState) void {
+        if (!self.profile_modules_enabled) return;
+        std.mem.sort(ProfileModuleEntry, self.profile_module_entries.items, {}, profileModuleSlowerThan);
+        for (self.profile_module_entries.items) |entry| {
+            switch (entry.kind) {
+                .module => std.debug.print("[zig-dom profile module] compile_ms={d:.3} {s}\n", .{
+                    @as(f64, @floatFromInt(entry.elapsed_ns)) / 1_000_000.0,
+                    entry.path,
+                }),
+                .cjs => std.debug.print("[zig-dom profile cjs] eval_ms={d:.3} {s}\n", .{
+                    @as(f64, @floatFromInt(entry.elapsed_ns)) / 1_000_000.0,
+                    entry.path,
+                }),
+            }
+        }
+    }
+
+    fn profileModuleSlowerThan(_: void, lhs: ProfileModuleEntry, rhs: ProfileModuleEntry) bool {
+        return lhs.elapsed_ns > rhs.elapsed_ns;
     }
 
     fn requestedExportsFor(self: *ModuleLoaderState, module_id: []const u8) ?*ExportNameSet {
@@ -906,12 +956,7 @@ const ModuleLoaderState = struct {
             const elapsed = self.profileNow() - compile_start;
             self.profile_compile_ns += elapsed;
             self.profile_module_count += 1;
-            if (std.c.getenv("ZIG_DOM_PROFILE_MODULES") != null) {
-                std.debug.print("[zig-dom profile cjs] eval_ms={d:.3} {s}\n", .{
-                    @as(f64, @floatFromInt(elapsed)) / 1_000_000.0,
-                    resolved,
-                });
-            }
+            try self.recordProfileModule(.cjs, elapsed, resolved);
         }
         if (value.isException()) return error.EvaluationFailed;
         return value;
@@ -3102,6 +3147,10 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         };
     }
 
+    if (module_loader_state.profile_enabled) {
+        module_loader_state.printProfileModules();
+    }
+
     const runner_start = if (module_loader_state.profile_enabled) module_loader_state.profileNow() else 0;
     vm.evalScript("<zig-runner-bootstrap>", run_bootstrap_source) catch |err| {
         return failureFromRuntimeException(allocator, path, "failed to start file execution", err, &vm);
@@ -3409,12 +3458,10 @@ fn moduleLoad(
         const elapsed = state.profileNow() - compile_start;
         state.profile_compile_ns += elapsed;
         state.profile_module_count += 1;
-        if (std.c.getenv("ZIG_DOM_PROFILE_MODULES") != null) {
-            std.debug.print("[zig-dom profile module] compile_ms={d:.3} {s}\n", .{
-                @as(f64, @floatFromInt(elapsed)) / 1_000_000.0,
-                module_id,
-            });
-        }
+        state.recordProfileModule(.module, elapsed, module_id) catch {
+            _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
+            return null;
+        };
     }
     if (compiled.isException()) {
         return null;
