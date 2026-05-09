@@ -34,6 +34,18 @@ pub fn printBanner(version: []const u8, commit_sha: []const u8) void {
     std.debug.print("{s}zig-dom test{s} {s}v{s} ({s}){s}\n\n", .{ bold, reset, dim, version, commit_sha, reset });
 }
 
+pub fn printBannerStdout(allocator: std.mem.Allocator, io: std.Io, version: []const u8, commit_sha: []const u8) !void {
+    const text = try std.fmt.allocPrint(allocator, "{s}zig-dom test{s} {s}v{s} ({s}){s}\n\n", .{ bold, reset, dim, version, commit_sha, reset });
+    defer allocator.free(text);
+    try std.Io.File.writeStreamingAll(.stdout(), io, text);
+}
+
+pub fn printFileHeaderStdout(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !void {
+    const text = try std.fmt.allocPrint(allocator, "{s}:\n", .{path});
+    defer allocator.free(text);
+    try std.Io.File.writeStreamingAll(.stdout(), io, text);
+}
+
 pub fn printFileResult(
     path: []const u8,
     passed: usize,
@@ -44,6 +56,17 @@ pub fn printFileResult(
     passed_report: ?[]const u8,
 ) void {
     std.debug.print("{s}:\n", .{path});
+    printFileResultWithoutHeader(passed, failed, skipped, timed_out, collection_errors, passed_report);
+}
+
+pub fn printFileResultWithoutHeader(
+    passed: usize,
+    failed: usize,
+    skipped: usize,
+    timed_out: usize,
+    collection_errors: usize,
+    passed_report: ?[]const u8,
+) void {
     if (passed_report) |report| {
         var lines = std.mem.splitScalar(u8, report, '\n');
         while (lines.next()) |line| {

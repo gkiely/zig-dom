@@ -84,19 +84,37 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
     const prepared = try transform.runUpfront(allocator, io, discovered.paths);
     defer prepared.deinit(allocator);
 
+    try reporter.printBannerStdout(allocator, io, build_info.version, build_info.commit_sha);
+
     const run_start = std.Io.Clock.Timestamp.now(io, .awake);
-    var summary = try execution.runFiles(allocator, io, prepared.paths, resolved_setup_files, parsed.dom_mode);
-    defer summary.deinit(allocator);
-    const elapsed_ms = @as(f64, @floatFromInt(run_start.untilNow(io).raw.toMilliseconds()));
+    var results: std.ArrayList(execution.FileResult) = .empty;
+    defer {
+        for (results.items) |*item| item.deinit(allocator);
+        results.deinit(allocator);
+    }
 
-    reporter.printBanner(build_info.version, build_info.commit_sha);
-
+    var total_passed: usize = 0;
+    var total_failed: usize = 0;
+    var total_skipped: usize = 0;
+    var total_timed_out: usize = 0;
+    var total_collection_errors: usize = 0;
     var total_expect_calls: usize = 0;
-    for (summary.files) |file_result| {
-        const display_path = displayPath(parsed.root_dir, file_result.path);
+
+    for (prepared.paths) |path| {
+        try reporter.printFileHeaderStdout(allocator, io, displayPath(parsed.root_dir, path));
+
+        var file_result = try execution.runSingleFile(allocator, io, path, resolved_setup_files, parsed.dom_mode);
+        errdefer file_result.deinit(allocator);
+
+        total_passed += file_result.passed;
+        total_failed += file_result.failed;
+        total_skipped += file_result.skipped;
+        total_timed_out += file_result.timed_out;
+        total_collection_errors += file_result.collection_errors;
         total_expect_calls += file_result.expect_calls;
-        reporter.printFileResult(
-            display_path,
+
+        const display_path = displayPath(parsed.root_dir, file_result.path);
+        reporter.printFileResultWithoutHeader(
             file_result.passed,
             file_result.failed,
             file_result.skipped,
@@ -112,20 +130,23 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
         if (file_result.failure_report) |failure_report| {
             reporter.printFailureReport(display_path, failure_report);
         }
+
+        try results.append(allocator, file_result);
     }
+    const elapsed_ms = @as(f64, @floatFromInt(run_start.untilNow(io).raw.toMilliseconds()));
 
     reporter.printSummary(
-        summary.total_passed,
-        summary.total_failed,
-        summary.total_skipped,
-        summary.total_timed_out,
-        summary.total_collection_errors,
+        total_passed,
+        total_failed,
+        total_skipped,
+        total_timed_out,
+        total_collection_errors,
         total_expect_calls,
-        summary.files.len,
+        results.items.len,
         elapsed_ms,
     );
 
-    return if (summary.hasFailures()) 1 else 0;
+    return if (total_failed > 0 or total_timed_out > 0 or total_collection_errors > 0) 1 else 0;
 }
 
 fn displayPath(root_dir: []const u8, path: []const u8) []const u8 {

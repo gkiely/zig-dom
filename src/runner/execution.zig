@@ -2997,7 +2997,7 @@ fn pathImpliesDom(path: []const u8, suffixes: []const []const u8) bool {
     return false;
 }
 
-fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths: []const []const u8, dom_mode: DomMode) !FileResult {
+pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths: []const []const u8, dom_mode: DomMode) !FileResult {
     const entry_module_id = canonicalizePath(allocator, io, path) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
