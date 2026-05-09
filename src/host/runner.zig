@@ -415,7 +415,8 @@ pub const HostRunner = struct {
     }
 
     fn runTestEntry(self: *HostRunner, test_entry: *TestEntry, result: *RunResult, only_mode: bool) !void {
-        defer self.restoreAllSpies();
+        const spy_checkpoint = self.captureSpyCheckpoint();
+        defer self.restoreSpiesSince(spy_checkpoint);
 
         const full_name = try self.testPath(test_entry);
         defer self.allocator.free(full_name);
@@ -480,6 +481,47 @@ pub const HostRunner = struct {
         if (result.isException()) {
             const exception = self.ctx.getException();
             exception.deinit(self.ctx);
+        }
+    }
+
+    fn captureSpyCheckpoint(self: *HostRunner) i32 {
+        const global = self.ctx.getGlobalObject();
+        defer global.deinit(self.ctx);
+
+        const get_count = global.getPropertyStr(self.ctx, "__zigGetSpyCount");
+        defer get_count.deinit(self.ctx);
+        if (get_count.isException() or !get_count.isFunction(self.ctx)) return 0;
+
+        const result = get_count.call(self.ctx, quickjs.Value.undefined, &.{});
+        defer result.deinit(self.ctx);
+        if (result.isException()) {
+            const exception = self.ctx.getException();
+            exception.deinit(self.ctx);
+            return 0;
+        }
+        return result.toInt32(self.ctx) catch 0;
+    }
+
+    fn restoreSpiesSince(self: *HostRunner, checkpoint: i32) void {
+        const global = self.ctx.getGlobalObject();
+        defer global.deinit(self.ctx);
+
+        const restore_since = global.getPropertyStr(self.ctx, "__zigRestoreSpiesSince");
+        defer restore_since.deinit(self.ctx);
+        if (restore_since.isException() or !restore_since.isFunction(self.ctx)) {
+            self.restoreAllSpies();
+            return;
+        }
+
+        var checkpoint_value = quickjs.Value.initInt32(if (checkpoint > 0) checkpoint else 0);
+        defer checkpoint_value.deinit(self.ctx);
+        var args = [_]quickjs.Value{checkpoint_value};
+        const result = restore_since.call(self.ctx, quickjs.Value.undefined, &args);
+        defer result.deinit(self.ctx);
+        if (result.isException()) {
+            const exception = self.ctx.getException();
+            exception.deinit(self.ctx);
+            self.restoreAllSpies();
         }
     }
 

@@ -772,31 +772,21 @@ fn timerDelayFromArgs(ctx: *quickjs.Context, args: []const quickjs.c.JSValue) u3
     return delayToTimerTurns(delay);
 }
 
+fn runQueuedMicrotaskCallback(ctx: *quickjs.Context, args: []const quickjs.Value) quickjs.Value {
+    if (args.len == 0) return quickjs.Value.undefined;
+    const callback = args[0];
+    if (!callback.isFunction(ctx)) return quickjs.Value.undefined;
+    const result = callback.call(ctx, quickjs.Value.undefined, &.{});
+    defer result.deinit(ctx);
+    if (result.isException()) return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
 fn enqueueMicrotaskCallback(ctx: *quickjs.Context, callback: quickjs.Value) bool {
-    const global = ctx.getGlobalObject();
-    defer global.deinit(ctx);
-
-    const promise_ctor = global.getPropertyStr(ctx, "Promise");
-    defer promise_ctor.deinit(ctx);
-    if (!promise_ctor.isObject()) return false;
-
-    const resolve = promise_ctor.getPropertyStr(ctx, "resolve");
-    defer resolve.deinit(ctx);
-    if (!resolve.isFunction(ctx)) return false;
-
-    const resolved = resolve.call(ctx, promise_ctor, &.{});
-    defer resolved.deinit(ctx);
-    if (resolved.isException()) return false;
-
-    const then = resolved.getPropertyStr(ctx, "then");
-    defer then.deinit(ctx);
-    if (!then.isFunction(ctx)) return false;
-
     var callback_args = [_]quickjs.Value{callback.dup(ctx)};
     defer callback_args[0].deinit(ctx);
-    const chained = then.call(ctx, resolved, &callback_args);
-    defer chained.deinit(ctx);
-    return !chained.isException();
+    ctx.enqueueJob(runQueuedMicrotaskCallback, &callback_args) catch return false;
+    return true;
 }
 
 fn scheduleNativeTimerTick(ctx: *quickjs.Context, id: i32) bool {

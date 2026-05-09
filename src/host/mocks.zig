@@ -261,6 +261,8 @@ pub const HostMocks = struct {
         try setFunction(ctx, global, "__zigRunnerApplyOnLoad", jsApplyOnLoad, 1);
         try setFunction(ctx, global, "__zigCollectRelatedSpyCalls", jsCollectRelatedSpyCalls, 1);
         try setFunction(ctx, global, "__zigRestoreAllSpies", jsRestoreAllSpies, 0);
+        try setFunction(ctx, global, "__zigGetSpyCount", jsGetSpyCount, 0);
+        try setFunction(ctx, global, "__zigRestoreSpiesSince", jsRestoreSpiesSince, 1);
 
         const bun_api = quickjs.Value.initObject(ctx);
         if (bun_api.isException()) return error.OutOfMemory;
@@ -732,6 +734,31 @@ fn jsRestoreAllSpies(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const 
     const mocks = active_mocks orelse return quickjs.Value.undefined;
 
     for (mocks.mock_states.items) |state| {
+        if (state.disposed or !state.has_restore) continue;
+        if (!state.mock_function.isObject()) continue;
+        restoreMockState(ctx, state, state.mock_function) catch return quickjs.Value.exception;
+    }
+
+    return quickjs.Value.undefined;
+}
+
+fn jsGetSpyCount(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    _ = maybe_ctx orelse return quickjs.Value.exception;
+    const mocks = active_mocks orelse return quickjs.Value.initInt32(0);
+    return quickjs.Value.initInt32(@intCast(mocks.mock_states.items.len));
+}
+
+fn jsRestoreSpiesSince(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const mocks = active_mocks orelse return quickjs.Value.undefined;
+
+    const start_raw = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toInt32(ctx) catch 0 else 0;
+    const start_index: usize = if (start_raw <= 0) 0 else @intCast(start_raw);
+    if (start_index >= mocks.mock_states.items.len) return quickjs.Value.undefined;
+
+    var index = start_index;
+    while (index < mocks.mock_states.items.len) : (index += 1) {
+        const state = mocks.mock_states.items[index];
         if (state.disposed or !state.has_restore) continue;
         if (!state.mock_function.isObject()) continue;
         restoreMockState(ctx, state, state.mock_function) catch return quickjs.Value.exception;
