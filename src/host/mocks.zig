@@ -223,7 +223,7 @@ pub const HostMocks = struct {
     pub fn clearGlobals(self: *HostMocks) void {
         const global = self.ctx.getGlobalObject();
         defer global.deinit(self.ctx);
-        inline for (.{ "__zigRunnerMockExports", "__zigMockModuleManifestJson", "__zigMock", "mock", "__zigSpyOn", "spyOn", "__zigRunnerApplyOnLoad", "__zigCollectRelatedSpyCalls", "__zigBunApi", "Bun" }) |name| {
+        inline for (.{ "__zigRunnerMockExports", "__zigMockModuleManifestJson", "__zigMock", "mock", "__zigSpyOn", "spyOn", "__zigRunnerApplyOnLoad", "__zigCollectRelatedSpyCalls", "__zigRestoreAllSpies", "__zigBunApi", "Bun" }) |name| {
             global.setPropertyStr(self.ctx, name, quickjs.Value.undefined) catch {};
         }
     }
@@ -260,6 +260,7 @@ pub const HostMocks = struct {
         try setFunction(ctx, global, "__zigSpyOn", jsSpyOn, 2);
         try setFunction(ctx, global, "__zigRunnerApplyOnLoad", jsApplyOnLoad, 1);
         try setFunction(ctx, global, "__zigCollectRelatedSpyCalls", jsCollectRelatedSpyCalls, 1);
+        try setFunction(ctx, global, "__zigRestoreAllSpies", jsRestoreAllSpies, 0);
 
         const bun_api = quickjs.Value.initObject(ctx);
         if (bun_api.isException()) return error.OutOfMemory;
@@ -306,6 +307,7 @@ pub const HostMocks = struct {
         const mock_info = quickjs.Value.initObject(ctx);
         if (mock_info.isException()) return quickjs.Value.exception;
         mock_info.setPropertyStr(ctx, "calls", state.calls.dup(ctx)) catch return quickjs.Value.exception;
+        mock_info.setPropertyStr(ctx, "lastCall", quickjs.Value.undefined) catch return quickjs.Value.exception;
         func.setPropertyStr(ctx, "mock", mock_info) catch return quickjs.Value.exception;
 
         installMockMethod(ctx, func, "mockImplementation", .implementation, state) catch return quickjs.Value.exception;
@@ -319,6 +321,7 @@ pub const HostMocks = struct {
         installMockMethod(ctx, func, "mockClear", .clear, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockReset", .reset, state) catch return quickjs.Value.exception;
         installMockMethod(ctx, func, "mockRestore", .restore, state) catch return quickjs.Value.exception;
+        installMockSymbolDispose(ctx, func) catch return quickjs.Value.exception;
         return func;
     }
 
@@ -403,8 +406,10 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
     for (0..@intCast(argc)) |index| {
         call_args.setPropertyUint32(real_ctx, @intCast(index), quickjs.Value.fromCVal(argv[index]).dup(real_ctx)) catch return quickjs.Value.exception.cval();
     }
+
     const length = state.calls.getLength(real_ctx) catch 0;
     state.calls.setPropertyUint32(real_ctx, @intCast(@max(length, 0)), call_args) catch return quickjs.Value.exception.cval();
+    setMockLastCall(real_ctx, wrapped_func, call_args) catch return quickjs.Value.exception.cval();
 
     const args_slice: []const quickjs.Value = if (argc > 0) @ptrCast(argv[0..@intCast(argc)]) else &.{};
     const once_length = state.once_implementations.getLength(real_ctx) catch 0;
@@ -499,6 +504,24 @@ fn jsMockModule(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const qu
     const source = buildMockModuleSource(mocks.allocator, ctx, specifier, produced) catch return quickjs.Value.exception;
     defer mocks.allocator.free(source);
     mocks.putMockModuleSource(specifier, source) catch return quickjs.Value.exception;
+
+    const apply_loaded = global.getPropertyStr(ctx, "__zigApplyMockModuleExports");
+    defer apply_loaded.deinit(ctx);
+    if (!apply_loaded.isException() and apply_loaded.isFunction(ctx)) {
+        var apply_args = [_]quickjs.Value{
+            quickjs.Value.initStringLen(ctx, specifier),
+            produced.dup(ctx),
+        };
+        defer {
+            apply_args[0].deinit(ctx);
+            apply_args[1].deinit(ctx);
+        }
+
+        const apply_result = apply_loaded.call(ctx, global, &apply_args);
+        defer apply_result.deinit(ctx);
+        if (apply_result.isException()) return quickjs.Value.exception;
+    }
+
     return produced.dup(ctx);
 }
 
@@ -522,8 +545,10 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
             const atom = quickjs.Atom.fromValue(ctx, property_key);
             defer atom.deinit(ctx);
             if (!setSpyTargetProperty(ctx, target, atom, existing_mock)) {
+                _ = patchModuleNamespaceExport(ctx, target, property_key, existing_mock);
                 // Some objects (for example ESM module namespace bindings) are not replaceable.
                 // Keep Bun-compatible behavior by returning the existing mock wrapper without throwing.
+                mirrorGlobalWindowProperty(ctx, target, property_key, current, existing_mock);
                 return existing_mock;
             }
             mirrorGlobalWindowProperty(ctx, target, property_key, current, existing_mock);
@@ -557,7 +582,9 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
     const atom = quickjs.Atom.fromValue(ctx, property_key);
     defer atom.deinit(ctx);
     if (!setSpyTargetProperty(ctx, target, atom, wrapped)) {
+        _ = patchModuleNamespaceExport(ctx, target, property_key, wrapped);
         // Fall back to returning the spy wrapper even when the target cannot be redefined.
+        mirrorGlobalWindowProperty(ctx, target, property_key, current, wrapped);
         return wrapped;
     }
     mirrorGlobalWindowProperty(ctx, target, property_key, current, wrapped);
@@ -589,6 +616,19 @@ fn jsCollectRelatedSpyCalls(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args
     return out;
 }
 
+fn jsRestoreAllSpies(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const mocks = active_mocks orelse return quickjs.Value.undefined;
+
+    for (mocks.mock_states.items) |state| {
+        if (state.disposed or !state.has_restore) continue;
+        if (!state.mock_function.isObject()) continue;
+        restoreMockState(ctx, state, state.mock_function) catch return quickjs.Value.exception;
+    }
+
+    return quickjs.Value.undefined;
+}
+
 fn setSpyTargetProperty(ctx: *quickjs.Context, target: quickjs.Value, atom: quickjs.Atom, value: quickjs.Value) bool {
     target.setProperty(ctx, atom, value.dup(ctx)) catch return false;
 
@@ -617,6 +657,31 @@ fn setSpyTargetProperty(ctx: *quickjs.Context, target: quickjs.Value, atom: quic
     return current.isStrictEqual(ctx, value);
 }
 
+fn patchModuleNamespaceExport(ctx: *quickjs.Context, target: quickjs.Value, property_key: quickjs.Value, replacement: quickjs.Value) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const patch_fn = global.getPropertyStr(ctx, "__zigPatchLoadedModuleExportByNamespace");
+    defer patch_fn.deinit(ctx);
+    if (patch_fn.isException() or !patch_fn.isFunction(ctx)) return false;
+
+    var args = [_]quickjs.Value{ target.dup(ctx), property_key.dup(ctx), replacement.dup(ctx) };
+    defer {
+        args[0].deinit(ctx);
+        args[1].deinit(ctx);
+        args[2].deinit(ctx);
+    }
+
+    const result = patch_fn.call(ctx, global, &args);
+    defer result.deinit(ctx);
+    if (result.isException()) {
+        const exception = ctx.getException();
+        exception.deinit(ctx);
+        return false;
+    }
+    return result.toBool(ctx) catch false;
+}
+
 fn findExistingMockState(mocks: *HostMocks, ctx: *quickjs.Context, target: quickjs.Value, property_key: quickjs.Value) ?*MockState {
     for (mocks.mock_states.items) |state| {
         if (state.disposed or !state.has_restore) continue;
@@ -630,24 +695,33 @@ fn findExistingMockState(mocks: *HostMocks, ctx: *quickjs.Context, target: quick
 }
 
 fn mirrorGlobalWindowProperty(ctx: *quickjs.Context, target: quickjs.Value, property_key: quickjs.Value, expected_current: quickjs.Value, replacement: quickjs.Value) void {
+    _ = expected_current;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
 
     const window = global.getPropertyStr(ctx, "window");
     defer window.deinit(ctx);
     if (!window.isObject()) return;
-    if (!target.isSameValue(ctx, window)) return;
 
     const atom = quickjs.Atom.fromValue(ctx, property_key);
     defer atom.deinit(ctx);
-    const global_current = global.getProperty(ctx, atom);
-    defer global_current.deinit(ctx);
-    if (global_current.isException()) return;
-    if (!global_current.isSameValue(ctx, expected_current)) return;
+
+    if (target.isSameValue(ctx, window)) {
+        _ = quickjs.c.JS_DefinePropertyValue(
+            ctx.cval(),
+            global.cval(),
+            @intFromEnum(atom),
+            replacement.dup(ctx).cval(),
+            quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_WRITABLE | quickjs.c.JS_PROP_ENUMERABLE,
+        );
+        return;
+    }
+
+    if (!target.isSameValue(ctx, global)) return;
 
     _ = quickjs.c.JS_DefinePropertyValue(
         ctx.cval(),
-        global.cval(),
+        window.cval(),
         @intFromEnum(atom),
         replacement.dup(ctx).cval(),
         quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_WRITABLE | quickjs.c.JS_PROP_ENUMERABLE,
@@ -788,31 +862,61 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
             state.has_resolved_value = false;
             state.has_rejected_value = true;
         },
-        .clear => state.calls.setLength(ctx, 0) catch return quickjs.Value.exception,
+        .clear => {
+            state.calls.setLength(ctx, 0) catch return quickjs.Value.exception;
+            setMockLastCall(ctx, this_value, quickjs.Value.undefined) catch return quickjs.Value.exception;
+        },
         .reset => {
             state.calls.setLength(ctx, 0) catch return quickjs.Value.exception;
             state.once_implementations.setLength(ctx, 0) catch return quickjs.Value.exception;
+            setMockLastCall(ctx, this_value, quickjs.Value.undefined) catch return quickjs.Value.exception;
             replaceValue(ctx, &state.implementation, state.original_implementation);
             clearModes(ctx, state, true);
         },
         .restore => {
-            if (state.has_restore) {
-                const atom = quickjs.Atom.fromValue(ctx, state.restore_property);
-                defer atom.deinit(ctx);
-                if (state.restore_getter) {
-                    _ = quickjs.c.JS_DefinePropertyGetSet(ctx.cval(), state.restore_target.cval(), @intFromEnum(atom), state.restore_value.dup(ctx).cval(), quickjs.Value.undefined.cval(), quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_ENUMERABLE);
-                } else {
-                    _ = quickjs.c.JS_DefinePropertyValue(ctx.cval(), state.restore_target.cval(), @intFromEnum(atom), state.restore_value.dup(ctx).cval(), quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_WRITABLE | quickjs.c.JS_PROP_ENUMERABLE);
-                    mirrorGlobalWindowProperty(ctx, state.restore_target, state.restore_property, this_value, state.restore_value);
-                }
-            }
-            state.calls.setLength(ctx, 0) catch return quickjs.Value.exception;
-            state.once_implementations.setLength(ctx, 0) catch return quickjs.Value.exception;
-            replaceValue(ctx, &state.implementation, state.original_implementation);
-            clearModes(ctx, state, true);
+            restoreMockState(ctx, state, this_value) catch return quickjs.Value.exception;
         },
     }
     return this_value.dup(ctx);
+}
+
+fn jsMockDispose(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const mocks = active_mocks orelse return quickjs.Value.undefined;
+    const state = this_value.getOpaque(MockState, mocks.mock_class_id) orelse return quickjs.Value.undefined;
+    restoreMockState(ctx, state, this_value) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn restoreMockState(ctx: *quickjs.Context, state: *MockState, this_value: quickjs.Value) !void {
+    if (state.has_restore) {
+        const atom = quickjs.Atom.fromValue(ctx, state.restore_property);
+        defer atom.deinit(ctx);
+        if (state.restore_getter) {
+            _ = quickjs.c.JS_DefinePropertyGetSet(
+                ctx.cval(),
+                state.restore_target.cval(),
+                @intFromEnum(atom),
+                state.restore_value.dup(ctx).cval(),
+                quickjs.Value.undefined.cval(),
+                quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_ENUMERABLE,
+            );
+        } else {
+            _ = quickjs.c.JS_DefinePropertyValue(
+                ctx.cval(),
+                state.restore_target.cval(),
+                @intFromEnum(atom),
+                state.restore_value.dup(ctx).cval(),
+                quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_WRITABLE | quickjs.c.JS_PROP_ENUMERABLE,
+            );
+            mirrorGlobalWindowProperty(ctx, state.restore_target, state.restore_property, this_value, state.restore_value);
+        }
+    }
+    state.calls.setLength(ctx, 0) catch return error.JSError;
+    state.once_implementations.setLength(ctx, 0) catch return error.JSError;
+    setMockLastCall(ctx, this_value, quickjs.Value.undefined) catch return error.JSError;
+    replaceValue(ctx, &state.implementation, state.original_implementation);
+    clearModes(ctx, state, true);
 }
 
 fn installMockMethod(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]const u8, method: MockMethod, state: *MockState) HostMocksError!void {
@@ -821,6 +925,46 @@ fn installMockMethod(ctx: *quickjs.Context, object: quickjs.Value, comptime name
     const func = quickjs.Value.initCFunctionData2(ctx, jsMockMethod, name, 1, @intFromEnum(method), &data);
     if (func.isException()) return error.JSError;
     object.setPropertyStr(ctx, name, func) catch return error.JSError;
+}
+
+fn installMockSymbolDispose(ctx: *quickjs.Context, object: quickjs.Value) HostMocksError!void {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const symbol_ctor = global.getPropertyStr(ctx, "Symbol");
+    defer symbol_ctor.deinit(ctx);
+    if (symbol_ctor.isException() or !symbol_ctor.isObject()) return;
+
+    var dispose_symbol = symbol_ctor.getPropertyStr(ctx, "dispose");
+    defer dispose_symbol.deinit(ctx);
+    if (dispose_symbol.isException() or dispose_symbol.isUndefined() or dispose_symbol.isNull()) {
+        const symbol_for = symbol_ctor.getPropertyStr(ctx, "for");
+        defer symbol_for.deinit(ctx);
+        if (symbol_for.isException() or !symbol_for.isFunction(ctx)) return;
+
+        var args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, "Symbol.dispose")};
+        defer args[0].deinit(ctx);
+        const fallback_symbol = symbol_for.call(ctx, symbol_ctor, &args);
+        if (fallback_symbol.isException() or fallback_symbol.isUndefined() or fallback_symbol.isNull()) {
+            fallback_symbol.deinit(ctx);
+            return;
+        }
+        dispose_symbol.deinit(ctx);
+        dispose_symbol = fallback_symbol;
+    }
+
+    const atom = quickjs.Atom.fromValue(ctx, dispose_symbol);
+    defer atom.deinit(ctx);
+
+    const dispose_fn = quickjs.Value.initCFunction(ctx, jsMockDispose, "__zigMockDispose", 0);
+    if (dispose_fn.isException()) return error.JSError;
+    object.setProperty(ctx, atom, dispose_fn) catch return error.JSError;
+}
+
+fn setMockLastCall(ctx: *quickjs.Context, mock_function: quickjs.Value, value: quickjs.Value) !void {
+    const mock_info = mock_function.getPropertyStr(ctx, "mock");
+    defer mock_info.deinit(ctx);
+    if (mock_info.isException() or !mock_info.isObject()) return error.JSError;
+    mock_info.setPropertyStr(ctx, "lastCall", value.dup(ctx)) catch return error.JSError;
 }
 
 fn appendOnceValue(ctx: *quickjs.Context, state: *MockState, mode: OnceMode, value: quickjs.Value) !void {

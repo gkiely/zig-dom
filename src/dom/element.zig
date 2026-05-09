@@ -44,6 +44,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "attachShadow", callbacks.attachShadow, 1);
     try bindings.installMethod(ctx, proto, "getBoundingClientRect", callbacks.getBoundingClientRect, 0);
     try bindings.installMethod(ctx, proto, "getClientRects", callbacks.getClientRects, 0);
+    try bindings.installMethod(ctx, proto, "scrollIntoView", callbacks.scrollIntoView, 1);
     try bindings.installMethod(ctx, proto, "focus", callbacks.focus, 0);
     try bindings.installMethod(ctx, proto, "blur", callbacks.blur, 0);
     try bindings.installMethod(ctx, proto, "select", callbacks.select, 0);
@@ -56,4 +57,5 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installGetter(ctx, proto, "elements", callbacks.formElementsGet);
     try bindings.installGetter(ctx, proto, "options", callbacks.optionsGet);
     try bindings.installMethod(ctx, proto, "reset", callbacks.reset, 0);
+    try bindings.installMethod(ctx, proto, "requestSubmit", callbacks.requestSubmit, 1);
 }

@@ -191,10 +191,12 @@ pub const HostRunner = struct {
 
         try installEachOnGlobalTarget(ctx, global, "test");
         try installEachOnGlobalTarget(ctx, global, "it");
+        try installEachOnGlobalTarget(ctx, global, "describe");
         try installEachOnGlobalNestedTarget(ctx, global, "test", "skip");
         try installEachOnGlobalNestedTarget(ctx, global, "test", "only");
         try installEachOnGlobalNestedTarget(ctx, global, "it", "skip");
         try installEachOnGlobalNestedTarget(ctx, global, "it", "only");
+        try installEachOnGlobalNestedTarget(ctx, global, "describe", "skip");
     }
 
     fn installDomCleanup(self: *HostRunner) HostRunnerError!void {
@@ -413,6 +415,8 @@ pub const HostRunner = struct {
     }
 
     fn runTestEntry(self: *HostRunner, test_entry: *TestEntry, result: *RunResult, only_mode: bool) !void {
+        defer self.restoreAllSpies();
+
         const full_name = try self.testPath(test_entry);
         defer self.allocator.free(full_name);
         if (test_entry.todo or test_entry.skip or (only_mode and !test_entry.only)) {
@@ -461,6 +465,22 @@ pub const HostRunner = struct {
         }
         result.passed += 1;
         try reporter.printPassedLineStdout(self.allocator, self.io, full_name, elapsed_ms);
+    }
+
+    fn restoreAllSpies(self: *HostRunner) void {
+        const global = self.ctx.getGlobalObject();
+        defer global.deinit(self.ctx);
+
+        const restore_all = global.getPropertyStr(self.ctx, "__zigRestoreAllSpies");
+        defer restore_all.deinit(self.ctx);
+        if (restore_all.isException() or !restore_all.isFunction(self.ctx)) return;
+
+        const result = restore_all.call(self.ctx, quickjs.Value.undefined, &.{});
+        defer result.deinit(self.ctx);
+        if (result.isException()) {
+            const exception = self.ctx.getException();
+            exception.deinit(self.ctx);
+        }
     }
 
     fn collectBeforeEach(self: *HostRunner, scope: *Scope, out: *std.ArrayList(Hook)) !void {

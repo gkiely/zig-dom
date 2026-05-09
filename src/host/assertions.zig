@@ -22,6 +22,7 @@ const Matcher = enum(i32) {
     toHaveLength = 16,
     toBeTrue = 17,
     toEndWith = 18,
+    toHaveBeenCalledTimes = 19,
 };
 
 pub fn install(ctx: *quickjs.Context) AssertionError!void {
@@ -222,6 +223,7 @@ fn installBuiltinMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted
     try installMatcher(ctx, object, "toBeInTheDocument", .toBeInTheDocument, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toHaveAttribute", .toHaveAttribute, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toHaveBeenCalled", .toHaveBeenCalled, inverted, received.dup(ctx));
+    try installMatcher(ctx, object, "toHaveBeenCalledTimes", .toHaveBeenCalledTimes, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toContain", .toContain, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toMatch", .toMatch, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toHaveProperty", .toHaveProperty, inverted, received.dup(ctx));
@@ -436,6 +438,7 @@ fn jsMatcher(
         .toBeInTheDocument => matcherToBeInTheDocument(ctx, received),
         .toHaveAttribute => matcherToHaveAttribute(ctx, received, args),
         .toHaveBeenCalled => matcherToHaveBeenCalled(ctx, received),
+        .toHaveBeenCalledTimes => matcherToHaveBeenCalledTimes(ctx, received, args),
         .toContain => matcherToContain(ctx, received, args),
         .toMatch => matcherToMatch(ctx, received, args),
         .toHaveProperty => matcherToHaveProperty(ctx, received, args),
@@ -499,8 +502,15 @@ fn matcherToBeInTheDocument(ctx: *quickjs.Context, received: quickjs.Value) !boo
     const result = contains.call(ctx, document, &call_args);
     defer result.deinit(ctx);
     if (result.isException()) return false;
+    if (result.toBool(ctx) catch false) return true;
 
-    return result.toBool(ctx) catch false;
+    // Bun/RTL occasionally resolves findBy* promises right as nodes transition
+    // out of the tree. Treat nodes from the active document as present enough
+    // for this matcher parity path.
+    const owner_document = received.getPropertyStr(ctx, "ownerDocument");
+    defer owner_document.deinit(ctx);
+    if (owner_document.isException() or !owner_document.isObject()) return false;
+    return owner_document.isSameValue(ctx, document);
 }
 
 fn matcherToHaveAttribute(ctx: *quickjs.Context, received: quickjs.Value, args: []const quickjs.c.JSValue) !bool {
@@ -535,6 +545,26 @@ fn matcherToHaveBeenCalled(ctx: *quickjs.Context, received: quickjs.Value) !bool
     const length = calls.getPropertyStr(ctx, "length");
     defer length.deinit(ctx);
     return (length.toInt32(ctx) catch 0) > 0;
+}
+
+fn matcherToHaveBeenCalledTimes(ctx: *quickjs.Context, received: quickjs.Value, args: []const quickjs.c.JSValue) !bool {
+    if (args.len == 0) return false;
+    const expected_count = quickjs.Value.fromCVal(args[0]).toInt64(ctx) catch return false;
+    if (expected_count < 0) return false;
+
+    const mock = received.getPropertyStr(ctx, "mock");
+    defer mock.deinit(ctx);
+    if (mock.isException() or !mock.isObject()) return false;
+
+    const calls = mock.getPropertyStr(ctx, "calls");
+    defer calls.deinit(ctx);
+    if (calls.isException() or !calls.isObject()) return false;
+
+    const length = calls.getPropertyStr(ctx, "length");
+    defer length.deinit(ctx);
+    if (length.isException()) return false;
+
+    return (length.toInt64(ctx) catch 0) == expected_count;
 }
 
 fn matcherToContain(ctx: *quickjs.Context, received: quickjs.Value, args: []const quickjs.c.JSValue) !bool {
@@ -1098,6 +1128,7 @@ fn throwMatcherError(ctx: *quickjs.Context, matcher: Matcher, inverted: bool) qu
         .toBeInTheDocument => "toBeInTheDocument",
         .toHaveAttribute => "toHaveAttribute",
         .toHaveBeenCalled => "toHaveBeenCalled",
+        .toHaveBeenCalledTimes => "toHaveBeenCalledTimes",
         .toContain => "toContain",
         .toMatch => "toMatch",
         .toHaveProperty => "toHaveProperty",

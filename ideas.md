@@ -1,4 +1,4 @@
 Ideas to make it faster
-- Use our own testing library
+- parallel-test-files-plan.md
+- zig-testing-library.md
 - Use our own setup file
-

@@ -499,6 +499,7 @@ const ModuleLoaderState = struct {
     allocator: Allocator,
     io: std.Io,
     runtime: ?*Runtime,
+    entry_module_id: []const u8,
     loaded_modules: std.StringHashMap(*ModuleDef),
     source_cache: std.StringHashMap([]u8),
     mock_module_sources: std.StringHashMap([]u8),
@@ -524,6 +525,7 @@ const ModuleLoaderState = struct {
             .allocator = allocator,
             .io = io,
             .runtime = null,
+            .entry_module_id = "",
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
             .source_cache = std.StringHashMap([]u8).init(allocator),
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
@@ -664,6 +666,65 @@ const ModuleLoaderState = struct {
 
         if (self.mock_module_sources.contains(module_name)) {
             return std.fmt.allocPrint(self.allocator, "__zig_mock__/{s}", .{module_name});
+        }
+
+        if (try self.resolvePathAlias(module_base_name, module_name)) |resolved| {
+            return resolved;
+        }
+
+        if (std.fs.path.isAbsolute(module_name)) {
+            return self.resolveAbsolutePath(module_name);
+        }
+
+        if (isRelativeSpecifier(module_name)) {
+            return self.resolveRelativePath(module_base_name, module_name);
+        }
+
+        if (try self.resolveNodeModule(module_base_name, module_name)) |resolved| {
+            return resolved;
+        }
+
+        return error.UnsupportedExternalModule;
+    }
+
+    fn resolveLoadedModuleIdForMockSpecifier(self: *ModuleLoaderState, specifier: []const u8) !?[]u8 {
+        if (self.loaded_modules.contains(specifier)) {
+            return @as(?[]u8, try self.allocator.dupe(u8, specifier));
+        }
+
+        if (self.entry_module_id.len > 0) {
+            if (try self.tryResolveLoadedModuleIdForBase(self.entry_module_id, specifier)) |resolved| {
+                return resolved;
+            }
+        }
+
+        var iterator = self.loaded_modules.iterator();
+        while (iterator.next()) |entry| {
+            if (try self.tryResolveLoadedModuleIdForBase(entry.key_ptr.*, specifier)) |resolved| {
+                return resolved;
+            }
+        }
+
+        return null;
+    }
+
+    fn tryResolveLoadedModuleIdForBase(self: *ModuleLoaderState, module_base_name: []const u8, specifier: []const u8) !?[]u8 {
+        const resolved = self.normalizeSpecifierWithoutMocks(module_base_name, specifier) catch |err| switch (err) {
+            error.ModuleNotFound, error.UnsupportedExternalModule => return null,
+            else => return err,
+        };
+        defer self.allocator.free(resolved);
+
+        if (!self.loaded_modules.contains(resolved)) {
+            return null;
+        }
+
+        return @as(?[]u8, try self.allocator.dupe(u8, resolved));
+    }
+
+    fn normalizeSpecifierWithoutMocks(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) ![]u8 {
+        if (builtInModuleSource(module_name) != null) {
+            return self.allocator.dupe(u8, module_name);
         }
 
         if (try self.resolvePathAlias(module_base_name, module_name)) |resolved| {
@@ -1533,7 +1594,11 @@ const ModuleLoaderState = struct {
         parsed: ParsedImportStatement,
         rewrite_index: usize,
     ) !?[]u8 {
+        if (self.runtime) |runtime| {
+            try self.syncMockModulesFromRuntime(runtime);
+        }
         if (parsed.all or !isBarePackageRootSpecifier(parsed.specifier)) return null;
+        if (self.mock_module_sources.contains(parsed.specifier)) return null;
         const bindings = std.mem.trim(u8, parsed.bindings, " \t\r\n");
         if (!std.mem.startsWith(u8, bindings, "{") or !std.mem.endsWith(u8, bindings, "}")) return null;
         if (try self.hasOnLoadForSpecifier(module_id, parsed.specifier)) return null;
@@ -3036,6 +3101,7 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
     var module_loader_state = ModuleLoaderState.init(allocator, io);
     defer module_loader_state.deinit();
     module_loader_state.runtime = &vm;
+    module_loader_state.entry_module_id = entry_module_id;
     active_cjs_loader_state = &module_loader_state;
     defer active_cjs_loader_state = null;
 
@@ -3044,7 +3110,7 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
     };
     defer vm.evalScript(
         "<zig-cjs-cleanup>",
-        "try { if (globalThis.__zigCjsRegistry) globalThis.__zigCjsRegistry.clear(); delete globalThis.__zigCjsRegistry; delete globalThis.__zigNativeRequire; } catch {}",
+        "try { if (globalThis.__zigCjsRegistry) globalThis.__zigCjsRegistry.clear(); delete globalThis.__zigCjsRegistry; delete globalThis.__zigNativeRequire; delete globalThis.__zigApplyMockModuleExports; delete globalThis.__zigPatchLoadedModuleExportByNamespace; } catch {}",
     ) catch {};
 
     vm.setModuleLoaderFunc(ModuleLoaderState, &module_loader_state, moduleNormalize, moduleLoad);
@@ -3243,6 +3309,21 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
         timed_out_i32 == 0 and
         collection_errors_i32 == 0)
     {
+        if (registered_tests_i32 == 0 and !only_mode and !has_runnable) {
+            return .{
+                .path = try allocator.dupe(u8, path),
+                .passed = 0,
+                .failed = 0,
+                .skipped = 0,
+                .timed_out = 0,
+                .collection_errors = 0,
+                .expect_calls = 0,
+                .passed_report = null,
+                .failure_report = null,
+                .collection_report = null,
+            };
+        }
+
         const diagnostic = try std.fmt.allocPrint(
             allocator,
             "collection failed: no tests executed (registered={d}, onlyMode={}, hasRunnable={})",
@@ -3338,6 +3419,14 @@ fn installNativeRequire(vm: *Runtime) !void {
     if (func.isException()) return error.EvaluationFailed;
     global.setPropertyStr(ctx, "__zigNativeRequire", func) catch return error.EvaluationFailed;
 
+    const apply_mock_exports = quickjs.Value.initCFunction(ctx, jsApplyMockModuleExports, "__zigApplyMockModuleExports", 2);
+    if (apply_mock_exports.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigApplyMockModuleExports", apply_mock_exports) catch return error.EvaluationFailed;
+
+    const patch_namespace_export = quickjs.Value.initCFunction(ctx, jsPatchLoadedModuleExportByNamespace, "__zigPatchLoadedModuleExportByNamespace", 3);
+    if (patch_namespace_export.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigPatchLoadedModuleExportByNamespace", patch_namespace_export) catch return error.EvaluationFailed;
+
     vm.evalScript("<zig-cjs-runtime-helpers>", cjs_runtime_helpers_source) catch return error.EvaluationFailed;
 }
 
@@ -3375,6 +3464,129 @@ fn jsNativeRequire(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const q
         );
         return quickjs.Value.exception;
     };
+}
+
+fn jsApplyMockModuleExports(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const state = active_cjs_loader_state orelse {
+        _ = quickjs.c.JS_ThrowReferenceError(ctx.cval(), "native module loader is not active");
+        return quickjs.Value.exception;
+    };
+
+    if (args.len < 2) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "__zigApplyMockModuleExports expects specifier and exports");
+        return quickjs.Value.exception;
+    }
+
+    const specifier = dupArgString(state.allocator, ctx, args[0]) catch return quickjs.Value.exception;
+    defer state.allocator.free(specifier);
+
+    const maybe_resolved = state.resolveLoadedModuleIdForMockSpecifier(specifier) catch return quickjs.Value.exception;
+    defer if (maybe_resolved) |resolved| state.allocator.free(resolved);
+
+    const resolved_module_id = maybe_resolved orelse return quickjs.Value.undefined;
+    const module_ptr = state.loaded_modules.get(resolved_module_id) orelse return quickjs.Value.undefined;
+    const produced = quickjs.Value.fromCVal(args[1]);
+
+    patchLoadedModuleExports(state.allocator, ctx, module_ptr, produced) catch {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "mock.module() failed to patch already-loaded module exports");
+        return quickjs.Value.exception;
+    };
+
+    return quickjs.Value.undefined;
+}
+
+fn jsPatchLoadedModuleExportByNamespace(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const state = active_cjs_loader_state orelse return quickjs.Value.initBool(false);
+    if (args.len < 3) return quickjs.Value.initBool(false);
+
+    const namespace = quickjs.Value.fromCVal(args[0]);
+    if (!namespace.isObject()) return quickjs.Value.initBool(false);
+
+    const export_name = dupArgString(state.allocator, ctx, args[1]) catch return quickjs.Value.exception;
+    defer state.allocator.free(export_name);
+    const export_name_z = state.allocator.dupeZ(u8, export_name) catch return quickjs.Value.exception;
+    defer state.allocator.free(export_name_z);
+
+    const replacement = quickjs.Value.fromCVal(args[2]);
+
+    var iterator = state.loaded_modules.iterator();
+    while (iterator.next()) |entry| {
+        const module_ptr = entry.value_ptr.*;
+        const candidate_namespace = module_ptr.getNamespace(ctx);
+        defer candidate_namespace.deinit(ctx);
+        if (candidate_namespace.isException() or !candidate_namespace.isObject()) continue;
+        if (!candidate_namespace.isSameValue(ctx, namespace)) continue;
+
+        if (!module_ptr.setExport(ctx, export_name_z, replacement.dup(ctx))) return quickjs.Value.initBool(false);
+        return quickjs.Value.initBool(true);
+    }
+
+    return quickjs.Value.initBool(false);
+}
+
+fn patchLoadedModuleExports(allocator: Allocator, ctx: *quickjs.Context, module_ptr: *ModuleDef, produced: quickjs.Value) !void {
+    var module_exports = produced.dup(ctx);
+    defer module_exports.deinit(ctx);
+
+    if (!module_exports.isObject() and !module_exports.isFunction(ctx)) {
+        const boxed = quickjs.Value.initObject(ctx);
+        if (boxed.isException()) return error.EvaluationFailed;
+        errdefer boxed.deinit(ctx);
+        boxed.setPropertyStr(ctx, "default", module_exports.dup(ctx)) catch return error.EvaluationFailed;
+        module_exports.deinit(ctx);
+        module_exports = boxed;
+    }
+
+    const namespace = module_ptr.getNamespace(ctx);
+    defer namespace.deinit(ctx);
+    if (namespace.isException() or !namespace.isObject()) return error.EvaluationFailed;
+
+    const keys = objectKeys(ctx, namespace);
+    defer keys.deinit(ctx);
+    const key_count = keys.getLength(ctx) catch 0;
+
+    var index: i64 = 0;
+    while (index < key_count) : (index += 1) {
+        const key = keys.getPropertyUint32(ctx, @intCast(index));
+        defer key.deinit(ctx);
+        if (!key.isString()) continue;
+
+        const key_text = key.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(key_text.ptr);
+        const key_slice = key_text.ptr[0..key_text.len];
+
+        const key_z = try allocator.dupeZ(u8, key_slice);
+        defer allocator.free(key_z);
+
+        const replacement = if (std.mem.eql(u8, key_slice, "default")) blk: {
+            const default_value = module_exports.getPropertyStr(ctx, "default");
+            if (default_value.isException()) return error.EvaluationFailed;
+            if (!default_value.isUndefined()) break :blk default_value;
+            default_value.deinit(ctx);
+            break :blk module_exports.dup(ctx);
+        } else module_exports.getPropertyStr(ctx, key_z);
+        defer replacement.deinit(ctx);
+        if (replacement.isException()) return error.EvaluationFailed;
+
+        if (!module_ptr.setExport(ctx, key_z, replacement.dup(ctx))) {
+            return error.EvaluationFailed;
+        }
+    }
+}
+
+fn objectKeys(ctx: *quickjs.Context, value: quickjs.Value) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const object_ctor = global.getPropertyStr(ctx, "Object");
+    defer object_ctor.deinit(ctx);
+    const keys_fn = object_ctor.getPropertyStr(ctx, "keys");
+    defer keys_fn.deinit(ctx);
+    if (!keys_fn.isFunction(ctx)) return quickjs.Value.initArray(ctx);
+    var args = [_]quickjs.Value{value.dup(ctx)};
+    defer args[0].deinit(ctx);
+    return keys_fn.call(ctx, object_ctor, &args);
 }
 
 fn dupArgString(allocator: Allocator, ctx: *quickjs.Context, value: quickjs.c.JSValue) ![]u8 {
@@ -3757,6 +3969,12 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
         std.mem.indexOf(u8, source, "exports.") != null or
         std.mem.indexOf(u8, source, "Object.defineProperty(exports") != null or
         std.mem.indexOf(u8, source, "Object.defineProperty(module") != null)
+    {
+        return true;
+    }
+
+    if (std.mem.indexOf(u8, source, "typeof exports") != null and
+        std.mem.indexOf(u8, source, "typeof module") != null)
     {
         return true;
     }

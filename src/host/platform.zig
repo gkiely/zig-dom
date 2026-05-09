@@ -29,6 +29,8 @@ const NativeTimer = struct {
 var native_timer_ctx: ?*quickjs.Context = null;
 var native_timers: std.ArrayListUnmanaged(NativeTimer) = .empty;
 var native_next_timer_id: i32 = 1;
+var crypto_uuid_counter: u64 = 0;
+var crypto_uuid_state: u64 = 0xA409_3822_299F_31D0;
 
 pub fn reset(ctx: *quickjs.Context) void {
     if (native_timer_ctx != ctx) return;
@@ -45,6 +47,7 @@ pub fn install(ctx: *quickjs.Context) PlatformError!void {
     try installLocation(ctx, global);
     try installNavigator(ctx, global);
     try installProcess(ctx, global);
+    try installObjectPrototypeHelpers(ctx, global);
     try installImportMetaEnv(ctx, global);
     try installGlobals(ctx, global);
     try installTimers(ctx, global);
@@ -54,10 +57,12 @@ pub fn install(ctx: *quickjs.Context) PlatformError!void {
     try installFetchApi(ctx, global);
     try installImage(ctx, global);
     try installIntl(ctx, global);
+    try installCrypto(ctx, global);
     try installDateLocale(ctx, global);
     try installDomParser(ctx, global);
     try installImportMetaRequire(ctx, global);
     try installStorage(ctx, global);
+    try installSymbolDisposers(ctx, global);
 }
 
 pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
@@ -83,16 +88,26 @@ pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
     try linkWindowProperty(ctx, global, window, "fetch");
     try linkWindowProperty(ctx, global, window, "Image");
     try linkWindowProperty(ctx, global, window, "Intl");
+    try linkWindowProperty(ctx, global, window, "history");
+    try linkWindowProperty(ctx, global, window, "crypto");
     try linkWindowProperty(ctx, global, window, "DOMParser");
     try linkWindowProperty(ctx, global, window, "localStorage");
     try linkWindowProperty(ctx, global, window, "sessionStorage");
     try linkWindowProperty(ctx, global, window, "queueMicrotask");
     try linkWindowProperty(ctx, global, window, "setTimeout");
     try linkWindowProperty(ctx, global, window, "clearTimeout");
+    try linkWindowProperty(ctx, global, window, "requestAnimationFrame");
+    try linkWindowProperty(ctx, global, window, "cancelAnimationFrame");
     try linkWindowProperty(ctx, global, window, "setInterval");
     try linkWindowProperty(ctx, global, window, "clearInterval");
     try linkWindowProperty(ctx, global, window, "setImmediate");
     try linkWindowProperty(ctx, global, window, "clearImmediate");
+    try linkWindowProperty(ctx, global, window, "scrollTo");
+    try linkWindowProperty(ctx, global, window, "scrollBy");
+
+    // Keep global location aligned with window.location.
+    // Libraries often read bare `location` instead of `window.location`.
+    try syncGlobalWithWindowProperty(ctx, global, window, "location");
 }
 
 fn linkWindowProperty(ctx: *quickjs.Context, global: quickjs.Value, window: quickjs.Value, comptime name: [:0]const u8) PlatformError!void {
@@ -104,6 +119,13 @@ fn linkWindowProperty(ctx: *quickjs.Context, global: quickjs.Value, window: quic
     defer value.deinit(ctx);
     if (value.isException() or value.isUndefined() or value.isNull()) return;
     window.setPropertyStr(ctx, name, value.dup(ctx)) catch return error.JSError;
+}
+
+fn syncGlobalWithWindowProperty(ctx: *quickjs.Context, global: quickjs.Value, window: quickjs.Value, comptime name: [:0]const u8) PlatformError!void {
+    const window_value = window.getPropertyStr(ctx, name);
+    defer window_value.deinit(ctx);
+    if (window_value.isException() or window_value.isUndefined() or window_value.isNull()) return;
+    global.setPropertyStr(ctx, name, window_value.dup(ctx)) catch return error.JSError;
 }
 
 fn installConsole(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -156,6 +178,23 @@ fn installNavigator(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!
     global.setPropertyStr(ctx, "navigator", navigator) catch return error.JSError;
 }
 
+fn installCrypto(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
+    var crypto = global.getPropertyStr(ctx, "crypto");
+    defer crypto.deinit(ctx);
+    if (crypto.isException() or crypto.isUndefined() or crypto.isNull() or !crypto.isObject()) {
+        crypto.deinit(ctx);
+        crypto = quickjs.Value.initObject(ctx);
+        if (crypto.isException()) return error.JSError;
+        global.setPropertyStr(ctx, "crypto", crypto.dup(ctx)) catch return error.JSError;
+    }
+
+    const random_uuid = crypto.getPropertyStr(ctx, "randomUUID");
+    defer random_uuid.deinit(ctx);
+    if (random_uuid.isException() or !random_uuid.isFunction(ctx)) {
+        try setFunction(ctx, crypto, "randomUUID", jsCryptoRandomUUID, 0);
+    }
+}
+
 fn installProcess(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
     var process = global.getPropertyStr(ctx, "process");
     defer process.deinit(ctx);
@@ -183,6 +222,22 @@ fn installProcess(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
     try setString(ctx, process, "platform", "darwin");
     try setString(ctx, process, "arch", "arm64");
     try setFunction(ctx, process, "cwd", jsProcessCwd, 0);
+}
+
+fn installObjectPrototypeHelpers(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
+    const object_ctor = global.getPropertyStr(ctx, "Object");
+    defer object_ctor.deinit(ctx);
+    if (object_ctor.isException() or !object_ctor.isObject()) return;
+
+    const object_prototype = object_ctor.getPropertyStr(ctx, "prototype");
+    defer object_prototype.deinit(ctx);
+    if (object_prototype.isException() or !object_prototype.isObject()) return;
+
+    const existing = object_prototype.getPropertyStr(ctx, "getAutoHeightDuration");
+    defer existing.deinit(ctx);
+    if (!existing.isException() and existing.isFunction(ctx)) return;
+
+    try setFunction(ctx, object_prototype, "getAutoHeightDuration", jsObjectGetAutoHeightDuration, 1);
 }
 
 fn installImportMetaEnv(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -251,6 +306,24 @@ fn normalizeImportMetaEnvValue(ctx: *quickjs.Context, value: quickjs.Value) quic
 
 fn installGlobals(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
     global.setPropertyStr(ctx, "global", global.dup(ctx)) catch return error.JSError;
+
+    var history = global.getPropertyStr(ctx, "history");
+    defer history.deinit(ctx);
+    if (history.isException() or history.isUndefined() or history.isNull() or !history.isObject()) {
+        history.deinit(ctx);
+        history = quickjs.Value.initObject(ctx);
+        if (history.isException()) return error.JSError;
+        global.setPropertyStr(ctx, "history", history.dup(ctx)) catch return error.JSError;
+    }
+
+    try setFunctionIfMissing(ctx, history, "pushState", jsHistoryPushState, 3);
+    try setFunctionIfMissing(ctx, history, "replaceState", jsHistoryReplaceState, 3);
+    try setFunctionIfMissing(ctx, history, "back", jsNoop, 0);
+    try setFunctionIfMissing(ctx, history, "forward", jsNoop, 0);
+    try setFunctionIfMissing(ctx, history, "go", jsNoop, 1);
+
+    try setFunctionIfMissing(ctx, global, "scrollTo", jsScrollTo, 2);
+    try setFunctionIfMissing(ctx, global, "scrollBy", jsScrollBy, 2);
 }
 
 fn installTimers(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -264,6 +337,8 @@ fn installTimers(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!voi
     try setFunction(ctx, global, "queueMicrotask", jsQueueMicrotask, 1);
     try setFunction(ctx, global, "setTimeout", jsSetTimeout, 2);
     try setFunction(ctx, global, "clearTimeout", jsClearTimeout, 1);
+    try setFunction(ctx, global, "requestAnimationFrame", jsRequestAnimationFrame, 1);
+    try setFunction(ctx, global, "cancelAnimationFrame", jsCancelAnimationFrame, 1);
     try setFunction(ctx, global, "setInterval", jsSetInterval, 2);
     try setFunction(ctx, global, "clearInterval", jsClearInterval, 1);
     try setFunction(ctx, global, "setImmediate", jsSetImmediate, 1);
@@ -429,8 +504,160 @@ fn installStorageObject(ctx: *quickjs.Context, global: quickjs.Value, comptime n
     global.setPropertyStr(ctx, name, storage) catch return error.JSError;
 }
 
+fn installSymbolDisposers(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
+    const symbol_ctor = global.getPropertyStr(ctx, "Symbol");
+    defer symbol_ctor.deinit(ctx);
+    if (symbol_ctor.isException() or !symbol_ctor.isObject()) return;
+
+    const symbol_for = symbol_ctor.getPropertyStr(ctx, "for");
+    defer symbol_for.deinit(ctx);
+    if (symbol_for.isException() or !symbol_for.isFunction(ctx)) return;
+
+    const ensure_symbol = struct {
+        fn ensure(ctx2: *quickjs.Context, symbol_obj: quickjs.Value, for_fn: quickjs.Value, name: [:0]const u8, key: []const u8) PlatformError!void {
+            const current = symbol_obj.getPropertyStr(ctx2, name);
+            defer current.deinit(ctx2);
+            if (!current.isUndefined() and !current.isNull()) return;
+
+            var args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx2, key)};
+            defer args[0].deinit(ctx2);
+            const symbol_value = for_fn.call(ctx2, symbol_obj, &args);
+            defer symbol_value.deinit(ctx2);
+            if (symbol_value.isException()) return;
+            symbol_obj.setPropertyStr(ctx2, name, symbol_value.dup(ctx2)) catch return error.JSError;
+        }
+    }.ensure;
+
+    try ensure_symbol(ctx, symbol_ctor, symbol_for, "dispose", "Symbol.dispose");
+    try ensure_symbol(ctx, symbol_ctor, symbol_for, "asyncDispose", "Symbol.asyncDispose");
+}
+
 fn jsNoop(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     return quickjs.Value.undefined;
+}
+
+fn jsHistoryPushState(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    return quickjs.Value.undefined;
+}
+
+fn jsHistoryReplaceState(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    return quickjs.Value.undefined;
+}
+
+fn jsScrollTo(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    var next_x: f64 = 0;
+    var next_y: f64 = 0;
+    if (args.len > 0) {
+        const first = quickjs.Value.fromCVal(args[0]);
+        if (first.isObject()) {
+            const left = first.getPropertyStr(ctx, "left");
+            defer left.deinit(ctx);
+            const top = first.getPropertyStr(ctx, "top");
+            defer top.deinit(ctx);
+            next_x = left.toFloat64(ctx) catch 0;
+            next_y = top.toFloat64(ctx) catch 0;
+        } else {
+            next_x = first.toFloat64(ctx) catch 0;
+            next_y = if (args.len > 1) quickjs.Value.fromCVal(args[1]).toFloat64(ctx) catch 0 else 0;
+        }
+    }
+
+    setScrollPosition(ctx, global, next_x, next_y) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsScrollBy(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const current_x_value = global.getPropertyStr(ctx, "scrollX");
+    defer current_x_value.deinit(ctx);
+    const current_y_value = global.getPropertyStr(ctx, "scrollY");
+    defer current_y_value.deinit(ctx);
+
+    const current_x = current_x_value.toFloat64(ctx) catch 0;
+    const current_y = current_y_value.toFloat64(ctx) catch 0;
+
+    const delta_x = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toFloat64(ctx) catch 0 else 0;
+    const delta_y = if (args.len > 1) quickjs.Value.fromCVal(args[1]).toFloat64(ctx) catch 0 else 0;
+
+    setScrollPosition(ctx, global, current_x + delta_x, current_y + delta_y) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn setScrollPosition(ctx: *quickjs.Context, global: quickjs.Value, x: f64, y: f64) !void {
+    global.setPropertyStr(ctx, "scrollX", quickjs.Value.initFloat64(x)) catch return error.JSError;
+    global.setPropertyStr(ctx, "scrollY", quickjs.Value.initFloat64(y)) catch return error.JSError;
+    global.setPropertyStr(ctx, "pageXOffset", quickjs.Value.initFloat64(x)) catch return error.JSError;
+    global.setPropertyStr(ctx, "pageYOffset", quickjs.Value.initFloat64(y)) catch return error.JSError;
+
+    const window = global.getPropertyStr(ctx, "window");
+    defer window.deinit(ctx);
+    if (!window.isException() and window.isObject()) {
+        window.setPropertyStr(ctx, "scrollX", quickjs.Value.initFloat64(x)) catch return error.JSError;
+        window.setPropertyStr(ctx, "scrollY", quickjs.Value.initFloat64(y)) catch return error.JSError;
+        window.setPropertyStr(ctx, "pageXOffset", quickjs.Value.initFloat64(x)) catch return error.JSError;
+        window.setPropertyStr(ctx, "pageYOffset", quickjs.Value.initFloat64(y)) catch return error.JSError;
+    }
+}
+
+fn jsCryptoRandomUUID(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+
+    crypto_uuid_counter +%= 1;
+    crypto_uuid_state +%= crypto_uuid_counter *% 0x9E37_79B9_7F4A_7C15;
+
+    var bytes: [16]u8 = undefined;
+    for (bytes[0..]) |*byte| {
+        crypto_uuid_state ^= crypto_uuid_state << 13;
+        crypto_uuid_state ^= crypto_uuid_state >> 7;
+        crypto_uuid_state ^= crypto_uuid_state << 17;
+        byte.* = @truncate(crypto_uuid_state);
+    }
+
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    var buf: [36]u8 = undefined;
+    const text = std.fmt.bufPrint(
+        &buf,
+        "{x:0>2}{x:0>2}{x:0>2}{x:0>2}-{x:0>2}{x:0>2}-{x:0>2}{x:0>2}-{x:0>2}{x:0>2}-{x:0>2}{x:0>2}{x:0>2}{x:0>2}{x:0>2}{x:0>2}",
+        .{
+            bytes[0],
+            bytes[1],
+            bytes[2],
+            bytes[3],
+            bytes[4],
+            bytes[5],
+            bytes[6],
+            bytes[7],
+            bytes[8],
+            bytes[9],
+            bytes[10],
+            bytes[11],
+            bytes[12],
+            bytes[13],
+            bytes[14],
+            bytes[15],
+        },
+    ) catch return quickjs.Value.exception;
+
+    return quickjs.Value.initStringLen(ctx, text);
+}
+
+fn jsObjectGetAutoHeightDuration(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const height = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toFloat64(ctx) catch 0.0 else 0.0;
+    if (!(height > 0.0)) return quickjs.Value.initInt32(0);
+
+    const constant = height / 36.0;
+    const duration = @min(@round((4.0 + 15.0 * std.math.pow(f64, constant, 0.25) + constant / 5.0) * 10.0), 3000.0);
+    return quickjs.Value.initFloat64(duration);
 }
 
 fn clearNativeTimers(ctx: *quickjs.Context) void {
@@ -452,7 +679,9 @@ fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
 }
 
 fn delayToTimerTurns(delay_ms: f64) u32 {
-    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 1;
+    // Timers are driven through microtasks, so run multiple turns to
+    // approximate browser macrotask ordering for setTimeout(..., 0).
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 20;
     const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 5.0)));
     return @intCast(@max(1, @min(turns, 10_000)));
 }
@@ -609,6 +838,25 @@ fn jsClearTimeout(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const 
 fn jsSetInterval(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     return installNativeTimer(ctx, args, .interval, null);
+}
+
+fn jsRequestAnimationFrame(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    if (args.len == 0) return ctx.throwInternalError("requestAnimationFrame callback is required");
+
+    const callback = quickjs.Value.fromCVal(args[0]);
+    if (!callback.isFunction(ctx)) return ctx.throwInternalError("requestAnimationFrame callback must be a function");
+
+    var delay = quickjs.Value.initInt32(16);
+    defer delay.deinit(ctx);
+    var raf_args = [_]quickjs.Value{ callback.dup(ctx), delay };
+    defer raf_args[0].deinit(ctx);
+
+    return installNativeTimer(ctx, @ptrCast(&raf_args), .timeout, null);
+}
+
+fn jsCancelAnimationFrame(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    return jsClearTimeout(maybe_ctx, quickjs.Value.undefined, args);
 }
 
 fn jsClearInterval(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
@@ -1185,6 +1433,7 @@ fn jsResponseCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const 
     obj.setPropertyStr(ctx, "status", quickjs.Value.initInt32(status)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "ok", quickjs.Value.initBool(status >= 200 and status < 300)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "statusText", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "url", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     const headers = jsHeadersCtor(ctx, quickjs.Value.undefined, &.{});
     if (headers.isException()) return headers;
     obj.setPropertyStr(ctx, "headers", headers) catch return quickjs.Value.exception;
@@ -1269,7 +1518,13 @@ fn jsFetch(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
     } else "";
     var response_args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, body)};
     defer response_args[0].deinit(ctx);
-    return jsResponseCtor(ctx, quickjs.Value.undefined, @ptrCast(&response_args));
+    const response = jsResponseCtor(ctx, quickjs.Value.undefined, @ptrCast(&response_args));
+    if (response.isException()) return quickjs.Value.exception;
+    response.setPropertyStr(ctx, "url", quickjs.Value.initStringLen(ctx, url)) catch {
+        response.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    return response;
 }
 
 fn jsImageCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
@@ -1327,11 +1582,68 @@ fn jsDomParserCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const qu
     return obj;
 }
 
+fn jsDomParserQuerySelectorAll(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const body = this_value.getPropertyStr(ctx, "body");
+    defer body.deinit(ctx);
+    if (!body.isObject()) return quickjs.Value.initArray(ctx);
+
+    const query_selector_all = body.getPropertyStr(ctx, "querySelectorAll");
+    defer query_selector_all.deinit(ctx);
+    if (!query_selector_all.isFunction(ctx)) return quickjs.Value.initArray(ctx);
+
+    const selector = if (args.len > 0)
+        quickjs.Value.fromCVal(args[0]).dup(ctx)
+    else
+        quickjs.Value.initStringLen(ctx, "*");
+    defer selector.deinit(ctx);
+
+    var call_args = [_]quickjs.Value{selector};
+    return query_selector_all.call(ctx, body, &call_args);
+}
+
 fn jsDomParserParseFromString(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
     defer if (input) |text| ctx.freeCString(text.ptr);
     const html = if (input) |text| text.ptr[0..text.len] else "";
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+
+    if (!document.isException() and document.isObject()) {
+        const create_element = document.getPropertyStr(ctx, "createElement");
+        defer create_element.deinit(ctx);
+
+        if (!create_element.isException() and create_element.isFunction(ctx)) {
+            const body_tag = quickjs.Value.initStringLen(ctx, "body");
+            defer body_tag.deinit(ctx);
+
+            var create_args = [_]quickjs.Value{body_tag};
+            const body = create_element.call(ctx, document, &create_args);
+            defer body.deinit(ctx);
+
+            if (!body.isException() and body.isObject()) {
+                body.setPropertyStr(ctx, "innerHTML", quickjs.Value.initStringLen(ctx, html)) catch return quickjs.Value.exception;
+
+                const parsed = quickjs.Value.initObject(ctx);
+                if (parsed.isException()) return quickjs.Value.exception;
+                parsed.setPropertyStr(ctx, "body", body.dup(ctx)) catch return quickjs.Value.exception;
+                setFunction(ctx, parsed, "querySelectorAll", jsDomParserQuerySelectorAll, 1) catch return quickjs.Value.exception;
+
+                const first_element_child = body.getPropertyStr(ctx, "firstElementChild");
+                defer first_element_child.deinit(ctx);
+                if (!first_element_child.isException() and !first_element_child.isUndefined() and !first_element_child.isNull()) {
+                    parsed.setPropertyStr(ctx, "documentElement", first_element_child.dup(ctx)) catch return quickjs.Value.exception;
+                }
+
+                return parsed;
+            }
+        }
+    }
+
     const parsed = quickjs.Value.initObject(ctx);
     if (parsed.isException()) return quickjs.Value.exception;
     const body = quickjs.Value.initObject(ctx);
@@ -1341,10 +1653,6 @@ fn jsDomParserParseFromString(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, ar
     parsed.setPropertyStr(ctx, "body", body) catch return quickjs.Value.exception;
     if (domParserRootName(html)) |root_name| {
         const namespace = domParserDefaultNamespace(html) orelse "";
-        const global = ctx.getGlobalObject();
-        defer global.deinit(ctx);
-        const document = global.getPropertyStr(ctx, "document");
-        defer document.deinit(ctx);
         if (!document.isException() and document.isObject()) {
             const create_element_ns = document.getPropertyStr(ctx, "createElementNS");
             defer create_element_ns.deinit(ctx);

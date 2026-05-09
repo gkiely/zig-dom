@@ -156,6 +156,7 @@ const ElementCallbacks = struct {
     pub const attachShadow = jsElementAttachShadow;
     pub const getBoundingClientRect = jsElementGetBoundingClientRect;
     pub const getClientRects = jsElementGetClientRects;
+    pub const scrollIntoView = jsElementScrollIntoView;
     pub const focus = jsElementFocus;
     pub const blur = jsElementBlur;
     pub const select = jsElementSelect;
@@ -173,6 +174,7 @@ const ElementCallbacks = struct {
     pub const formElementsGet = jsElementFormElementsGet;
     pub const optionsGet = jsElementOptionsGet;
     pub const reset = jsElementReset;
+    pub const requestSubmit = jsElementRequestSubmit;
 };
 
 const DocumentCallbacks = struct {
@@ -556,6 +558,8 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     const custom_event_proto = try installConstructor(ctx, global, "CustomEvent", jsConstructCustomEvent);
     custom_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
     try installMethod(ctx, custom_event_proto, "initCustomEvent", jsCustomEventInitCustomEvent, 4);
+    const submit_event_proto = try installConstructor(ctx, global, "SubmitEvent", jsConstructSubmitEvent);
+    submit_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
     const gamepad_event_proto = try installConstructor(ctx, global, "GamepadEvent", jsConstructGamepadEvent);
     gamepad_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
     const ui_event_proto = try installConstructor(ctx, global, "UIEvent", jsConstructUIEvent);
@@ -605,6 +609,7 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     window_proto.deinit(ctx);
     event_proto.deinit(ctx);
     custom_event_proto.deinit(ctx);
+    submit_event_proto.deinit(ctx);
     gamepad_event_proto.deinit(ctx);
     ui_event_proto.deinit(ctx);
     focus_event_proto.deinit(ctx);
@@ -1384,6 +1389,12 @@ fn jsConstructCustomEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value,
     return createEventObject(ctx, this_value, args, .custom);
 }
 
+fn jsConstructSubmitEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return createEventObject(ctx, this_value, args, .submit_event);
+}
+
 fn jsConstructGamepadEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
@@ -1675,7 +1686,7 @@ fn jsKeyboardEventInitKeyboardEvent(ctx_opt: ?*quickjs.Context, this_value: quic
     return quickjs.Value.undefined;
 }
 
-const EventKind = enum { event, custom, ui, focus, mouse, wheel, keyboard, error_event, input, composition };
+const EventKind = enum { event, custom, submit_event, ui, focus, mouse, wheel, keyboard, error_event, input, composition };
 
 fn eventTimeStampNowMs(ctx: *quickjs.Context) f64 {
     const global = ctx.getGlobalObject();
@@ -1745,6 +1756,9 @@ fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []
     }
     if (kind == .custom) {
         obj.setPropertyStr(ctx, "detail", optionValueOrNull(ctx, args, "detail")) catch return quickjs.Value.exception;
+    }
+    if (kind == .submit_event) {
+        obj.setPropertyStr(ctx, "submitter", optionValueOrNull(ctx, args, "submitter")) catch return quickjs.Value.exception;
     }
     if (kind == .mouse or kind == .wheel) {
         obj.setPropertyStr(ctx, "screenX", quickjs.Value.initFloat64(optionNumber(ctx, args, "screenX"))) catch return quickjs.Value.exception;
@@ -3147,8 +3161,7 @@ fn jsElementHrefGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quick
     const href_text = href.toCStringLen(ctx) orelse return href;
     defer ctx.freeCString(href_text.ptr);
     const href_slice = href_text.ptr[0..href_text.len];
-    if (std.mem.indexOfScalar(u8, href_slice, '?') != null) return href;
-    if (!std.mem.startsWith(u8, href_slice, "/app/page/")) return href;
+    if (href_slice.len == 0) return href;
 
     const document = jsNodeOwnerDocumentGet(ctx, this_value);
     defer document.deinit(ctx);
@@ -3164,20 +3177,38 @@ fn jsElementHrefGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quick
     }
     if (location.isException() or !location.isObject()) return href;
 
+    var href_for_resolution = href_slice;
+    var combined_href: ?[]u8 = null;
+    defer if (combined_href) |text| std.heap.c_allocator.free(text);
+
     const search = location.getPropertyStr(ctx, "search");
     defer search.deinit(ctx);
-    if (search.isException() or !search.isString()) return href;
-    const search_text = search.toCStringLen(ctx) orelse return href;
-    defer ctx.freeCString(search_text.ptr);
-    const search_slice = search_text.ptr[0..search_text.len];
-    if (search_slice.len == 0) return href;
-    const has_legacy_flags = std.mem.indexOf(u8, search_slice, "p=") != null or std.mem.indexOf(u8, search_slice, "wikis=") != null;
-    if (!has_legacy_flags) return href;
+    if (!search.isException() and search.isString() and
+        std.mem.indexOfScalar(u8, href_slice, '?') == null and
+        std.mem.startsWith(u8, href_slice, "/app/page/"))
+    {
+        const search_text = search.toCStringLen(ctx);
+        if (search_text) |text| {
+            defer ctx.freeCString(text.ptr);
+            const search_slice = text.ptr[0..text.len];
+            if (search_slice.len > 0) {
+                const has_legacy_flags = std.mem.indexOf(u8, search_slice, "p=") != null or std.mem.indexOf(u8, search_slice, "wikis=") != null;
+                if (has_legacy_flags) {
+                    const combined = std.fmt.allocPrint(std.heap.c_allocator, "{s}{s}", .{ href_slice, search_slice }) catch null;
+                    if (combined) |value| {
+                        combined_href = value;
+                        href_for_resolution = value;
+                    }
+                }
+            }
+        }
+    }
 
-    const combined = std.fmt.allocPrint(std.heap.c_allocator, "{s}{s}", .{ href_slice, search_slice }) catch return href;
-    defer std.heap.c_allocator.free(combined);
+    const resolved = resolveLocationHref(ctx, location, href_for_resolution) catch return href;
+    defer std.heap.c_allocator.free(resolved);
+
     href.deinit(ctx);
-    return quickjs.Value.initStringLen(ctx, combined);
+    return quickjs.Value.initStringLen(ctx, resolved);
 }
 
 fn jsElementHrefSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
@@ -3462,6 +3493,99 @@ fn jsElementReset(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []co
     }
 
     return quickjs.Value.undefined;
+}
+
+fn isSubmitCapableControl(ctx: *quickjs.Context, target: quickjs.Value) bool {
+    if (!target.isObject()) return false;
+    const local = jsElementLocalNameGet(ctx, target);
+    defer local.deinit(ctx);
+    const local_text = local.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(local_text.ptr);
+
+    const is_button = std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "button");
+    const is_input = std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "input");
+    if (!is_button and !is_input) return false;
+
+    const type_value_opt = elementAttributeString(ctx, target, "type");
+    defer if (type_value_opt) |value| ctx.freeCString(value.ptr);
+    const type_value = if (type_value_opt) |value| value.ptr[0..value.len] else "";
+
+    if (is_button) {
+        return type_value.len == 0 or std.ascii.eqlIgnoreCase(type_value, "submit");
+    }
+
+    return std.ascii.eqlIgnoreCase(type_value, "submit") or std.ascii.eqlIgnoreCase(type_value, "image");
+}
+
+fn dispatchFormSubmitEvent(ctx: *quickjs.Context, form: quickjs.Value, submitter: quickjs.Value) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    var submit_ctor = global.getPropertyStr(ctx, "SubmitEvent");
+    var use_submit_ctor = !submit_ctor.isException() and submit_ctor.isObject();
+    if (!use_submit_ctor) {
+        submit_ctor.deinit(ctx);
+        submit_ctor = global.getPropertyStr(ctx, "Event");
+        use_submit_ctor = false;
+    }
+    defer submit_ctor.deinit(ctx);
+    if (submit_ctor.isException() or !submit_ctor.isObject()) return quickjs.Value.undefined;
+
+    const submit_type = quickjs.Value.initStringLen(ctx, "submit");
+    defer submit_type.deinit(ctx);
+    const submit_options = quickjs.Value.initObject(ctx);
+    if (submit_options.isException()) return quickjs.Value.exception;
+    defer submit_options.deinit(ctx);
+    submit_options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    submit_options.setPropertyStr(ctx, "cancelable", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    if (!submitter.isNull() and !submitter.isUndefined()) {
+        submit_options.setPropertyStr(ctx, "submitter", submitter.dup(ctx)) catch return quickjs.Value.exception;
+    }
+
+    const submit_args = [_]quickjs.Value{ submit_type, submit_options };
+    const submit_event = createEventObject(
+        ctx,
+        submit_ctor,
+        submit_args[0..],
+        if (use_submit_ctor) .submit_event else .event,
+    );
+    defer submit_event.deinit(ctx);
+    if (submit_event.isException()) return submit_event.dup(ctx);
+    if (!use_submit_ctor and !submitter.isNull() and !submitter.isUndefined()) {
+        submit_event.setPropertyStr(ctx, "submitter", submitter.dup(ctx)) catch return quickjs.Value.exception;
+    }
+
+    const submit_dispatched = jsEventTargetDispatchEvent(ctx, form, @ptrCast(&[_]quickjs.Value{submit_event}));
+    defer submit_dispatched.deinit(ctx);
+    if (submit_dispatched.isException()) return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsElementRequestSubmit(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const local = jsElementLocalNameGet(ctx, this_value);
+    defer local.deinit(ctx);
+    const local_text = local.toCStringLen(ctx) orelse return quickjs.Value.undefined;
+    defer ctx.freeCString(local_text.ptr);
+    if (!std.ascii.eqlIgnoreCase(local_text.ptr[0..local_text.len], "form")) return quickjs.Value.undefined;
+
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const submitter = if (args.len > 0 and !args[0].isUndefined() and !args[0].isNull()) args[0].dup(ctx) else quickjs.Value.null;
+    defer submitter.deinit(ctx);
+
+    if (submitter.isObject()) {
+        if (!isSubmitCapableControl(ctx, submitter)) {
+            return ctx.throwTypeError("requestSubmit() submitter must be a submit button or submit input");
+        }
+
+        const submitter_form = jsElementFormGet(ctx, submitter);
+        defer submitter_form.deinit(ctx);
+        if (!submitter_form.isObject() or !submitter_form.isStrictEqual(ctx, this_value)) {
+            return ctx.throwTypeError("requestSubmit() submitter is not associated with this form");
+        }
+    }
+
+    return dispatchFormSubmitEvent(ctx, this_value, submitter);
 }
 
 fn jsElementClassListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
@@ -4949,6 +5073,11 @@ fn jsElementSelect(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []c
     defer ctx.freeCString(text.ptr);
     this_value.setPropertyStr(ctx, "selectionStart", quickjs.Value.initInt32(0)) catch return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "selectionEnd", quickjs.Value.initInt32(@intCast(text.len))) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsElementScrollIntoView(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    _ = ctx_opt orelse return quickjs.Value.exception;
     return quickjs.Value.undefined;
 }
 
@@ -7652,28 +7781,7 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
     if (!form_parent.isObject()) return quickjs.Value.undefined;
 
     if (should_submit) {
-        const global = ctx.getGlobalObject();
-        defer global.deinit(ctx);
-        const event_ctor = global.getPropertyStr(ctx, "Event");
-        defer event_ctor.deinit(ctx);
-        if (event_ctor.isException() or !event_ctor.isObject()) return quickjs.Value.undefined;
-
-        const submit_type = quickjs.Value.initStringLen(ctx, "submit");
-        defer submit_type.deinit(ctx);
-        const submit_options = quickjs.Value.initObject(ctx);
-        if (submit_options.isException()) return quickjs.Value.exception;
-        defer submit_options.deinit(ctx);
-        submit_options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
-        submit_options.setPropertyStr(ctx, "cancelable", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
-
-        const submit_args = [_]quickjs.Value{ submit_type, submit_options };
-        const submit_event = createEventObject(ctx, event_ctor, submit_args[0..], .event);
-        defer submit_event.deinit(ctx);
-        if (submit_event.isException()) return submit_event.dup(ctx);
-
-        const submit_dispatched = jsEventTargetDispatchEvent(ctx, form, @ptrCast(&[_]quickjs.Value{submit_event}));
-        defer submit_dispatched.deinit(ctx);
-        return quickjs.Value.undefined;
+        return dispatchFormSubmitEvent(ctx, form, target);
     }
 
     const global = ctx.getGlobalObject();
@@ -7686,7 +7794,7 @@ fn applyClickDefaultAction(ctx: *quickjs.Context, target: quickjs.Value) quickjs
         const reset_options = quickjs.Value.initObject(ctx);
         if (reset_options.isException()) return quickjs.Value.exception;
         defer reset_options.deinit(ctx);
-        reset_options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
+        reset_options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
         reset_options.setPropertyStr(ctx, "cancelable", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
 
         const reset_event = createEventObject(ctx, event_ctor, &.{ reset_type, reset_options }, .event);
@@ -9362,6 +9470,12 @@ fn jsLocationHrefSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next
 
 fn resolveLocationHref(ctx: *quickjs.Context, location: quickjs.Value, input_href: []const u8) ![]u8 {
     if (std.mem.indexOf(u8, input_href, "://") != null) {
+        const scheme_end = std.mem.indexOf(u8, input_href, "://") orelse return std.heap.c_allocator.dupe(u8, input_href);
+        const after_scheme = input_href[scheme_end + 3 ..];
+        const host_end = std.mem.indexOfAny(u8, after_scheme, "/?#") orelse after_scheme.len;
+        if (host_end == after_scheme.len) {
+            return std.fmt.allocPrint(std.heap.c_allocator, "{s}/", .{input_href});
+        }
         return std.heap.c_allocator.dupe(u8, input_href);
     }
 
