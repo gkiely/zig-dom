@@ -145,224 +145,11 @@ const node_stream_web_specifier = "stream/web";
 const node_stream_web_colon_specifier = "node:stream/web";
 const node_vm_specifier = "vm";
 const node_vm_colon_specifier = "node:vm";
+const node_perf_hooks_specifier = "perf_hooks";
 const node_perf_hooks_colon_specifier = "node:perf_hooks";
 
 const native_builtin_stub_source =
     \\export {};
-;
-
-const node_url_shim_source =
-    \\const URLCtor = globalThis.URL;
-    \\const URLSearchParamsCtor = globalThis.URLSearchParams;
-    \\export const URL = URLCtor;
-    \\export const URLSearchParams = URLSearchParamsCtor;
-    \\export function pathToFileURL(pathLike) {
-    \\  const raw = String(pathLike ?? "");
-    \\  if (raw.startsWith("file:")) {
-    \\    return new URLCtor(raw);
-    \\  }
-    \\  const normalized = raw.replace(/\\\\/g, "/");
-    \\  const prefixed = normalized.startsWith("/") ? normalized : `/${normalized}`;
-    \\  return new URLCtor(`file://${prefixed}`);
-    \\}
-    \\export function fileURLToPath(input) {
-    \\  const parsed = input instanceof URLCtor ? input : new URLCtor(String(input ?? ""));
-    \\  if (parsed.protocol !== "file:") {
-    \\    throw new TypeError("fileURLToPath expects a file URL");
-    \\  }
-    \\  return decodeURIComponent(parsed.pathname || "");
-    \\}
-    \\export default { URL, URLSearchParams, pathToFileURL, fileURLToPath };
-;
-
-const node_fs_shim_source =
-    \\function unsupported(name) {
-    \\  throw new Error(`node:fs.${name} is not implemented in this runner`);
-    \\}
-    \\function resolvePath(path) {
-    \\  const raw = String(path);
-    \\  if (raw.startsWith("/")) return raw;
-    \\  const cwd = globalThis.process && typeof globalThis.process.cwd === "function" ? globalThis.process.cwd() : "";
-    \\  return cwd ? `${cwd.replace(/\/+$/, "")}/${raw}` : raw;
-    \\}
-    \\export function readFileSync(path, encoding = "utf8") {
-    \\  if (encoding !== "utf8" && encoding !== "utf-8") {
-    \\    unsupported("readFileSync encoding " + encoding);
-    \\  }
-    \\  return globalThis.__zigReadFileSync(resolvePath(path), encoding);
-    \\}
-    \\export function writeFileSync() { unsupported("writeFileSync"); }
-    \\export function mkdirSync() { unsupported("mkdirSync"); }
-    \\export function readdirSync() { unsupported("readdirSync"); }
-    \\export function existsSync() { return false; }
-    \\export default { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync };
-;
-
-const node_http_shim_source =
-    \\function unsupported(name) {
-    \\  throw new Error(`node:http.${name} is not implemented in this runner`);
-    \\}
-    \\export function request() { unsupported("request"); }
-    \\export function get() { unsupported("get"); }
-    \\export function createServer() { unsupported("createServer"); }
-    \\export default { request, get, createServer };
-;
-
-const node_https_shim_source =
-    \\import * as http from "http";
-    \\export const request = http.request;
-    \\export const get = http.get;
-    \\export default { request, get };
-;
-
-const node_net_shim_source =
-    \\function unsupported(name) {
-    \\  throw new Error(`node:net.${name} is not implemented in this runner`);
-    \\}
-    \\export function createConnection() { unsupported("createConnection"); }
-    \\export function createServer() { unsupported("createServer"); }
-    \\export function isIP() { return 0; }
-    \\export default { createConnection, createServer, isIP };
-;
-
-const node_zlib_shim_source =
-    \\function unsupported(name) {
-    \\  throw new Error(`node:zlib.${name} is not implemented in this runner`);
-    \\}
-    \\export function gzipSync() { unsupported("gzipSync"); }
-    \\export function gunzipSync() { unsupported("gunzipSync"); }
-    \\export default { gzipSync, gunzipSync };
-;
-
-const node_child_process_shim_source =
-    \\function unsupported(name) {
-    \\  throw new Error(`node:child_process.${name} is not implemented in this runner`);
-    \\}
-    \\export function spawn() { unsupported("spawn"); }
-    \\export function exec() { unsupported("exec"); }
-    \\export default { spawn, exec };
-;
-
-const node_path_shim_source =
-    \\function normalize(value) {
-    \\  return String(value ?? "").replace(/\\\\/g, "/");
-    \\}
-    \\export function join(...parts) {
-    \\  return parts.map((part) => normalize(part)).filter(Boolean).join("/").replace(/\/+/g, "/");
-    \\}
-    \\export function resolve(...parts) {
-    \\  return join(...parts);
-    \\}
-    \\export function dirname(input) {
-    \\  const normalized = normalize(input);
-    \\  const index = normalized.lastIndexOf("/");
-    \\  return index <= 0 ? "." : normalized.slice(0, index);
-    \\}
-    \\export function basename(input) {
-    \\  const normalized = normalize(input);
-    \\  const index = normalized.lastIndexOf("/");
-    \\  return index < 0 ? normalized : normalized.slice(index + 1);
-    \\}
-    \\export function extname(input) {
-    \\  const base = basename(input);
-    \\  const index = base.lastIndexOf(".");
-    \\  return index <= 0 ? "" : base.slice(index);
-    \\}
-    \\export default { join, resolve, dirname, basename, extname };
-;
-
-const node_util_shim_source =
-    \\export function inspect(value) {
-    \\  try {
-    \\    return JSON.stringify(value);
-    \\  } catch {
-    \\    return String(value);
-    \\  }
-    \\}
-    \\export function format(...values) {
-    \\  return values.map((value) => String(value)).join(" ");
-    \\}
-    \\export function promisify(fn) {
-    \\  return (...args) =>
-    \\    new Promise((resolve, reject) => {
-    \\      fn(...args, (error, value) => {
-    \\        if (error) reject(error);
-    \\        else resolve(value);
-    \\      });
-    \\    });
-    \\}
-    \\export const TextEncoder = globalThis.TextEncoder;
-    \\export const TextDecoder = globalThis.TextDecoder;
-    \\export default { inspect, format, promisify, TextEncoder, TextDecoder };
-;
-
-const node_buffer_shim_source =
-    \\class BufferImpl extends Uint8Array {
-    \\  static from(input) {
-    \\    if (typeof input === "string") {
-    \\      return new TextEncoder().encode(input);
-    \\    }
-    \\    if (Array.isArray(input) || ArrayBuffer.isView(input)) {
-    \\      return new Uint8Array(input);
-    \\    }
-    \\    if (input instanceof ArrayBuffer) {
-    \\      return new Uint8Array(input);
-    \\    }
-    \\    return new Uint8Array(0);
-    \\  }
-    \\  static isBuffer(value) {
-    \\    return value instanceof Uint8Array;
-    \\  }
-    \\}
-    \\export const Buffer = BufferImpl;
-    \\export const Blob = globalThis.Blob;
-    \\export default { Buffer, Blob };
-;
-
-const node_crypto_shim_source =
-    \\const cryptoApi = globalThis.crypto || {};
-    \\export function randomUUID() {
-    \\  if (typeof cryptoApi.randomUUID === "function") {
-    \\    return cryptoApi.randomUUID();
-    \\  }
-    \\  return "00000000-0000-4000-8000-000000000000";
-    \\}
-    \\export const webcrypto = cryptoApi;
-    \\export default { randomUUID, webcrypto };
-;
-
-const node_stream_shim_source =
-    \\class Readable {}
-    \\class Writable {}
-    \\class Transform {}
-    \\class Duplex {}
-    \\export { Readable, Writable, Transform, Duplex };
-    \\export default { Readable, Writable, Transform, Duplex };
-;
-
-const node_vm_shim_source =
-    \\function unsupported(name) {
-    \\  throw new Error(`node:vm.${name} is not implemented in this runner`);
-    \\}
-    \\export function runInNewContext() { unsupported("runInNewContext"); }
-    \\export function runInContext() { unsupported("runInContext"); }
-    \\export function runInThisContext() { unsupported("runInThisContext"); }
-    \\export class Script {
-    \\  constructor() {}
-    \\  runInThisContext() { unsupported("Script.runInThisContext"); }
-    \\}
-    \\export default { runInNewContext, runInContext, runInThisContext, Script };
-;
-
-const node_perf_hooks_shim_source =
-    \\export const performance = globalThis.performance;
-    \\export class PerformanceObserver {
-    \\  observe() {}
-    \\  disconnect() {}
-    \\  takeRecords() { return []; }
-    \\}
-    \\export class PerformanceEntry {}
-    \\export default { performance, PerformanceObserver, PerformanceEntry };
 ;
 
 const max_module_source_bytes = 4 * 1024 * 1024;
@@ -3793,11 +3580,141 @@ fn loadNativeBuiltInModule(ctx: *ModuleContext, module_name: [:0]const u8) ?*Mod
         return module;
     }
 
+    if (std.mem.eql(u8, module_name, node_url_specifier) or std.mem.eql(u8, module_name, node_url_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeUrlModule) orelse return null;
+        if (!module.addExport(ctx, "URL")) return null;
+        if (!module.addExport(ctx, "URLSearchParams")) return null;
+        if (!module.addExport(ctx, "pathToFileURL")) return null;
+        if (!module.addExport(ctx, "fileURLToPath")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_fs_specifier) or std.mem.eql(u8, module_name, node_fs_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeFsModule) orelse return null;
+        if (!module.addExport(ctx, "readFileSync")) return null;
+        if (!module.addExport(ctx, "writeFileSync")) return null;
+        if (!module.addExport(ctx, "mkdirSync")) return null;
+        if (!module.addExport(ctx, "readdirSync")) return null;
+        if (!module.addExport(ctx, "existsSync")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_path_specifier) or std.mem.eql(u8, module_name, node_path_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodePathModule) orelse return null;
+        if (!module.addExport(ctx, "join")) return null;
+        if (!module.addExport(ctx, "resolve")) return null;
+        if (!module.addExport(ctx, "dirname")) return null;
+        if (!module.addExport(ctx, "basename")) return null;
+        if (!module.addExport(ctx, "extname")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_util_specifier) or std.mem.eql(u8, module_name, node_util_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeUtilModule) orelse return null;
+        if (!module.addExport(ctx, "inspect")) return null;
+        if (!module.addExport(ctx, "format")) return null;
+        if (!module.addExport(ctx, "promisify")) return null;
+        if (!module.addExport(ctx, "TextEncoder")) return null;
+        if (!module.addExport(ctx, "TextDecoder")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_buffer_specifier) or std.mem.eql(u8, module_name, node_buffer_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeBufferModule) orelse return null;
+        if (!module.addExport(ctx, "Buffer")) return null;
+        if (!module.addExport(ctx, "Blob")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_crypto_specifier) or std.mem.eql(u8, module_name, node_crypto_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeCryptoModule) orelse return null;
+        if (!module.addExport(ctx, "randomUUID")) return null;
+        if (!module.addExport(ctx, "webcrypto")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_http_specifier) or std.mem.eql(u8, module_name, node_http_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeHttpModule) orelse return null;
+        if (!module.addExport(ctx, "request")) return null;
+        if (!module.addExport(ctx, "get")) return null;
+        if (!module.addExport(ctx, "createServer")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_https_specifier) or std.mem.eql(u8, module_name, node_https_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeHttpsModule) orelse return null;
+        if (!module.addExport(ctx, "request")) return null;
+        if (!module.addExport(ctx, "get")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_net_specifier) or std.mem.eql(u8, module_name, node_net_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeNetModule) orelse return null;
+        if (!module.addExport(ctx, "createConnection")) return null;
+        if (!module.addExport(ctx, "createServer")) return null;
+        if (!module.addExport(ctx, "isIP")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_zlib_specifier) or std.mem.eql(u8, module_name, node_zlib_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeZlibModule) orelse return null;
+        if (!module.addExport(ctx, "gzipSync")) return null;
+        if (!module.addExport(ctx, "gunzipSync")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_child_process_specifier) or std.mem.eql(u8, module_name, node_child_process_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeChildProcessModule) orelse return null;
+        if (!module.addExport(ctx, "spawn")) return null;
+        if (!module.addExport(ctx, "exec")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_stream_specifier) or std.mem.eql(u8, module_name, node_stream_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeStreamModule) orelse return null;
+        if (!module.addExport(ctx, "Readable")) return null;
+        if (!module.addExport(ctx, "Writable")) return null;
+        if (!module.addExport(ctx, "Transform")) return null;
+        if (!module.addExport(ctx, "Duplex")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
     if (std.mem.eql(u8, module_name, node_stream_web_specifier) or std.mem.eql(u8, module_name, node_stream_web_colon_specifier)) {
         const module = ModuleDef.init(ctx, module_name, initNativeNodeStreamWebModule) orelse return null;
         if (!module.addExport(ctx, "ReadableStream")) return null;
         if (!module.addExport(ctx, "WritableStream")) return null;
         if (!module.addExport(ctx, "TransformStream")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_vm_specifier) or std.mem.eql(u8, module_name, node_vm_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodeVmModule) orelse return null;
+        if (!module.addExport(ctx, "runInNewContext")) return null;
+        if (!module.addExport(ctx, "runInContext")) return null;
+        if (!module.addExport(ctx, "runInThisContext")) return null;
+        if (!module.addExport(ctx, "Script")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, node_perf_hooks_specifier) or std.mem.eql(u8, module_name, node_perf_hooks_colon_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeNodePerfHooksModule) orelse return null;
+        if (!module.addExport(ctx, "performance")) return null;
+        if (!module.addExport(ctx, "PerformanceObserver")) return null;
+        if (!module.addExport(ctx, "PerformanceEntry")) return null;
         if (!module.addExport(ctx, "default")) return null;
         return module;
     }
@@ -3900,6 +3817,1085 @@ fn jsNodeAssertNotStrictEqual(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args
     return quickjs.Value.exception;
 }
 
+fn setModuleExportValue(
+    ctx: *ModuleContext,
+    module: *ModuleDef,
+    default_export: quickjs.Value,
+    export_name: [:0]const u8,
+    value: quickjs.Value,
+) bool {
+    default_export.setPropertyStr(ctx, export_name.ptr, value.dup(ctx)) catch return false;
+    if (!module.setExport(ctx, export_name, value.dup(ctx))) return false;
+    return true;
+}
+
+fn finishModuleDefaultExport(ctx: *ModuleContext, module: *ModuleDef, default_export: quickjs.Value) bool {
+    if (!module.setExport(ctx, "default", default_export.dup(ctx))) return false;
+    return true;
+}
+
+fn initNativeNodeUrlModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const url_ctor = global.getPropertyStr(ctx, "URL");
+    defer url_ctor.deinit(ctx);
+    if (url_ctor.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "URL", url_ctor)) return false;
+
+    const search_params_ctor = global.getPropertyStr(ctx, "URLSearchParams");
+    defer search_params_ctor.deinit(ctx);
+    if (search_params_ctor.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "URLSearchParams", search_params_ctor)) return false;
+
+    const path_to_file_url = quickjs.Value.initCFunction(ctx, jsNodeUrlPathToFileURL, "pathToFileURL", 1);
+    defer path_to_file_url.deinit(ctx);
+    if (path_to_file_url.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "pathToFileURL", path_to_file_url)) return false;
+
+    const file_url_to_path = quickjs.Value.initCFunction(ctx, jsNodeUrlFileURLToPath, "fileURLToPath", 1);
+    defer file_url_to_path.deinit(ctx);
+    if (file_url_to_path.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "fileURLToPath", file_url_to_path)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeFsModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const read_file_sync = quickjs.Value.initCFunction(ctx, jsNodeFsReadFileSync, "readFileSync", 2);
+    defer read_file_sync.deinit(ctx);
+    if (read_file_sync.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "readFileSync", read_file_sync)) return false;
+
+    const write_file_sync = quickjs.Value.initCFunction(ctx, jsNodeFsWriteFileSync, "writeFileSync", 0);
+    defer write_file_sync.deinit(ctx);
+    if (write_file_sync.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "writeFileSync", write_file_sync)) return false;
+
+    const mkdir_sync = quickjs.Value.initCFunction(ctx, jsNodeFsMkdirSync, "mkdirSync", 0);
+    defer mkdir_sync.deinit(ctx);
+    if (mkdir_sync.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "mkdirSync", mkdir_sync)) return false;
+
+    const readdir_sync = quickjs.Value.initCFunction(ctx, jsNodeFsReaddirSync, "readdirSync", 0);
+    defer readdir_sync.deinit(ctx);
+    if (readdir_sync.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "readdirSync", readdir_sync)) return false;
+
+    const exists_sync = quickjs.Value.initCFunction(ctx, jsNodeFsExistsSync, "existsSync", 1);
+    defer exists_sync.deinit(ctx);
+    if (exists_sync.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "existsSync", exists_sync)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodePathModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const join = quickjs.Value.initCFunction(ctx, jsNodePathJoin, "join", 0);
+    defer join.deinit(ctx);
+    if (join.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "join", join)) return false;
+
+    const resolve = quickjs.Value.initCFunction(ctx, jsNodePathResolve, "resolve", 0);
+    defer resolve.deinit(ctx);
+    if (resolve.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "resolve", resolve)) return false;
+
+    const dirname = quickjs.Value.initCFunction(ctx, jsNodePathDirname, "dirname", 1);
+    defer dirname.deinit(ctx);
+    if (dirname.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "dirname", dirname)) return false;
+
+    const basename = quickjs.Value.initCFunction(ctx, jsNodePathBasename, "basename", 1);
+    defer basename.deinit(ctx);
+    if (basename.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "basename", basename)) return false;
+
+    const extname = quickjs.Value.initCFunction(ctx, jsNodePathExtname, "extname", 1);
+    defer extname.deinit(ctx);
+    if (extname.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "extname", extname)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeUtilModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const inspect = quickjs.Value.initCFunction(ctx, jsNodeUtilInspect, "inspect", 1);
+    defer inspect.deinit(ctx);
+    if (inspect.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "inspect", inspect)) return false;
+
+    const format = quickjs.Value.initCFunction(ctx, jsNodeUtilFormat, "format", 0);
+    defer format.deinit(ctx);
+    if (format.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "format", format)) return false;
+
+    const promisify = quickjs.Value.initCFunction(ctx, jsNodeUtilPromisify, "promisify", 1);
+    defer promisify.deinit(ctx);
+    if (promisify.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "promisify", promisify)) return false;
+
+    const text_encoder = global.getPropertyStr(ctx, "TextEncoder");
+    defer text_encoder.deinit(ctx);
+    if (text_encoder.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "TextEncoder", text_encoder)) return false;
+
+    const text_decoder = global.getPropertyStr(ctx, "TextDecoder");
+    defer text_decoder.deinit(ctx);
+    if (text_decoder.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "TextDecoder", text_decoder)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeBufferModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const buffer_ctor = quickjs.Value.initCFunction2(ctx, jsNodeBufferCtor, "Buffer", 1, .constructor_or_func, 0);
+    defer buffer_ctor.deinit(ctx);
+    if (buffer_ctor.isException()) return false;
+
+    const from = quickjs.Value.initCFunction(ctx, jsNodeBufferFrom, "from", 1);
+    defer from.deinit(ctx);
+    if (from.isException()) return false;
+    buffer_ctor.setPropertyStr(ctx, "from", from.dup(ctx)) catch return false;
+
+    const is_buffer = quickjs.Value.initCFunction(ctx, jsNodeBufferIsBuffer, "isBuffer", 1);
+    defer is_buffer.deinit(ctx);
+    if (is_buffer.isException()) return false;
+    buffer_ctor.setPropertyStr(ctx, "isBuffer", is_buffer.dup(ctx)) catch return false;
+
+    if (!setModuleExportValue(ctx, module, default_export, "Buffer", buffer_ctor)) return false;
+
+    const blob = global.getPropertyStr(ctx, "Blob");
+    defer blob.deinit(ctx);
+    if (blob.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "Blob", blob)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeCryptoModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const random_uuid = quickjs.Value.initCFunction(ctx, jsNodeCryptoRandomUUID, "randomUUID", 0);
+    defer random_uuid.deinit(ctx);
+    if (random_uuid.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "randomUUID", random_uuid)) return false;
+
+    const crypto_value = global.getPropertyStr(ctx, "crypto");
+    defer crypto_value.deinit(ctx);
+    const webcrypto = if (!crypto_value.isException() and crypto_value.isObject()) crypto_value.dup(ctx) else quickjs.Value.initObject(ctx);
+    defer webcrypto.deinit(ctx);
+    if (webcrypto.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "webcrypto", webcrypto)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeHttpModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const request = quickjs.Value.initCFunction(ctx, jsNodeHttpRequest, "request", 0);
+    defer request.deinit(ctx);
+    if (request.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "request", request)) return false;
+
+    const get = quickjs.Value.initCFunction(ctx, jsNodeHttpGet, "get", 0);
+    defer get.deinit(ctx);
+    if (get.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "get", get)) return false;
+
+    const create_server = quickjs.Value.initCFunction(ctx, jsNodeHttpCreateServer, "createServer", 0);
+    defer create_server.deinit(ctx);
+    if (create_server.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "createServer", create_server)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeHttpsModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const request = quickjs.Value.initCFunction(ctx, jsNodeHttpsRequest, "request", 0);
+    defer request.deinit(ctx);
+    if (request.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "request", request)) return false;
+
+    const get = quickjs.Value.initCFunction(ctx, jsNodeHttpsGet, "get", 0);
+    defer get.deinit(ctx);
+    if (get.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "get", get)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeNetModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const create_connection = quickjs.Value.initCFunction(ctx, jsNodeNetCreateConnection, "createConnection", 0);
+    defer create_connection.deinit(ctx);
+    if (create_connection.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "createConnection", create_connection)) return false;
+
+    const create_server = quickjs.Value.initCFunction(ctx, jsNodeNetCreateServer, "createServer", 0);
+    defer create_server.deinit(ctx);
+    if (create_server.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "createServer", create_server)) return false;
+
+    const is_ip = quickjs.Value.initCFunction(ctx, jsNodeNetIsIp, "isIP", 1);
+    defer is_ip.deinit(ctx);
+    if (is_ip.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "isIP", is_ip)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeZlibModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const gzip_sync = quickjs.Value.initCFunction(ctx, jsNodeZlibGzipSync, "gzipSync", 0);
+    defer gzip_sync.deinit(ctx);
+    if (gzip_sync.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "gzipSync", gzip_sync)) return false;
+
+    const gunzip_sync = quickjs.Value.initCFunction(ctx, jsNodeZlibGunzipSync, "gunzipSync", 0);
+    defer gunzip_sync.deinit(ctx);
+    if (gunzip_sync.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "gunzipSync", gunzip_sync)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeChildProcessModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const spawn = quickjs.Value.initCFunction(ctx, jsNodeChildProcessSpawn, "spawn", 0);
+    defer spawn.deinit(ctx);
+    if (spawn.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "spawn", spawn)) return false;
+
+    const exec = quickjs.Value.initCFunction(ctx, jsNodeChildProcessExec, "exec", 0);
+    defer exec.deinit(ctx);
+    if (exec.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "exec", exec)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeStreamModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const readable = quickjs.Value.initCFunction2(ctx, jsNodeStreamCtor, "Readable", 0, .constructor_or_func, 0);
+    defer readable.deinit(ctx);
+    if (readable.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "Readable", readable)) return false;
+
+    const writable = quickjs.Value.initCFunction2(ctx, jsNodeStreamCtor, "Writable", 0, .constructor_or_func, 0);
+    defer writable.deinit(ctx);
+    if (writable.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "Writable", writable)) return false;
+
+    const transform_value = quickjs.Value.initCFunction2(ctx, jsNodeStreamCtor, "Transform", 0, .constructor_or_func, 0);
+    defer transform_value.deinit(ctx);
+    if (transform_value.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "Transform", transform_value)) return false;
+
+    const duplex = quickjs.Value.initCFunction2(ctx, jsNodeStreamCtor, "Duplex", 0, .constructor_or_func, 0);
+    defer duplex.deinit(ctx);
+    if (duplex.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "Duplex", duplex)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodeVmModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const run_in_new_context = quickjs.Value.initCFunction(ctx, jsNodeVmRunInNewContext, "runInNewContext", 0);
+    defer run_in_new_context.deinit(ctx);
+    if (run_in_new_context.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "runInNewContext", run_in_new_context)) return false;
+
+    const run_in_context = quickjs.Value.initCFunction(ctx, jsNodeVmRunInContext, "runInContext", 0);
+    defer run_in_context.deinit(ctx);
+    if (run_in_context.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "runInContext", run_in_context)) return false;
+
+    const run_in_this_context = quickjs.Value.initCFunction(ctx, jsNodeVmRunInThisContext, "runInThisContext", 0);
+    defer run_in_this_context.deinit(ctx);
+    if (run_in_this_context.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "runInThisContext", run_in_this_context)) return false;
+
+    const script_ctor = quickjs.Value.initCFunction2(ctx, jsNodeVmScriptCtor, "Script", 0, .constructor_or_func, 0);
+    defer script_ctor.deinit(ctx);
+    if (script_ctor.isException()) return false;
+
+    const script_proto = script_ctor.getPropertyStr(ctx, "prototype");
+    defer script_proto.deinit(ctx);
+    if (script_proto.isException() or !script_proto.isObject()) return false;
+    const script_run = quickjs.Value.initCFunction(ctx, jsNodeVmScriptRunInThisContext, "runInThisContext", 0);
+    defer script_run.deinit(ctx);
+    if (script_run.isException()) return false;
+    script_proto.setPropertyStr(ctx, "runInThisContext", script_run.dup(ctx)) catch return false;
+
+    if (!setModuleExportValue(ctx, module, default_export, "Script", script_ctor)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn initNativeNodePerfHooksModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const default_export = quickjs.Value.initObject(ctx);
+    defer default_export.deinit(ctx);
+    if (default_export.isException()) return false;
+
+    const performance = global.getPropertyStr(ctx, "performance");
+    defer performance.deinit(ctx);
+    if (performance.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "performance", performance)) return false;
+
+    const observer_ctor = quickjs.Value.initCFunction2(ctx, jsNodePerfObserverCtor, "PerformanceObserver", 1, .constructor_or_func, 0);
+    defer observer_ctor.deinit(ctx);
+    if (observer_ctor.isException()) return false;
+    const observer_proto = observer_ctor.getPropertyStr(ctx, "prototype");
+    defer observer_proto.deinit(ctx);
+    if (observer_proto.isException() or !observer_proto.isObject()) return false;
+    const observer_observe = quickjs.Value.initCFunction(ctx, jsNodePerfObserverObserve, "observe", 1);
+    defer observer_observe.deinit(ctx);
+    if (observer_observe.isException()) return false;
+    observer_proto.setPropertyStr(ctx, "observe", observer_observe.dup(ctx)) catch return false;
+    const observer_disconnect = quickjs.Value.initCFunction(ctx, jsNodePerfObserverDisconnect, "disconnect", 0);
+    defer observer_disconnect.deinit(ctx);
+    if (observer_disconnect.isException()) return false;
+    observer_proto.setPropertyStr(ctx, "disconnect", observer_disconnect.dup(ctx)) catch return false;
+    const observer_take_records = quickjs.Value.initCFunction(ctx, jsNodePerfObserverTakeRecords, "takeRecords", 0);
+    defer observer_take_records.deinit(ctx);
+    if (observer_take_records.isException()) return false;
+    observer_proto.setPropertyStr(ctx, "takeRecords", observer_take_records.dup(ctx)) catch return false;
+    if (!setModuleExportValue(ctx, module, default_export, "PerformanceObserver", observer_ctor)) return false;
+
+    const entry_ctor = quickjs.Value.initCFunction2(ctx, jsNodePerfEntryCtor, "PerformanceEntry", 0, .constructor_or_func, 0);
+    defer entry_ctor.deinit(ctx);
+    if (entry_ctor.isException()) return false;
+    if (!setModuleExportValue(ctx, module, default_export, "PerformanceEntry", entry_ctor)) return false;
+
+    return finishModuleDefaultExport(ctx, module, default_export);
+}
+
+fn throwUnsupportedNodeApi(
+    comptime module_name: [:0]const u8,
+    comptime function_name: [:0]const u8,
+    ctx: *quickjs.Context,
+) quickjs.Value {
+    _ = quickjs.c.JS_ThrowInternalError(
+        ctx.cval(),
+        "node:%s.%s is not implemented in this runner",
+        module_name.ptr,
+        function_name.ptr,
+    );
+    return quickjs.Value.exception;
+}
+
+fn callAsConstructor(ctx: *quickjs.Context, ctor: quickjs.Value, args: []const quickjs.Value) quickjs.Value {
+    if (args.len == 0) {
+        return quickjs.Value.fromCVal(quickjs.c.JS_CallConstructor(ctx.cval(), ctor.cval(), 0, null));
+    }
+
+    const allocator = std.heap.c_allocator;
+    const argv = allocator.alloc(quickjs.c.JSValue, args.len) catch return quickjs.Value.exception;
+    defer allocator.free(argv);
+    for (args, 0..) |arg, index| {
+        argv[index] = arg.cval();
+    }
+
+    return quickjs.Value.fromCVal(
+        quickjs.c.JS_CallConstructor(
+            ctx.cval(),
+            ctor.cval(),
+            @intCast(args.len),
+            @ptrCast(argv.ptr),
+        ),
+    );
+}
+
+fn valueToOwnedString(allocator: Allocator, ctx: *quickjs.Context, value: quickjs.Value, nullish_empty: bool) ![]u8 {
+    if (nullish_empty and (value.isUndefined() or value.isNull())) {
+        return allocator.dupe(u8, "");
+    }
+
+    const text = value.toCStringLen(ctx) orelse return error.ValueConversionFailed;
+    defer ctx.freeCString(text.ptr);
+    return allocator.dupe(u8, text.ptr[0..text.len]);
+}
+
+fn normalizePathSeparatorsAlloc(allocator: Allocator, text: []const u8) ![]u8 {
+    var normalized = try allocator.alloc(u8, text.len);
+    for (text, 0..) |ch, index| {
+        normalized[index] = if (ch == '\\') '/' else ch;
+    }
+    return normalized;
+}
+
+fn getProcessCwdAlloc(allocator: Allocator, ctx: *quickjs.Context) ![]u8 {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const process = global.getPropertyStr(ctx, "process");
+    defer process.deinit(ctx);
+    if (process.isException() or !process.isObject()) return allocator.dupe(u8, "");
+
+    const cwd_fn = process.getPropertyStr(ctx, "cwd");
+    defer cwd_fn.deinit(ctx);
+    if (cwd_fn.isException() or !cwd_fn.isFunction(ctx)) return allocator.dupe(u8, "");
+
+    const cwd_value = cwd_fn.call(ctx, process, &.{});
+    defer cwd_value.deinit(ctx);
+    if (cwd_value.isException()) {
+        const exception = ctx.getException();
+        exception.deinit(ctx);
+        return allocator.dupe(u8, "");
+    }
+
+    return valueToOwnedString(allocator, ctx, cwd_value, true);
+}
+
+fn resolveNodeFsPathAlloc(allocator: Allocator, ctx: *quickjs.Context, path: []const u8) ![]u8 {
+    if (std.mem.startsWith(u8, path, "/")) {
+        return allocator.dupe(u8, path);
+    }
+
+    const cwd = try getProcessCwdAlloc(allocator, ctx);
+    defer allocator.free(cwd);
+    var trimmed_len = cwd.len;
+    while (trimmed_len > 0 and cwd[trimmed_len - 1] == '/') : (trimmed_len -= 1) {}
+    if (trimmed_len == 0) return allocator.dupe(u8, path);
+
+    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ cwd[0..trimmed_len], path });
+}
+
+fn jsNodeUrlPathToFileURL(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const allocator = std.heap.c_allocator;
+    const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const raw = valueToOwnedString(allocator, ctx, input, true) catch return quickjs.Value.exception;
+    defer allocator.free(raw);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const url_ctor = global.getPropertyStr(ctx, "URL");
+    defer url_ctor.deinit(ctx);
+    if (url_ctor.isException() or !url_ctor.isFunction(ctx)) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "URL constructor is not available");
+        return quickjs.Value.exception;
+    }
+
+    const url_text = blk: {
+        if (std.mem.startsWith(u8, raw, "file:")) {
+            break :blk allocator.dupe(u8, raw) catch return quickjs.Value.exception;
+        }
+        const normalized = normalizePathSeparatorsAlloc(allocator, raw) catch return quickjs.Value.exception;
+        defer allocator.free(normalized);
+
+        const prefixed = if (normalized.len > 0 and normalized[0] == '/')
+            allocator.dupe(u8, normalized) catch return quickjs.Value.exception
+        else
+            std.fmt.allocPrint(allocator, "/{s}", .{normalized}) catch return quickjs.Value.exception;
+        defer allocator.free(prefixed);
+
+        break :blk std.fmt.allocPrint(allocator, "file://{s}", .{prefixed}) catch return quickjs.Value.exception;
+    };
+    defer allocator.free(url_text);
+
+    const url_arg = quickjs.Value.initStringLen(ctx, url_text);
+    defer url_arg.deinit(ctx);
+    return callAsConstructor(ctx, url_ctor, &.{url_arg});
+}
+
+fn jsNodeUrlFileURLToPath(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const allocator = std.heap.c_allocator;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const url_ctor = global.getPropertyStr(ctx, "URL");
+    defer url_ctor.deinit(ctx);
+    if (url_ctor.isException() or !url_ctor.isFunction(ctx)) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "URL constructor is not available");
+        return quickjs.Value.exception;
+    }
+
+    const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const parsed = blk: {
+        if (input.isObject()) {
+            const is_instance = input.isInstanceOf(ctx, url_ctor) catch false;
+            if (is_instance) break :blk input.dup(ctx);
+        }
+
+        const raw = valueToOwnedString(allocator, ctx, input, true) catch return quickjs.Value.exception;
+        defer allocator.free(raw);
+        const arg = quickjs.Value.initStringLen(ctx, raw);
+        defer arg.deinit(ctx);
+        break :blk callAsConstructor(ctx, url_ctor, &.{arg});
+    };
+    defer parsed.deinit(ctx);
+    if (parsed.isException()) return quickjs.Value.exception;
+
+    const protocol = parsed.getPropertyStr(ctx, "protocol");
+    defer protocol.deinit(ctx);
+    const protocol_text = protocol.toCStringLen(ctx) orelse return quickjs.Value.exception;
+    defer ctx.freeCString(protocol_text.ptr);
+    if (!std.mem.eql(u8, protocol_text.ptr[0..protocol_text.len], "file:")) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "fileURLToPath expects a file URL");
+        return quickjs.Value.exception;
+    }
+
+    const pathname = parsed.getPropertyStr(ctx, "pathname");
+    defer pathname.deinit(ctx);
+    if (pathname.isException()) return quickjs.Value.exception;
+
+    const decode = global.getPropertyStr(ctx, "decodeURIComponent");
+    defer decode.deinit(ctx);
+    if (!decode.isException() and decode.isFunction(ctx)) {
+        return decode.call(ctx, quickjs.Value.undefined, &.{pathname.dup(ctx)});
+    }
+
+    return pathname.dup(ctx);
+}
+
+fn jsNodeFsReadFileSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const allocator = std.heap.c_allocator;
+
+    const path_arg = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const raw_path = valueToOwnedString(allocator, ctx, path_arg, false) catch return quickjs.Value.exception;
+    defer allocator.free(raw_path);
+
+    const encoding = if (args.len > 1)
+        valueToOwnedString(allocator, ctx, quickjs.Value.fromCVal(args[1]), false) catch return quickjs.Value.exception
+    else
+        allocator.dupe(u8, "utf8") catch return quickjs.Value.exception;
+    defer allocator.free(encoding);
+
+    if (!std.mem.eql(u8, encoding, "utf8") and !std.mem.eql(u8, encoding, "utf-8")) {
+        return throwUnsupportedNodeApi("fs", "readFileSync", ctx);
+    }
+
+    const resolved = resolveNodeFsPathAlloc(allocator, ctx, raw_path) catch return quickjs.Value.exception;
+    defer allocator.free(resolved);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const read_fn = global.getPropertyStr(ctx, "__zigReadFileSync");
+    defer read_fn.deinit(ctx);
+    if (read_fn.isException() or !read_fn.isFunction(ctx)) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "__zigReadFileSync is not available");
+        return quickjs.Value.exception;
+    }
+
+    const path_value = quickjs.Value.initStringLen(ctx, resolved);
+    defer path_value.deinit(ctx);
+    const encoding_value = quickjs.Value.initStringLen(ctx, encoding);
+    defer encoding_value.deinit(ctx);
+    return read_fn.call(ctx, quickjs.Value.undefined, &.{ path_value, encoding_value });
+}
+
+fn jsNodeFsWriteFileSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("fs", "writeFileSync", ctx);
+}
+
+fn jsNodeFsMkdirSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("fs", "mkdirSync", ctx);
+}
+
+fn jsNodeFsReaddirSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("fs", "readdirSync", ctx);
+}
+
+fn jsNodeFsExistsSync(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    return quickjs.Value.initBool(false);
+}
+
+fn nodePathJoinLike(ctx: *quickjs.Context, args: []const quickjs.c.JSValue) quickjs.Value {
+    const allocator = std.heap.c_allocator;
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(allocator);
+
+    for (args) |arg| {
+        const raw = valueToOwnedString(allocator, ctx, quickjs.Value.fromCVal(arg), true) catch return quickjs.Value.exception;
+        defer allocator.free(raw);
+        const normalized = normalizePathSeparatorsAlloc(allocator, raw) catch return quickjs.Value.exception;
+        defer allocator.free(normalized);
+        if (normalized.len == 0) continue;
+        if (joined.items.len > 0 and joined.items[joined.items.len - 1] != '/') {
+            joined.append(allocator, '/') catch return quickjs.Value.exception;
+        }
+        joined.appendSlice(allocator, normalized) catch return quickjs.Value.exception;
+    }
+
+    var compact: std.ArrayList(u8) = .empty;
+    defer compact.deinit(allocator);
+    var previous_was_slash = false;
+    for (joined.items) |ch| {
+        if (ch == '/') {
+            if (previous_was_slash) continue;
+            previous_was_slash = true;
+        } else {
+            previous_was_slash = false;
+        }
+        compact.append(allocator, ch) catch return quickjs.Value.exception;
+    }
+
+    return quickjs.Value.initStringLen(ctx, compact.items);
+}
+
+fn jsNodePathJoin(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return nodePathJoinLike(ctx, args);
+}
+
+fn jsNodePathResolve(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return nodePathJoinLike(ctx, args);
+}
+
+fn jsNodePathDirname(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const allocator = std.heap.c_allocator;
+    const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const raw = valueToOwnedString(allocator, ctx, input, true) catch return quickjs.Value.exception;
+    defer allocator.free(raw);
+    const normalized = normalizePathSeparatorsAlloc(allocator, raw) catch return quickjs.Value.exception;
+    defer allocator.free(normalized);
+    const index = std.mem.lastIndexOfScalar(u8, normalized, '/') orelse return quickjs.Value.initStringLen(ctx, ".");
+    if (index <= 0) return quickjs.Value.initStringLen(ctx, ".");
+    return quickjs.Value.initStringLen(ctx, normalized[0..index]);
+}
+
+fn jsNodePathBasename(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const allocator = std.heap.c_allocator;
+    const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const raw = valueToOwnedString(allocator, ctx, input, true) catch return quickjs.Value.exception;
+    defer allocator.free(raw);
+    const normalized = normalizePathSeparatorsAlloc(allocator, raw) catch return quickjs.Value.exception;
+    defer allocator.free(normalized);
+    const index = std.mem.lastIndexOfScalar(u8, normalized, '/') orelse return quickjs.Value.initStringLen(ctx, normalized);
+    return quickjs.Value.initStringLen(ctx, normalized[index + 1 ..]);
+}
+
+fn jsNodePathExtname(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const base = jsNodePathBasename(ctx_opt, quickjs.Value.undefined, args);
+    defer base.deinit(ctx);
+    if (base.isException()) return quickjs.Value.exception;
+
+    const base_text = base.toCStringLen(ctx) orelse return quickjs.Value.exception;
+    defer ctx.freeCString(base_text.ptr);
+    const base_slice = base_text.ptr[0..base_text.len];
+    const index = std.mem.lastIndexOfScalar(u8, base_slice, '.') orelse return quickjs.Value.initStringLen(ctx, "");
+    if (index <= 0) return quickjs.Value.initStringLen(ctx, "");
+    return quickjs.Value.initStringLen(ctx, base_slice[index..]);
+}
+
+fn jsNodeUtilInspect(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const json = global.getPropertyStr(ctx, "JSON");
+    defer json.deinit(ctx);
+    if (!json.isException() and json.isObject()) {
+        const stringify = json.getPropertyStr(ctx, "stringify");
+        defer stringify.deinit(ctx);
+        if (!stringify.isException() and stringify.isFunction(ctx)) {
+            const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]).dup(ctx) else quickjs.Value.undefined;
+            defer input.deinit(ctx);
+            const result = stringify.call(ctx, json, &.{input});
+            if (!result.isException() and !result.isUndefined()) {
+                return result;
+            }
+            if (result.isException()) {
+                const exception = ctx.getException();
+                exception.deinit(ctx);
+            }
+            result.deinit(ctx);
+        }
+    }
+
+    const value = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    return value.toStringValue(ctx);
+}
+
+fn jsNodeUtilFormat(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const allocator = std.heap.c_allocator;
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    for (args, 0..) |arg, index| {
+        if (index > 0) out.append(allocator, ' ') catch return quickjs.Value.exception;
+        const text = quickjs.Value.fromCVal(arg).toCStringLen(ctx) orelse return quickjs.Value.exception;
+        defer ctx.freeCString(text.ptr);
+        out.appendSlice(allocator, text.ptr[0..text.len]) catch return quickjs.Value.exception;
+    }
+
+    return quickjs.Value.initStringLen(ctx, out.items);
+}
+
+fn jsNodeUtilPromisify(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len == 0) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "promisify expects a function");
+        return quickjs.Value.exception;
+    }
+
+    const fn_value = quickjs.Value.fromCVal(args[0]);
+    if (!fn_value.isFunction(ctx)) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "promisify expects a function");
+        return quickjs.Value.exception;
+    }
+
+    var data = [_]quickjs.Value{fn_value.dup(ctx)};
+    defer data[0].deinit(ctx);
+    return quickjs.Value.initCFunctionData(ctx, jsNodeUtilPromisifiedCall, 0, 0, &data);
+}
+
+fn jsNodeUtilPromisifiedCall(
+    ctx_opt: ?*quickjs.Context,
+    _: quickjs.Value,
+    args: []const quickjs.c.JSValue,
+    _: c_int,
+    func_data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const original = quickjs.Value.fromCVal(func_data[0]);
+    if (!original.isFunction(ctx)) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "promisified target is not callable");
+        return quickjs.Value.exception;
+    }
+
+    var promise = quickjs.Value.initPromiseCapability(ctx);
+    if (promise.value.isException()) {
+        promise.resolve.deinit(ctx);
+        promise.reject.deinit(ctx);
+        return quickjs.Value.exception;
+    }
+    defer promise.resolve.deinit(ctx);
+    defer promise.reject.deinit(ctx);
+
+    var callback_data = [_]quickjs.Value{ promise.resolve.dup(ctx), promise.reject.dup(ctx) };
+    defer callback_data[0].deinit(ctx);
+    defer callback_data[1].deinit(ctx);
+
+    const callback = quickjs.Value.initCFunctionData(ctx, jsNodeUtilPromisifyCallback, 2, 0, &callback_data);
+    defer callback.deinit(ctx);
+    if (callback.isException()) {
+        promise.value.deinit(ctx);
+        return quickjs.Value.exception;
+    }
+
+    const allocator = std.heap.c_allocator;
+    const call_args = allocator.alloc(quickjs.Value, args.len + 1) catch {
+        promise.value.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    defer allocator.free(call_args);
+    defer for (call_args) |value| value.deinit(ctx);
+
+    for (args, 0..) |arg, index| {
+        call_args[index] = quickjs.Value.fromCVal(arg).dup(ctx);
+    }
+    call_args[args.len] = callback.dup(ctx);
+
+    const call_result = original.call(ctx, quickjs.Value.undefined, call_args);
+    if (call_result.isException()) {
+        call_result.deinit(ctx);
+        const exception = ctx.getException();
+        defer exception.deinit(ctx);
+        const rejected_value = exception.dup(ctx);
+        defer rejected_value.deinit(ctx);
+        const reject_result = promise.reject.call(ctx, quickjs.Value.undefined, &.{rejected_value});
+        reject_result.deinit(ctx);
+    } else {
+        call_result.deinit(ctx);
+    }
+
+    return promise.value;
+}
+
+fn jsNodeUtilPromisifyCallback(
+    ctx_opt: ?*quickjs.Context,
+    _: quickjs.Value,
+    args: []const quickjs.c.JSValue,
+    _: c_int,
+    func_data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const resolve = quickjs.Value.fromCVal(func_data[0]);
+    const reject = quickjs.Value.fromCVal(func_data[1]);
+    const error_value = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+
+    if (!error_value.isUndefined() and !error_value.isNull()) {
+        const rejected_value = error_value.dup(ctx);
+        defer rejected_value.deinit(ctx);
+        const result = reject.call(ctx, quickjs.Value.undefined, &.{rejected_value});
+        result.deinit(ctx);
+        return quickjs.Value.undefined;
+    }
+
+    const success_value = if (args.len > 1) quickjs.Value.fromCVal(args[1]).dup(ctx) else quickjs.Value.undefined.dup(ctx);
+    defer success_value.deinit(ctx);
+    const result = resolve.call(ctx, quickjs.Value.undefined, &.{success_value});
+    result.deinit(ctx);
+    return quickjs.Value.undefined;
+}
+
+fn makeUint8Array(ctx: *quickjs.Context, input: ?quickjs.Value) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const ctor = global.getPropertyStr(ctx, "Uint8Array");
+    defer ctor.deinit(ctx);
+    if (ctor.isException() or !ctor.isFunction(ctx)) return quickjs.Value.exception;
+    if (input) |value| return callAsConstructor(ctx, ctor, &.{value});
+    const zero = quickjs.Value.initInt32(0);
+    defer zero.deinit(ctx);
+    return callAsConstructor(ctx, ctor, &.{zero});
+}
+
+fn jsNodeBufferCtor(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len == 0) return makeUint8Array(ctx, null);
+    return makeUint8Array(ctx, quickjs.Value.fromCVal(args[0]));
+}
+
+fn jsNodeBufferFrom(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len == 0) return makeUint8Array(ctx, null);
+
+    const input = quickjs.Value.fromCVal(args[0]);
+    if (input.isString()) {
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const text_encoder_ctor = global.getPropertyStr(ctx, "TextEncoder");
+        defer text_encoder_ctor.deinit(ctx);
+        if (!text_encoder_ctor.isException() and text_encoder_ctor.isFunction(ctx)) {
+            const encoder = callAsConstructor(ctx, text_encoder_ctor, &.{});
+            defer encoder.deinit(ctx);
+            if (!encoder.isException()) {
+                const encode = encoder.getPropertyStr(ctx, "encode");
+                defer encode.deinit(ctx);
+                if (!encode.isException() and encode.isFunction(ctx)) {
+                    return encode.call(ctx, encoder, &.{input.dup(ctx)});
+                }
+            }
+        }
+    }
+
+    var result = makeUint8Array(ctx, input);
+    if (!result.isException()) return result;
+    const exception = ctx.getException();
+    exception.deinit(ctx);
+    result.deinit(ctx);
+    return makeUint8Array(ctx, null);
+}
+
+fn jsNodeBufferIsBuffer(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len == 0) return quickjs.Value.initBool(false);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const uint8_ctor = global.getPropertyStr(ctx, "Uint8Array");
+    defer uint8_ctor.deinit(ctx);
+    if (uint8_ctor.isException() or !uint8_ctor.isFunction(ctx)) return quickjs.Value.initBool(false);
+
+    const input = quickjs.Value.fromCVal(args[0]);
+    const is_buffer = if (input.isObject()) input.isInstanceOf(ctx, uint8_ctor) catch false else false;
+    return quickjs.Value.initBool(is_buffer);
+}
+
+fn jsNodeCryptoRandomUUID(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const crypto_value = global.getPropertyStr(ctx, "crypto");
+    defer crypto_value.deinit(ctx);
+    if (!crypto_value.isException() and crypto_value.isObject()) {
+        const random_uuid = crypto_value.getPropertyStr(ctx, "randomUUID");
+        defer random_uuid.deinit(ctx);
+        if (!random_uuid.isException() and random_uuid.isFunction(ctx)) {
+            return random_uuid.call(ctx, crypto_value, &.{});
+        }
+    }
+    return quickjs.Value.initStringLen(ctx, "00000000-0000-4000-8000-000000000000");
+}
+
+fn jsNodeHttpRequest(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("http", "request", ctx);
+}
+
+fn jsNodeHttpGet(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("http", "get", ctx);
+}
+
+fn jsNodeHttpCreateServer(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("http", "createServer", ctx);
+}
+
+fn jsNodeHttpsRequest(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("http", "request", ctx);
+}
+
+fn jsNodeHttpsGet(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("http", "get", ctx);
+}
+
+fn jsNodeNetCreateConnection(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("net", "createConnection", ctx);
+}
+
+fn jsNodeNetCreateServer(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("net", "createServer", ctx);
+}
+
+fn jsNodeNetIsIp(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    return quickjs.Value.initInt32(0);
+}
+
+fn jsNodeZlibGzipSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("zlib", "gzipSync", ctx);
+}
+
+fn jsNodeZlibGunzipSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("zlib", "gunzipSync", ctx);
+}
+
+fn jsNodeChildProcessSpawn(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("child_process", "spawn", ctx);
+}
+
+fn jsNodeChildProcessExec(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("child_process", "exec", ctx);
+}
+
+fn jsNodeStreamCtor(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (this_value.isObject()) return this_value.dup(ctx);
+    return quickjs.Value.initObject(ctx);
+}
+
+fn jsNodeVmRunInNewContext(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("vm", "runInNewContext", ctx);
+}
+
+fn jsNodeVmRunInContext(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("vm", "runInContext", ctx);
+}
+
+fn jsNodeVmRunInThisContext(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("vm", "runInThisContext", ctx);
+}
+
+fn jsNodeVmScriptCtor(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (this_value.isObject()) return this_value.dup(ctx);
+    return quickjs.Value.initObject(ctx);
+}
+
+fn jsNodeVmScriptRunInThisContext(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return throwUnsupportedNodeApi("vm", "Script.runInThisContext", ctx);
+}
+
+fn jsNodePerfObserverCtor(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (this_value.isObject()) return this_value.dup(ctx);
+    return quickjs.Value.initObject(ctx);
+}
+
+fn jsNodePerfObserverObserve(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    return quickjs.Value.undefined;
+}
+
+fn jsNodePerfObserverDisconnect(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    return quickjs.Value.undefined;
+}
+
+fn jsNodePerfObserverTakeRecords(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return quickjs.Value.initArray(ctx);
+}
+
+fn jsNodePerfEntryCtor(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (this_value.isObject()) return this_value.dup(ctx);
+    return quickjs.Value.initObject(ctx);
+}
+
 fn exportApiMembersAsModule(
     ctx: *ModuleContext,
     module: *ModuleDef,
@@ -3977,51 +4973,51 @@ fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
     }
 
     if (std.mem.eql(u8, module_name, node_url_specifier) or std.mem.eql(u8, module_name, node_url_colon_specifier)) {
-        return node_url_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_fs_specifier) or std.mem.eql(u8, module_name, node_fs_colon_specifier)) {
-        return node_fs_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_path_specifier) or std.mem.eql(u8, module_name, node_path_colon_specifier)) {
-        return node_path_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_util_specifier) or std.mem.eql(u8, module_name, node_util_colon_specifier)) {
-        return node_util_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_buffer_specifier) or std.mem.eql(u8, module_name, node_buffer_colon_specifier)) {
-        return node_buffer_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_crypto_specifier) or std.mem.eql(u8, module_name, node_crypto_colon_specifier)) {
-        return node_crypto_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_http_specifier) or std.mem.eql(u8, module_name, node_http_colon_specifier)) {
-        return node_http_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_https_specifier) or std.mem.eql(u8, module_name, node_https_colon_specifier)) {
-        return node_https_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_net_specifier) or std.mem.eql(u8, module_name, node_net_colon_specifier)) {
-        return node_net_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_zlib_specifier) or std.mem.eql(u8, module_name, node_zlib_colon_specifier)) {
-        return node_zlib_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_child_process_specifier) or std.mem.eql(u8, module_name, node_child_process_colon_specifier)) {
-        return node_child_process_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_stream_specifier) or std.mem.eql(u8, module_name, node_stream_colon_specifier)) {
-        return node_stream_shim_source;
+        return native_builtin_stub_source;
     }
 
     if (std.mem.eql(u8, module_name, node_stream_web_specifier) or std.mem.eql(u8, module_name, node_stream_web_colon_specifier)) {
@@ -4029,11 +5025,11 @@ fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
     }
 
     if (std.mem.eql(u8, module_name, node_vm_specifier) or std.mem.eql(u8, module_name, node_vm_colon_specifier)) {
-        return node_vm_shim_source;
+        return native_builtin_stub_source;
     }
 
-    if (std.mem.eql(u8, module_name, node_perf_hooks_colon_specifier)) {
-        return node_perf_hooks_shim_source;
+    if (std.mem.eql(u8, module_name, node_perf_hooks_specifier) or std.mem.eql(u8, module_name, node_perf_hooks_colon_specifier)) {
+        return native_builtin_stub_source;
     }
 
     return null;
