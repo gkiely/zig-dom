@@ -4,6 +4,7 @@ const discovery = @import("discovery.zig");
 const execution = @import("execution.zig");
 const reporter = @import("reporter.zig");
 const transform = @import("transform.zig");
+const build_info = @import("build_info");
 
 const Allocator = std.mem.Allocator;
 const default_test_patterns = [_][]const u8{"tests"};
@@ -74,8 +75,8 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
         return 1;
     }
 
-    reporter.printDiscovered(discovered.paths.len);
     if (parsed.dry_run) {
+        reporter.printDiscovered(discovered.paths.len);
         reporter.printDryRun(discovered.paths);
         return 0;
     }
@@ -83,29 +84,33 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
     const prepared = try transform.runUpfront(allocator, io, discovered.paths);
     defer prepared.deinit(allocator);
 
-    if (prepared.transformed_count > 0) {
-        reporter.printTransformed(prepared.transformed_count);
-    }
-
+    const run_start = std.Io.Clock.Timestamp.now(io, .awake);
     var summary = try execution.runFiles(allocator, io, prepared.paths, resolved_setup_files, parsed.dom_mode);
     defer summary.deinit(allocator);
+    const elapsed_ms = @as(f64, @floatFromInt(run_start.untilNow(io).raw.toMilliseconds()));
 
+    reporter.printBanner(build_info.version, build_info.commit_sha);
+
+    var total_expect_calls: usize = 0;
     for (summary.files) |file_result| {
+        const display_path = displayPath(parsed.root_dir, file_result.path);
+        total_expect_calls += file_result.expect_calls;
         reporter.printFileResult(
-            file_result.path,
+            display_path,
             file_result.passed,
             file_result.failed,
             file_result.skipped,
             file_result.timed_out,
             file_result.collection_errors,
+            file_result.passed_report,
         );
 
         if (file_result.collection_report) |collection_report| {
-            reporter.printCollectionReport(file_result.path, collection_report);
+            reporter.printCollectionReport(display_path, collection_report);
         }
 
         if (file_result.failure_report) |failure_report| {
-            reporter.printFailureReport(file_result.path, failure_report);
+            reporter.printFailureReport(display_path, failure_report);
         }
     }
 
@@ -115,9 +120,21 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
         summary.total_skipped,
         summary.total_timed_out,
         summary.total_collection_errors,
+        total_expect_calls,
+        summary.files.len,
+        elapsed_ms,
     );
 
     return if (summary.hasFailures()) 1 else 0;
+}
+
+fn displayPath(root_dir: []const u8, path: []const u8) []const u8 {
+    if (std.mem.eql(u8, root_dir, ".")) return path;
+    if (std.mem.startsWith(u8, path, root_dir)) {
+        const rest = path[root_dir.len..];
+        if (std.mem.startsWith(u8, rest, "/")) return rest[1..];
+    }
+    return path;
 }
 
 fn parseTestArgs(allocator: Allocator, raw_args: []const []const u8) !ParsedTestArgs {

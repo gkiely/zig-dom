@@ -84,12 +84,29 @@ const Failure = struct {
     }
 };
 
+const PassedTest = struct {
+    name: []u8,
+    elapsed_ms: f64,
+
+    fn deinit(self: *PassedTest, allocator: Allocator) void {
+        allocator.free(self.name);
+    }
+};
+
 const RunResult = struct {
     passed: i32 = 0,
     failed: i32 = 0,
     skipped: i32 = 0,
     timed_out: i32 = 0,
     failures: std.ArrayList(Failure) = .empty,
+    passed_tests: std.ArrayList(PassedTest) = .empty,
+
+    fn deinit(self: *RunResult, allocator: Allocator) void {
+        for (self.failures.items) |*failure| failure.deinit(allocator);
+        self.failures.deinit(allocator);
+        for (self.passed_tests.items) |*passed_test| passed_test.deinit(allocator);
+        self.passed_tests.deinit(allocator);
+    }
 };
 
 const CallbackOutcome = struct {
@@ -348,10 +365,7 @@ pub const HostRunner = struct {
 
     fn run(self: *HostRunner) !void {
         var result = RunResult{};
-        defer {
-            for (result.failures.items) |*failure| failure.deinit(self.allocator);
-            result.failures.deinit(self.allocator);
-        }
+        defer result.deinit(self.allocator);
 
         const only_mode = self.hasOnly(self.root_scope);
         const has_runnable = self.hasRunnableTest(self.root_scope, only_mode);
@@ -455,7 +469,10 @@ pub const HostRunner = struct {
         }
         result.passed += 1;
         const elapsed_ms = @as(f64, @floatFromInt(profileNowNs() - profile_start)) / 1_000_000.0;
-        std.debug.print("[zig-dom test] {d:.3}ms {s}\n", .{ elapsed_ms, full_name });
+        try result.passed_tests.append(self.allocator, .{
+            .name = try self.allocator.dupe(u8, full_name),
+            .elapsed_ms = elapsed_ms,
+        });
     }
 
     fn collectBeforeEach(self: *HostRunner, scope: *Scope, out: *std.ArrayList(Hook)) !void {
@@ -543,12 +560,25 @@ pub const HostRunner = struct {
         global.setPropertyStr(ctx, "__zigRegisteredTests", quickjs.Value.initInt32(self.registered_test_count)) catch return error.JSError;
         global.setPropertyStr(ctx, "__zigOnlyMode", quickjs.Value.initBool(only_mode)) catch return error.JSError;
         global.setPropertyStr(ctx, "__zigHasRunnable", quickjs.Value.initBool(has_runnable)) catch return error.JSError;
+        const passed_text = try self.buildPassedText(result.passed_tests.items);
+        defer self.allocator.free(passed_text);
         const failures_text = try self.buildFailuresText(result.failures.items);
         defer self.allocator.free(failures_text);
         const collection_text = try self.buildCollectionText();
         defer self.allocator.free(collection_text);
+        global.setPropertyStr(ctx, "__zigPassedText", quickjs.Value.initStringLen(ctx, passed_text)) catch return error.JSError;
         global.setPropertyStr(ctx, "__zigFailuresText", quickjs.Value.initStringLen(ctx, failures_text)) catch return error.JSError;
         global.setPropertyStr(ctx, "__zigCollectionText", quickjs.Value.initStringLen(ctx, collection_text)) catch return error.JSError;
+    }
+
+    fn buildPassedText(self: *HostRunner, passed_tests: []const PassedTest) ![]u8 {
+        var builder: std.ArrayList(u8) = .empty;
+        for (passed_tests) |passed_test| {
+            const line = try std.fmt.allocPrint(self.allocator, "{s}\t{d:.2}\n", .{ passed_test.name, passed_test.elapsed_ms });
+            defer self.allocator.free(line);
+            try builder.appendSlice(self.allocator, line);
+        }
+        return builder.toOwnedSlice(self.allocator);
     }
 
     fn buildFailuresText(self: *HostRunner, failures: []const Failure) ![]u8 {

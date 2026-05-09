@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const build_info = buildInfoOptions(b);
     const quickjs_dep = b.dependency("quickjs_ng", .{
         .target = target,
         .optimize = optimize,
@@ -44,6 +45,7 @@ pub fn build(b: *std.Build) void {
     });
     exe_module.addImport("quickjs", quickjs_module);
     exe_module.addImport("yuku_parser", yuku_parser_module);
+    exe_module.addOptions("build_info", build_info);
 
     const exe = b.addExecutable(.{
         .name = "zig-dom",
@@ -69,6 +71,7 @@ pub fn build(b: *std.Build) void {
     });
     main_tests_module.addImport("quickjs", quickjs_module);
     main_tests_module.addImport("yuku_parser", yuku_parser_module);
+    main_tests_module.addOptions("build_info", build_info);
 
     const main_tests = b.addTest(.{
         .root_module = main_tests_module,
@@ -82,4 +85,36 @@ pub fn build(b: *std.Build) void {
 
     const native_step = b.step("native", "Build zig-dom shared library");
     native_step.dependOn(&lib.step);
+}
+
+fn buildInfoOptions(b: *std.Build) *std.Build.Step.Options {
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", packageVersion(b));
+    options.addOption([]const u8, "commit_sha", commitSha(b));
+    return options;
+}
+
+fn packageVersion(b: *std.Build) []const u8 {
+    const source = std.Io.Dir.cwd().readFileAlloc(b.graph.io, "package.json", b.allocator, .limited(512 * 1024)) catch |err| {
+        std.process.fatal("failed to read package.json: {s}", .{@errorName(err)});
+    };
+    defer b.allocator.free(source);
+
+    var parsed = std.json.parseFromSlice(std.json.Value, b.allocator, source, .{}) catch |err| {
+        std.process.fatal("failed to parse package.json: {s}", .{@errorName(err)});
+    };
+    defer parsed.deinit();
+
+    const version_value = parsed.value.object.get("version") orelse {
+        std.process.fatal("package.json is missing version", .{});
+    };
+    return switch (version_value) {
+        .string => |version| b.dupe(version),
+        else => std.process.fatal("package.json version must be a string", .{}),
+    };
+}
+
+fn commitSha(b: *std.Build) []const u8 {
+    const raw = b.run(&.{ "git", "rev-parse", "--short", "HEAD" });
+    return b.dupe(std.mem.trim(u8, raw, " \n\r\t"));
 }

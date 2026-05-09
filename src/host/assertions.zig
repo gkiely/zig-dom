@@ -188,6 +188,13 @@ fn hasOwnPropertyCall(ctx: *quickjs.Context, target: quickjs.Value, key: quickjs
 
 fn jsExpect(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const current_count_value = global.getPropertyStr(ctx, "__zigExpectCalls");
+    defer current_count_value.deinit(ctx);
+    const current_count = current_count_value.toInt32(ctx) catch 0;
+    global.setPropertyStr(ctx, "__zigExpectCalls", quickjs.Value.initInt32(current_count + 1)) catch return quickjs.Value.exception;
+
     const received = if (args.len > 0) quickjs.Value.fromCVal(args[0]).dup(ctx) else quickjs.Value.undefined;
     defer received.deinit(ctx);
 

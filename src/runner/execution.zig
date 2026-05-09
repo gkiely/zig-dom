@@ -403,11 +403,16 @@ pub const FileResult = struct {
     skipped: usize,
     timed_out: usize,
     collection_errors: usize,
+    expect_calls: usize,
+    passed_report: ?[]u8,
     failure_report: ?[]u8,
     collection_report: ?[]u8,
 
     pub fn deinit(self: *FileResult, allocator: Allocator) void {
         allocator.free(self.path);
+        if (self.passed_report) |report| {
+            allocator.free(report);
+        }
         if (self.failure_report) |report| {
             allocator.free(report);
         }
@@ -525,7 +530,7 @@ const ModuleLoaderState = struct {
             .requested_exports = std.StringHashMap(ExportNameSet).init(allocator),
             .path_alias_root = null,
             .path_aliases = .empty,
-            .profile_enabled = std.c.getenv("ZIG_DOM_PROFILE") == null or !std.mem.eql(u8, std.mem.span(std.c.getenv("ZIG_DOM_PROFILE").?), "0"),
+            .profile_enabled = (std.c.getenv("ZIG_DOM_PROFILE") != null and !std.mem.eql(u8, std.mem.span(std.c.getenv("ZIG_DOM_PROFILE").?), "0")) or std.c.getenv("ZIG_DOM_PROFILE_MODULES") != null,
             .profile_modules_enabled = std.c.getenv("ZIG_DOM_PROFILE_MODULES") != null,
             .profile_module_entries = .empty,
             .profile_transform_ns = 0,
@@ -3129,6 +3134,8 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
                 .skipped = 0,
                 .timed_out = 0,
                 .collection_errors = 1,
+                .expect_calls = 0,
+                .passed_report = null,
                 .failure_report = null,
                 .collection_report = try allocator.dupe(u8, "collection failed: microtask flush timed out"),
             };
@@ -3168,6 +3175,8 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
                 .skipped = 0,
                 .timed_out = 1,
                 .collection_errors = 0,
+                .expect_calls = 0,
+                .passed_report = null,
                 .failure_report = try allocator.dupe(u8, "Runner timed out while waiting for async jobs."),
                 .collection_report = null,
             };
@@ -3187,6 +3196,8 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             .skipped = 0,
             .timed_out = 0,
             .collection_errors = 0,
+            .expect_calls = 0,
+            .passed_report = null,
             .failure_report = try allocator.dupe(u8, "Runner stalled with unresolved async work."),
             .collection_report = null,
         };
@@ -3204,6 +3215,8 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             .skipped = 0,
             .timed_out = 0,
             .collection_errors = 0,
+            .expect_calls = 0,
+            .passed_report = null,
             .failure_report = run_error,
             .collection_report = null,
         };
@@ -3237,13 +3250,17 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
             .skipped = 0,
             .timed_out = 0,
             .collection_errors = 1,
+            .expect_calls = 0,
+            .passed_report = null,
             .failure_report = null,
             .collection_report = diagnostic,
         };
     }
 
+    const passed_text = vm.getGlobalStringDup("__zigPassedText") catch try allocator.dupe(u8, "");
     const failures_text = vm.getGlobalStringDup("__zigFailuresText") catch try allocator.dupe(u8, "");
     const collection_text = vm.getGlobalStringDup("__zigCollectionText") catch try allocator.dupe(u8, "");
+    const expect_calls_i32 = vm.getGlobalInt32("__zigExpectCalls") catch 0;
 
     if (module_loader_state.profile_enabled) {
         std.debug.print(
@@ -3270,6 +3287,11 @@ fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_paths
         .skipped = @intCast(@max(skipped_i32, 0)),
         .timed_out = @intCast(@max(timed_out_i32, 0)),
         .collection_errors = @intCast(@max(collection_errors_i32, 0)),
+        .expect_calls = @intCast(@max(expect_calls_i32, 0)),
+        .passed_report = if (passed_text.len > 0) passed_text else blk: {
+            allocator.free(passed_text);
+            break :blk null;
+        },
         .failure_report = if (failures_text.len > 0) failures_text else blk: {
             allocator.free(failures_text);
             break :blk null;
@@ -4462,6 +4484,8 @@ fn failureFromRuntimeException(
         .skipped = 0,
         .timed_out = 0,
         .collection_errors = 0,
+        .expect_calls = 0,
+        .passed_report = null,
         .failure_report = message,
         .collection_report = null,
     };
@@ -4492,6 +4516,8 @@ fn collectionFailureFromRuntimeException(
         .skipped = 0,
         .timed_out = 0,
         .collection_errors = 1,
+        .expect_calls = 0,
+        .passed_report = null,
         .failure_report = null,
         .collection_report = message,
     };
@@ -4512,6 +4538,8 @@ fn collectionFailureFromError(
         .skipped = 0,
         .timed_out = 0,
         .collection_errors = 1,
+        .expect_calls = 0,
+        .passed_report = null,
         .failure_report = null,
         .collection_report = message,
     };
