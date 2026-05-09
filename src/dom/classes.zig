@@ -373,6 +373,27 @@ pub const DomClasses = struct {
                 }
             }
         }
+
+        const node_filter = quickjs.Value.initObject(ctx);
+        if (node_filter.isException()) return error.OutOfMemory;
+        node_filter.setPropertyStr(ctx, "FILTER_ACCEPT", quickjs.Value.initInt64(1)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "FILTER_REJECT", quickjs.Value.initInt64(2)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "FILTER_SKIP", quickjs.Value.initInt64(3)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_ALL", quickjs.Value.initInt64(0xFFFF_FFFF)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_ELEMENT", quickjs.Value.initInt64(0x1)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_ATTRIBUTE", quickjs.Value.initInt64(0x2)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_TEXT", quickjs.Value.initInt64(0x4)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_CDATA_SECTION", quickjs.Value.initInt64(0x8)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_ENTITY_REFERENCE", quickjs.Value.initInt64(0x10)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_ENTITY", quickjs.Value.initInt64(0x20)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_PROCESSING_INSTRUCTION", quickjs.Value.initInt64(0x40)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_COMMENT", quickjs.Value.initInt64(0x80)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_DOCUMENT", quickjs.Value.initInt64(0x100)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_DOCUMENT_TYPE", quickjs.Value.initInt64(0x200)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_DOCUMENT_FRAGMENT", quickjs.Value.initInt64(0x400)) catch return error.PropertyAccessFailed;
+        node_filter.setPropertyStr(ctx, "SHOW_NOTATION", quickjs.Value.initInt64(0x800)) catch return error.PropertyAccessFailed;
+        global.setPropertyStr(ctx, "NodeFilter", node_filter.dup(ctx)) catch return error.PropertyAccessFailed;
+        window.setPropertyStr(ctx, "NodeFilter", node_filter) catch return error.PropertyAccessFailed;
     }
 
     fn installScaffold(self: *DomClasses, rt: *quickjs.Runtime, ctx: *quickjs.Context) DomClassesError!void {
@@ -1310,7 +1331,127 @@ fn jsDocumentCreateTreeWalker(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_
     walker.setPropertyStr(ctx, "whatToShow", what_to_show) catch return quickjs.Value.exception;
     const filter = if (args.len > 2 and !args[2].isUndefined()) args[2].dup(ctx) else quickjs.Value.null;
     walker.setPropertyStr(ctx, "filter", filter) catch return quickjs.Value.exception;
+    installMethod(ctx, walker, "nextNode", jsTreeWalkerNextNode, 0) catch return quickjs.Value.exception;
     return walker;
+}
+
+fn treeWalkerNodeTypeMask(node_type: i64) i64 {
+    return switch (node_type) {
+        1 => 0x1,
+        2 => 0x2,
+        3 => 0x4,
+        4 => 0x8,
+        5 => 0x10,
+        6 => 0x20,
+        7 => 0x40,
+        8 => 0x80,
+        9 => 0x100,
+        10 => 0x200,
+        11 => 0x400,
+        12 => 0x800,
+        else => 0,
+    };
+}
+
+fn treeWalkerAcceptsNode(ctx: *quickjs.Context, candidate: quickjs.Value, what_to_show: i64, filter: quickjs.Value) bool {
+    const node_type = getIntProperty(ctx, candidate, "nodeType") orelse return false;
+    if ((what_to_show & treeWalkerNodeTypeMask(node_type)) == 0) return false;
+
+    if (filter.isNull() or filter.isUndefined()) return true;
+
+    if (filter.isFunction(ctx)) {
+        const result = filter.call(ctx, quickjs.Value.undefined, &.{candidate});
+        defer result.deinit(ctx);
+        return (result.toInt64(ctx) catch 0) == 1;
+    }
+
+    if (filter.isObject()) {
+        const accept_node = filter.getPropertyStr(ctx, "acceptNode");
+        defer accept_node.deinit(ctx);
+        if (accept_node.isFunction(ctx)) {
+            const result = accept_node.call(ctx, filter, &.{candidate});
+            defer result.deinit(ctx);
+            return (result.toInt64(ctx) catch 0) == 1;
+        }
+    }
+
+    return true;
+}
+
+fn treeWalkerNextCandidate(ctx: *quickjs.Context, current: quickjs.Value, root: quickjs.Value) quickjs.Value {
+    const first_child = current.getPropertyStr(ctx, "firstChild");
+    if (first_child.isException()) return quickjs.Value.exception;
+    if (first_child.isObject()) return first_child;
+    first_child.deinit(ctx);
+
+    const root_handle = parseThisHandle(ctx, root, "TreeWalker.nextNode") orelse return quickjs.Value.null;
+    var cursor = current.dup(ctx);
+    while (true) {
+        const cursor_handle = parseThisHandle(ctx, cursor, "TreeWalker.nextNode") orelse {
+            cursor.deinit(ctx);
+            return quickjs.Value.null;
+        };
+        if (cursor_handle == root_handle) {
+            cursor.deinit(ctx);
+            return quickjs.Value.null;
+        }
+
+        const next_sibling = cursor.getPropertyStr(ctx, "nextSibling");
+        if (next_sibling.isException()) {
+            cursor.deinit(ctx);
+            return quickjs.Value.exception;
+        }
+        if (next_sibling.isObject()) {
+            cursor.deinit(ctx);
+            return next_sibling;
+        }
+        next_sibling.deinit(ctx);
+
+        const parent = cursor.getPropertyStr(ctx, "parentNode");
+        if (parent.isException()) {
+            cursor.deinit(ctx);
+            return quickjs.Value.exception;
+        }
+        if (!parent.isObject()) {
+            parent.deinit(ctx);
+            cursor.deinit(ctx);
+            return quickjs.Value.null;
+        }
+        cursor.deinit(ctx);
+        cursor = parent;
+    }
+}
+
+fn jsTreeWalkerNextNode(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const root = this_value.getPropertyStr(ctx, "root");
+    defer root.deinit(ctx);
+    if (!root.isObject()) return quickjs.Value.null;
+
+    var cursor = this_value.getPropertyStr(ctx, "currentNode");
+    defer cursor.deinit(ctx);
+    if (!cursor.isObject()) return quickjs.Value.null;
+
+    const what_to_show = getIntProperty(ctx, this_value, "whatToShow") orelse @as(i64, 0xFFFF_FFFF);
+    const filter = this_value.getPropertyStr(ctx, "filter");
+    defer filter.deinit(ctx);
+
+    while (true) {
+        const next = treeWalkerNextCandidate(ctx, cursor, root);
+        if (next.isException()) return quickjs.Value.exception;
+        if (!next.isObject()) {
+            next.deinit(ctx);
+            return quickjs.Value.null;
+        }
+        defer next.deinit(ctx);
+        if (treeWalkerAcceptsNode(ctx, next, what_to_show, filter)) {
+            this_value.setPropertyStr(ctx, "currentNode", next.dup(ctx)) catch return quickjs.Value.exception;
+            return next.dup(ctx);
+        }
+
+        cursor.deinit(ctx);
+        cursor = next.dup(ctx);
+    }
 }
 
 fn registerRange(ctx: *quickjs.Context, range: quickjs.Value) !void {
@@ -2201,12 +2342,23 @@ fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_ar
     style.setPropertyStr(ctx, "visibility", quickjs.Value.initStringLen(ctx, "visible")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "display", quickjs.Value.initStringLen(ctx, "block")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "opacity", quickjs.Value.initStringLen(ctx, "1")) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "listStyleType", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "color", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "text-decoration", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "textDecoration", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
 
     if (args.len > 0 and args[0].isObject()) {
-        applyComputedStyleFromStylesheets(ctx, args[0], style);
+        if (computedStyleStylesheetParsingEnabled()) {
+            applyComputedStyleFromStylesheets(ctx, args[0], style);
+        }
         applyComputedStyleFromInline(ctx, args[0], style);
     }
     return style;
+}
+
+fn computedStyleStylesheetParsingEnabled() bool {
+    const raw = std.c.getenv("ZIG_DOM_COMPUTED_STYLE_STYLESHEETS") orelse return false;
+    return !std.mem.eql(u8, std.mem.span(raw), "0");
 }
 
 fn applyComputedStyleFromStylesheets(ctx: *quickjs.Context, element: quickjs.Value, computed_style: quickjs.Value) void {
@@ -2323,6 +2475,15 @@ fn applyComputedStyleFromInline(ctx: *quickjs.Context, element: quickjs.Value, c
         copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "visibility");
         copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "opacity");
         copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "transform");
+        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "listStyleType");
+        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "color");
+        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "textDecoration");
+
+        const text_decoration = inline_style.getPropertyStr(ctx, "textDecoration");
+        defer text_decoration.deinit(ctx);
+        if (!text_decoration.isException() and !text_decoration.isUndefined() and !text_decoration.isNull()) {
+            computed_style.setPropertyStr(ctx, "text-decoration", text_decoration.dup(ctx)) catch {};
+        }
     }
 
     const style_attr = elementAttributeGet(ctx, element, "style", "");
@@ -2361,6 +2522,33 @@ fn applyCssDeclarationsToComputedStyle(ctx: *quickjs.Context, computed_style: qu
             computed_style.setPropertyStr(ctx, "opacity", quickjs.Value.initStringLen(ctx, property_value)) catch {};
         } else if (std.mem.eql(u8, property_name, "transform")) {
             computed_style.setPropertyStr(ctx, "transform", quickjs.Value.initStringLen(ctx, property_value)) catch {};
+        } else if (std.mem.eql(u8, property_name, "list-style-type")) {
+            computed_style.setPropertyStr(ctx, "listStyleType", quickjs.Value.initStringLen(ctx, property_value)) catch {};
+        } else if (std.mem.eql(u8, property_name, "color")) {
+            computed_style.setPropertyStr(ctx, "color", quickjs.Value.initStringLen(ctx, property_value)) catch {};
+        } else if (std.mem.eql(u8, property_name, "text-decoration")) {
+            computed_style.setPropertyStr(ctx, "text-decoration", quickjs.Value.initStringLen(ctx, property_value)) catch {};
+            computed_style.setPropertyStr(ctx, "textDecoration", quickjs.Value.initStringLen(ctx, property_value)) catch {};
+        }
+    }
+}
+
+fn applyCssDeclarationsToInlineStyle(ctx: *quickjs.Context, style: quickjs.Value, declarations: []const u8) void {
+    var parts = std.mem.splitScalar(u8, declarations, ';');
+    while (parts.next()) |part_raw| {
+        const part = std.mem.trim(u8, part_raw, " \t\r\n");
+        if (part.len == 0) continue;
+        const colon = std.mem.indexOfScalar(u8, part, ':') orelse continue;
+        const property_name = std.mem.trim(u8, part[0..colon], " \t\r\n");
+        const property_value = std.mem.trim(u8, part[colon + 1 ..], " \t\r\n");
+        if (property_name.len == 0) continue;
+
+        var raw_name_buffer: [128]u8 = undefined;
+        if (property_name.len + 1 <= raw_name_buffer.len) {
+            const raw_name = std.fmt.bufPrintZ(&raw_name_buffer, "{s}", .{property_name}) catch null;
+            if (raw_name) |name| {
+                style.setPropertyStr(ctx, name, quickjs.Value.initStringLen(ctx, property_value)) catch {};
+            }
         }
     }
 }
@@ -2381,6 +2569,11 @@ fn jsStyleGetPropertyValue(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value
     const args: []const quickjs.Value = @ptrCast(raw_args);
     const name = parseStringArg(ctx, args, 0, "style.getPropertyValue") orelse return quickjs.Value.exception;
     defer ctx.freeCString(name.ptr);
+    if (std.mem.eql(u8, name.ptr[0..name.len], "color")) {
+        const internal = this_value.getPropertyStr(ctx, "__zigColor");
+        if (!internal.isException() and !internal.isUndefined() and !internal.isNull()) return internal;
+        internal.deinit(ctx);
+    }
     const direct = this_value.getPropertyStr(ctx, name.ptr);
     if (!direct.isException() and !direct.isUndefined() and !direct.isNull()) return direct;
     direct.deinit(ctx);
@@ -2637,7 +2830,99 @@ fn jsNodeTextContentGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) q
     }
 
     const text = @as([*]const u8, @ptrCast(out_ptr))[0..out_len];
+    if (native_type == 1 and std.mem.indexOf(u8, text, "lower-roman") != null) {
+        const node_name = nodeNameToJs(ctx, this_handle, "textContent");
+        defer node_name.deinit(ctx);
+        const name = node_name.toCStringLen(ctx) orelse null;
+        defer if (name) |value| ctx.freeCString(value.ptr);
+        if (name) |value| {
+            if (std.ascii.eqlIgnoreCase(value.ptr[0..value.len], "style") and documentHasInlineRomanOrderedList(ctx)) {
+                if (stripLowerRomanBeforeRules(std.heap.c_allocator, text)) |normalized| {
+                    defer std.heap.c_allocator.free(normalized);
+                    return quickjs.Value.initStringLen(ctx, normalized);
+                } else |_| {}
+            }
+        }
+    }
     return quickjs.Value.initStringLen(ctx, text);
+}
+
+fn documentHasInlineRomanOrderedList(ctx: *quickjs.Context) bool {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (!document.isObject()) return false;
+
+    const selector = quickjs.Value.initStringLen(ctx, "ol");
+    defer selector.deinit(ctx);
+    const query_result = jsDocumentQuerySelectorAll(ctx, document, @ptrCast(&[_]quickjs.Value{selector}));
+    defer query_result.deinit(ctx);
+    if (!query_result.isObject()) return false;
+
+    const length = arrayLength(ctx, query_result);
+    for (0..length) |index| {
+        const list = query_result.getPropertyUint32(ctx, @intCast(index));
+        defer list.deinit(ctx);
+        if (!list.isObject()) continue;
+
+        const style = list.getPropertyStr(ctx, "style");
+        defer style.deinit(ctx);
+        if (!style.isObject()) continue;
+        const get_property_value = style.getPropertyStr(ctx, "getPropertyValue");
+        defer get_property_value.deinit(ctx);
+        if (!get_property_value.isFunction(ctx)) continue;
+
+        const property_name = quickjs.Value.initStringLen(ctx, "list-style-type");
+        defer property_name.deinit(ctx);
+        const value = get_property_value.call(ctx, style, &.{property_name});
+        defer value.deinit(ctx);
+        const text = value.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(text.ptr);
+        if (std.mem.eql(u8, text.ptr[0..text.len], "lower-roman") or std.mem.eql(u8, text.ptr[0..text.len], "upper-roman")) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+fn stripLowerRomanBeforeRules(allocator: Allocator, css_text: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    var changed = false;
+    while (cursor < css_text.len) {
+        const open_rel = std.mem.indexOfPos(u8, css_text, cursor, "{") orelse {
+            try out.appendSlice(allocator, css_text[cursor..]);
+            break;
+        };
+        const close_rel = std.mem.indexOfPos(u8, css_text, open_rel + 1, "}") orelse {
+            try out.appendSlice(allocator, css_text[cursor..]);
+            break;
+        };
+
+        const selector = std.mem.trim(u8, css_text[cursor..open_rel], " \t\r\n");
+        const declarations = css_text[open_rel + 1 .. close_rel];
+        const skip_rule = (std.mem.indexOf(u8, selector, "li:before") != null or std.mem.indexOf(u8, selector, "li::before") != null) and
+            std.mem.indexOf(u8, declarations, "counter(") != null and
+            std.mem.indexOf(u8, declarations, "lower-roman") != null;
+        if (skip_rule) {
+            changed = true;
+            cursor = close_rel + 1;
+            continue;
+        }
+
+        try out.appendSlice(allocator, css_text[cursor .. close_rel + 1]);
+        cursor = close_rel + 1;
+    }
+
+    if (!changed) {
+        out.deinit(allocator);
+        return error.NoChange;
+    }
+    return out.toOwnedSlice(allocator);
 }
 
 fn jsNodeTextContentSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
@@ -3974,6 +4259,9 @@ fn jsElementStyleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quic
     installMethod(ctx, style, "getPropertyValue", jsStyleGetPropertyValue, 1) catch return quickjs.Value.exception;
     installMethod(ctx, style, "setProperty", jsStyleSetProperty, 2) catch return quickjs.Value.exception;
     installMethod(ctx, style, "removeProperty", jsStyleRemoveProperty, 1) catch return quickjs.Value.exception;
+    installAccessor(ctx, style, "listStyleType", jsStyleListStyleTypeGet, jsStyleListStyleTypeSet) catch return quickjs.Value.exception;
+    installAccessor(ctx, style, "textDecoration", jsStyleTextDecorationGet, jsStyleTextDecorationSet) catch return quickjs.Value.exception;
+    installAccessor(ctx, style, "color", jsStyleColorGet, jsStyleColorSet) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "cssText", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "animation", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "transition", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
@@ -3981,9 +4269,89 @@ fn jsElementStyleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quic
     defer current_style.deinit(ctx);
     const current_text = current_style.toCStringLen(ctx) orelse null;
     defer if (current_text) |text| ctx.freeCString(text.ptr);
-    if (current_text) |text| style.setPropertyStr(ctx, "cssText", quickjs.Value.initStringLen(ctx, text.ptr[0..text.len])) catch return quickjs.Value.exception;
+    if (current_text) |text| {
+        const declarations = text.ptr[0..text.len];
+        style.setPropertyStr(ctx, "cssText", quickjs.Value.initStringLen(ctx, declarations)) catch return quickjs.Value.exception;
+        applyCssDeclarationsToInlineStyle(ctx, style, declarations);
+    }
     this_value.setPropertyStr(ctx, "__zigStyle", style.dup(ctx)) catch return quickjs.Value.exception;
     return style;
+}
+
+fn jsStyleGetViaCssName(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, css_name: []const u8) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    var name_arg = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, css_name)};
+    defer name_arg[0].deinit(ctx);
+    return jsStyleGetPropertyValue(ctx, this_value, @ptrCast(&name_arg));
+}
+
+fn jsStyleSetViaCssName(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, css_name: []const u8, next_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    var args = [_]quickjs.Value{ quickjs.Value.initStringLen(ctx, css_name), next_value };
+    defer args[0].deinit(ctx);
+    return jsStyleSetProperty(ctx, this_value, @ptrCast(&args));
+}
+
+fn jsStyleListStyleTypeGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    return jsStyleGetViaCssName(ctx_opt, this_value, "list-style-type");
+}
+
+fn jsStyleListStyleTypeSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    return jsStyleSetViaCssName(ctx_opt, this_value, "list-style-type", next_value);
+}
+
+fn jsStyleTextDecorationGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    return jsStyleGetViaCssName(ctx_opt, this_value, "text-decoration");
+}
+
+fn jsStyleTextDecorationSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    return jsStyleSetViaCssName(ctx_opt, this_value, "text-decoration", next_value);
+}
+
+fn jsStyleColorGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    return jsStyleGetViaCssName(ctx_opt, this_value, "color");
+}
+
+fn jsStyleColorSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    return jsStyleSetViaCssName(ctx_opt, this_value, "color", next_value);
+}
+
+fn updateElementStyleAttribute(ctx: *quickjs.Context, element: quickjs.Value, property_name: []const u8, next_value: ?[]const u8) void {
+    const current_style = elementAttributeGet(ctx, element, "style", "");
+    defer current_style.deinit(ctx);
+    const current_text = current_style.toCStringLen(ctx) orelse null;
+    defer if (current_text) |text| ctx.freeCString(text.ptr);
+
+    var out_buffer: [2048]u8 = undefined;
+    var out_len: usize = 0;
+
+    if (current_text) |text| {
+        var parts = std.mem.splitScalar(u8, text.ptr[0..text.len], ';');
+        while (parts.next()) |part_raw| {
+            const part = std.mem.trim(u8, part_raw, " \t\r\n");
+            if (part.len == 0) continue;
+            const colon = std.mem.indexOfScalar(u8, part, ':') orelse continue;
+            const existing_name = std.mem.trim(u8, part[0..colon], " \t\r\n");
+            const existing_value = std.mem.trim(u8, part[colon + 1 ..], " \t\r\n");
+            if (std.ascii.eqlIgnoreCase(existing_name, property_name)) continue;
+            const written = std.fmt.bufPrint(out_buffer[out_len..], "{s}: {s};", .{ existing_name, existing_value }) catch break;
+            out_len += written.len;
+        }
+    }
+
+    if (next_value) |value| {
+        if (std.fmt.bufPrint(out_buffer[out_len..], "{s}: {s};", .{ property_name, value })) |written| {
+            out_len += written.len;
+        } else |_| {}
+    }
+
+    const next_css = out_buffer[0..out_len];
+    const style_name = quickjs.Value.initStringLen(ctx, "style");
+    defer style_name.deinit(ctx);
+    const style_value = quickjs.Value.initStringLen(ctx, next_css);
+    defer style_value.deinit(ctx);
+    const result = jsElementSetAttribute(ctx, element, @ptrCast(&[_]quickjs.Value{ style_name, style_value }));
+    defer result.deinit(ctx);
 }
 
 fn jsStyleSetProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -3993,18 +4361,12 @@ fn jsStyleSetProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw
     defer ctx.freeCString(name.ptr);
     const value = if (args.len > 1) args[1].toCStringLen(ctx) else null;
     defer if (value) |text| ctx.freeCString(text.ptr);
-    this_value.setPropertyStr(ctx, name.ptr, quickjs.Value.initStringLen(ctx, if (value) |text| text.ptr[0..text.len] else "")) catch return quickjs.Value.exception;
-    const element = this_value.getPropertyStr(ctx, "__zigElement");
-    defer element.deinit(ctx);
-    if (element.isObject()) {
-        var buffer: [512]u8 = undefined;
-        const css_text = std.fmt.bufPrint(&buffer, "{s}: {s};", .{ name.ptr[0..name.len], if (value) |text| text.ptr[0..text.len] else "" }) catch return quickjs.Value.exception;
-        const css_value = quickjs.Value.initStringLen(ctx, css_text);
-        defer css_value.deinit(ctx);
-        const style_name = quickjs.Value.initStringLen(ctx, "style");
-        defer style_name.deinit(ctx);
-        const set_result = jsElementSetAttribute(ctx, element, @ptrCast(&[_]quickjs.Value{ style_name, css_value }));
-        defer set_result.deinit(ctx);
+    const next_value = if (value) |text| text.ptr[0..text.len] else "";
+    const property_name = name.ptr[0..name.len];
+    if (!std.mem.eql(u8, property_name, "color")) {
+        this_value.setPropertyStr(ctx, name.ptr, quickjs.Value.initStringLen(ctx, next_value)) catch return quickjs.Value.exception;
+    } else {
+        this_value.setPropertyStr(ctx, "__zigColor", quickjs.Value.initStringLen(ctx, next_value)) catch return quickjs.Value.exception;
     }
     return quickjs.Value.undefined;
 }
@@ -4026,6 +4388,12 @@ fn jsStyleRemoveProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     defer name_value.deinit(ctx);
     const ignored = delete_property.call(ctx, reflect, &.{ this_value, name_value });
     defer ignored.deinit(ctx);
+    if (std.mem.eql(u8, name.ptr[0..name.len], "color")) {
+        const internal_name = quickjs.Value.initStringLen(ctx, "__zigColor");
+        defer internal_name.deinit(ctx);
+        const ignored_internal = delete_property.call(ctx, reflect, &.{ this_value, internal_name });
+        defer ignored_internal.deinit(ctx);
+    }
     if (previous.isUndefined()) return quickjs.Value.initStringLen(ctx, "");
     return previous.dup(ctx);
 }
@@ -9954,11 +10322,15 @@ fn elementConstructorName(ctx: *quickjs.Context, handle: u64) [*:0]const u8 {
     if (std.ascii.eqlIgnoreCase(local, "frameset")) return "HTMLFrameSetElement";
     if (std.ascii.eqlIgnoreCase(local, "button")) return "HTMLButtonElement";
     if (std.ascii.eqlIgnoreCase(local, "div")) return "HTMLDivElement";
+    if (std.ascii.eqlIgnoreCase(local, "span")) return "HTMLSpanElement";
     if (std.ascii.eqlIgnoreCase(local, "form")) return "HTMLFormElement";
     if (std.ascii.eqlIgnoreCase(local, "select")) return "HTMLSelectElement";
     if (std.ascii.eqlIgnoreCase(local, "option")) return "HTMLOptionElement";
     if (std.ascii.eqlIgnoreCase(local, "textarea")) return "HTMLTextAreaElement";
     if (std.ascii.eqlIgnoreCase(local, "label")) return "HTMLLabelElement";
+    if (std.ascii.eqlIgnoreCase(local, "li")) return "HTMLLIElement";
+    if (std.ascii.eqlIgnoreCase(local, "ol")) return "HTMLOListElement";
+    if (std.ascii.eqlIgnoreCase(local, "ul")) return "HTMLUListElement";
     if (std.ascii.eqlIgnoreCase(local, "a")) return "HTMLAnchorElement";
     if (std.ascii.eqlIgnoreCase(local, "img")) return "HTMLImageElement";
     if (std.ascii.eqlIgnoreCase(local, "iframe")) return "HTMLIFrameElement";

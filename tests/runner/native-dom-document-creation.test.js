@@ -23,3 +23,23 @@ test("native DOM document creation APIs", () => {
   expect(doctype.nodeName).toBe("html");
   expect(fragment.childNodes.length).toBe(2);
 });
+
+test("native DOM wraps span and list element constructors", () => {
+  const host = document.createElement("div");
+  host.innerHTML = "<ol><li><span>One</span></li></ol><ul><li>Two</li></ul>";
+
+  const ol = host.querySelector("ol");
+  const ul = host.querySelector("ul");
+  const li = host.querySelector("li");
+  const span = host.querySelector("span");
+
+  expect(ol instanceof HTMLOListElement).toBe(true);
+  expect(ul instanceof HTMLUListElement).toBe(true);
+  expect(li instanceof HTMLLIElement).toBe(true);
+  expect(span instanceof HTMLSpanElement).toBe(true);
+
+  expect(document.createElement("ol") instanceof HTMLOListElement).toBe(true);
+  expect(document.createElement("ul") instanceof HTMLUListElement).toBe(true);
+  expect(document.createElement("li") instanceof HTMLLIElement).toBe(true);
+  expect(document.createElement("span") instanceof HTMLSpanElement).toBe(true);
+});
