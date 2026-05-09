@@ -7,8 +7,8 @@ A Zig-backed native DOM implementation with a built-in test runner.
 ```sh
 bun run test
 bun run test tests/runner/basic.test.ts
-bun run build:dev basic.test
-bun run build:perf
+bun run test basic.test
+bun run test:perf
 ```
 
 The `test` command runs JavaScript, TypeScript, JSX, and TSX tests through the embedded QuickJS-ng runtime. DOM support can be enabled for all files with `--dom`, is enabled automatically for `.jsx` and `.tsx`, or can be customized with suffixes:

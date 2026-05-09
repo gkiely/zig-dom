@@ -130,7 +130,7 @@ and downstream still needs it.
 Acceptance:
 
 ```sh
-bun run build:dev native-dom-testing-library-smoke testing-library-role
+bun run test native-dom-testing-library-smoke testing-library-role
 ```
 
 ## Milestone 2: Built-In Module Fallback
@@ -157,7 +157,7 @@ bun run build:dev native-dom-testing-library-smoke testing-library-role
 Acceptance:
 
 ```sh
-bun run build:dev native-dom-testing-library-smoke
+bun run test native-dom-testing-library-smoke
 ```
 
 ## Milestone 3: DOM Query Core
@@ -214,7 +214,7 @@ Implementation notes:
 Acceptance:
 
 ```sh
-bun run build:dev testing-library-role native-dom-testing-library-smoke
+bun run test testing-library-role native-dom-testing-library-smoke
 ```
 
 ## Milestone 4: Role Queries and Accessible Names
@@ -268,7 +268,7 @@ Hidden filtering:
 Acceptance:
 
 ```sh
-bun run build:dev testing-library-role
+bun run test testing-library-role
 ```
 
 ## Milestone 5: Async Helpers
@@ -293,7 +293,7 @@ Behavior:
 Acceptance:
 
 ```sh
-bun run build:dev Search Tree Page OrderedListChecklistMacro
+bun run test Search Tree Page OrderedListChecklistMacro
 ```
 
 ## Milestone 6: Events and fireEvent
@@ -328,7 +328,7 @@ Behavior:
 Acceptance:
 
 ```sh
-bun run build:dev events native-dom-events native-dom-testing-library-smoke
+bun run test events native-dom-events native-dom-testing-library-smoke
 ```
 
 ## Milestone 7: React render and renderHook
@@ -374,7 +374,7 @@ the latest callback result and returns `{ result, rerender, unmount }`. Support
 Acceptance:
 
 ```sh
-bun run build:dev native-dom-testing-library-smoke render events hooks forms
+bun run test native-dom-testing-library-smoke render events hooks forms
 ```
 
 ## Milestone 8: Remove Upstream Dependency
@@ -391,8 +391,8 @@ After the built-ins pass repo coverage:
 Acceptance:
 
 ```sh
-bun run build:dev testing-library native-dom-testing-library-smoke
-bun run build:perf
+bun run test testing-library native-dom-testing-library-smoke
+bun run test:perf
 node --run test
 ```
 
@@ -420,8 +420,8 @@ instead of restoring upstream dependencies or adding test-specific hacks.
 
 1. Add the smallest failing test for one API group.
 2. Add or extend the import rewrite only when the API object already exists.
-3. Verify with `bun run build:dev <target>`.
-4. Run `bun run build:perf` after query traversal or module-loader changes.
+3. Verify with `bun run test <target>`.
+4. Run `bun run test:perf` after query traversal or module-loader changes.
 5. Run `node --run test` before handoff.
 6. Run `../youneedawiki node --run test-dom` before removing upstream packages.
 

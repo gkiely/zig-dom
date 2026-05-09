@@ -48,16 +48,16 @@ Do not remove skips for:
 7. Run the perf guard:
 
    ```sh
-   bun run build:perf
+   bun run test:perf:gate --timeout=.15 ../youneedawiki/src/elements/Buttons/Edit.test.tsx
    ```
 
-8. If WPT passes and there is no measurable perf regression, delete the
+8. If WPT passes and the warm perf run stays within the 150ms gate, delete the
    selected skip from `wpt/expected/upstream-dom.json`.
 
 9. Repeat for the next supported skip.
 
 If one skip is blocked because the fix stops being small, requires broad DOM
-architecture work, or causes a non-obvious `build:perf` regression, restore
+architecture work, or causes a non-obvious `test:perf:gate` regression, restore
 that skip, note the blocker, and continue with the next supported skip.
 
 Stop only when there are no supported skips left, the remaining skips are all
