@@ -719,7 +719,6 @@ fn installFormElementPrototypeAccessors(ctx: *quickjs.Context, global: quickjs.V
             try installMethod(ctx, template_proto, "getElementById", jsDocumentFragmentGetElementById, 1);
         }
     }
-
 }
 
 fn installBodyAndFrameSetWindowForwardedHandlers(ctx: *quickjs.Context, global: quickjs.Value, window_proto: quickjs.Value) DomClassesError!void {
@@ -6615,74 +6614,314 @@ fn hasShadowRootAncestor(ctx: *quickjs.Context, node: quickjs.Value) bool {
     return false;
 }
 
-fn jsRangeToString(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
-    const ctx = ctx_opt orelse return quickjs.Value.exception;
+fn rangeIsTextNode(ctx: *quickjs.Context, node: quickjs.Value) bool {
+    if (!node.isObject()) return false;
+    const node_type = getIntProperty(ctx, node, "nodeType") orelse return false;
+    return node_type == 3 or node_type == 4;
+}
+
+fn rangeIsBodyBlockDiv(ctx: *quickjs.Context, node: quickjs.Value) bool {
+    if (!node.isObject()) return false;
+    const tag_name = node.getPropertyStr(ctx, "tagName");
+    defer tag_name.deinit(ctx);
+    if (tag_name.isException() or tag_name.isUndefined() or tag_name.isNull()) return false;
+    const raw = tag_name.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(raw.ptr);
+    return std.ascii.eqlIgnoreCase(raw.ptr[0..raw.len], "DIV");
+}
+
+fn rangeNodeTextAlloc(ctx: *quickjs.Context, node: quickjs.Value) ![]u8 {
+    const text = node.getPropertyStr(ctx, "textContent");
+    defer text.deinit(ctx);
+    if (text.isException()) return error.JSError;
+    if (text.isUndefined() or text.isNull()) return std.heap.c_allocator.dupe(u8, "");
+    const raw = text.toCStringLen(ctx) orelse return error.JSError;
+    defer ctx.freeCString(raw.ptr);
+    return std.heap.c_allocator.dupe(u8, raw.ptr[0..raw.len]);
+}
+
+fn rangeSliceStringAlloc(ctx: *quickjs.Context, value: quickjs.Value, start: i64, end: ?i64) ![]u8 {
+    var text = if (value.isString()) value.dup(ctx) else value.toStringValue(ctx);
+    defer text.deinit(ctx);
+    if (text.isException()) return error.JSError;
+
+    const slice_fn = text.getPropertyStr(ctx, "slice");
+    defer slice_fn.deinit(ctx);
+    if (slice_fn.isException() or !slice_fn.isFunction(ctx)) {
+        const raw_fallback = text.toCStringLen(ctx) orelse return error.JSError;
+        defer ctx.freeCString(raw_fallback.ptr);
+        return std.heap.c_allocator.dupe(u8, raw_fallback.ptr[0..raw_fallback.len]);
+    }
+
+    const start_value = quickjs.Value.initInt64(start);
+    defer start_value.deinit(ctx);
+    const result = if (end) |end_value_raw| blk: {
+        const end_value = quickjs.Value.initInt64(end_value_raw);
+        defer end_value.deinit(ctx);
+        break :blk slice_fn.call(ctx, text, &.{ start_value, end_value });
+    } else slice_fn.call(ctx, text, &.{start_value});
+    defer result.deinit(ctx);
+    if (result.isException()) return error.JSError;
+
+    const raw = result.toCStringLen(ctx) orelse return error.JSError;
+    defer ctx.freeCString(raw.ptr);
+    return std.heap.c_allocator.dupe(u8, raw.ptr[0..raw.len]);
+}
+
+fn rangeNodeTextSliceAlloc(ctx: *quickjs.Context, node: quickjs.Value, start: i64, end: ?i64) ![]u8 {
+    const text = node.getPropertyStr(ctx, "textContent");
+    defer text.deinit(ctx);
+    if (text.isException()) return error.JSError;
+    if (text.isUndefined() or text.isNull()) return std.heap.c_allocator.dupe(u8, "");
+    return rangeSliceStringAlloc(ctx, text, start, end);
+}
+
+fn rangeAppendDocumentDivNodes(ctx: *quickjs.Context, out: *std.ArrayListUnmanaged(quickjs.Value)) !void {
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
-    const function_ctor = global.getPropertyStr(ctx, "Function");
-    defer function_ctor.deinit(ctx);
-    const body =
-        \\const r = arguments[0];
-        \\const start = r.startContainer, end = r.endContainer;
-        \\const startOffset = r.startOffset || 0, endOffset = r.endOffset || 0;
-        \\const isText = n => n && (n.nodeType === 3 || n.nodeType === 4);
-        \\const isBodyBlock = n => n && String(n.tagName || "").toUpperCase() === "DIV";
-        \\const text = n => String(n && n.textContent != null ? n.textContent : "");
-        \\const textOwner = t => {
-        \\  const stack = Array.from(document.querySelectorAll ? document.querySelectorAll("div") : []);
-        \\  while (stack.length) {
-        \\    const n = stack.shift();
-        \\    for (const child of Array.from(n.childNodes || [])) {
-        \\      if (child === t) return n;
-        \\      if (isText(child) && isText(t) && text(child) === text(t)) return n;
-        \\      stack.push(child);
-        \\    }
-        \\  }
-        \\  return null;
-        \\};
-        \\const nextNode = n => {
-        \\  if (n && n.firstChild) return n.firstChild;
-        \\  while (n) {
-        \\    if (n.nextSibling) return n.nextSibling;
-        \\    n = n.parentNode;
-        \\  }
-        \\  return null;
-        \\};
-        \\if (!start) return "";
-        \\if (start === end) return text(start).slice(startOffset, endOffset);
-        \\const startBlock = isText(start) ? textOwner(start) : start;
-        \\const endBlock = isText(end) ? textOwner(end) : end;
-        \\if (startBlock && endBlock && startBlock !== endBlock && isBodyBlock(startBlock) && isBodyBlock(endBlock)) {
-        \\  const blocks = Array.from(document.querySelectorAll("div")).filter(isBodyBlock);
-        \\  let i = blocks.indexOf(startBlock) + 1;
-        \\  let out = isText(start) ? text(start).slice(startOffset) : text(startBlock);
-        \\  while (i >= 1 && i < blocks.length && blocks[i] !== endBlock) out += "\n" + text(blocks[i++]);
-        \\  out += "\n" + (isText(end) ? text(end).slice(0, endOffset) : "");
-        \\  return out;
-        \\}
-        \\let out = "";
-        \\let cursor;
-        \\if (isText(start)) {
-        \\  out += text(start).slice(startOffset);
-        \\  cursor = nextNode(start);
-        \\} else {
-        \\  cursor = start.childNodes && start.childNodes[startOffset] ? start.childNodes[startOffset] : nextNode(start);
-        \\}
-        \\while (cursor && cursor !== end) {
-        \\  if (isBodyBlock(cursor) && out) out += "\n";
-        \\  if (isText(cursor)) out += text(cursor);
-        \\  cursor = nextNode(cursor);
-        \\}
-        \\if (cursor === end && !isText(end) && isBodyBlock(end) && out) out += "\n";
-        \\if (cursor === end && isText(end)) out += text(end).slice(0, endOffset);
-        \\return out;
-    ;
-    const body_value = quickjs.Value.initStringLen(ctx, body);
-    defer body_value.deinit(ctx);
-    const fn_value = function_ctor.call(ctx, quickjs.Value.undefined, &.{body_value});
-    defer fn_value.deinit(ctx);
-    if (fn_value.isException()) return quickjs.Value.exception;
-    return fn_value.call(ctx, quickjs.Value.undefined, &.{this_value});
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) return;
+
+    const query_selector_all = document.getPropertyStr(ctx, "querySelectorAll");
+    defer query_selector_all.deinit(ctx);
+    if (query_selector_all.isException() or !query_selector_all.isFunction(ctx)) return;
+
+    const selector = quickjs.Value.initStringLen(ctx, "div");
+    defer selector.deinit(ctx);
+    const nodes = query_selector_all.call(ctx, document, &.{selector});
+    defer nodes.deinit(ctx);
+    if (nodes.isException()) return error.JSError;
+
+    const len = arrayLength(ctx, nodes);
+    for (0..len) |index| {
+        const node = nodes.getPropertyUint32(ctx, @intCast(index));
+        defer node.deinit(ctx);
+        if (node.isException() or !node.isObject()) continue;
+        try out.append(std.heap.c_allocator, node.dup(ctx));
+    }
+}
+
+fn rangeFindTextOwner(ctx: *quickjs.Context, target: quickjs.Value) !?quickjs.Value {
+    var stack: std.ArrayListUnmanaged(quickjs.Value) = .empty;
+    defer {
+        for (stack.items) |entry| entry.deinit(ctx);
+        stack.deinit(std.heap.c_allocator);
+    }
+    try rangeAppendDocumentDivNodes(ctx, &stack);
+
+    const target_is_text = rangeIsTextNode(ctx, target);
+    const target_text = if (target_is_text) try rangeNodeTextAlloc(ctx, target) else try std.heap.c_allocator.dupe(u8, "");
+    defer std.heap.c_allocator.free(target_text);
+
+    var cursor: usize = 0;
+    while (cursor < stack.items.len) : (cursor += 1) {
+        const node = stack.items[cursor];
+        const children = node.getPropertyStr(ctx, "childNodes");
+        defer children.deinit(ctx);
+        if (children.isException()) return error.JSError;
+        if (!children.isObject()) continue;
+
+        const child_len = arrayLength(ctx, children);
+        for (0..child_len) |child_index| {
+            const child = children.getPropertyUint32(ctx, @intCast(child_index));
+            defer child.deinit(ctx);
+            if (child.isException()) return error.JSError;
+            if (!child.isObject()) continue;
+            if (child.isStrictEqual(ctx, target)) return node.dup(ctx);
+
+            if (target_is_text and rangeIsTextNode(ctx, child)) {
+                const child_text = try rangeNodeTextAlloc(ctx, child);
+                defer std.heap.c_allocator.free(child_text);
+                if (std.mem.eql(u8, child_text, target_text)) return node.dup(ctx);
+            }
+
+            try stack.append(std.heap.c_allocator, child.dup(ctx));
+        }
+    }
+
+    return null;
+}
+
+fn rangeNextNode(ctx: *quickjs.Context, node: quickjs.Value) !?quickjs.Value {
+    var cursor = node.dup(ctx);
+    while (true) {
+        const first_child = cursor.getPropertyStr(ctx, "firstChild");
+        if (first_child.isException()) {
+            cursor.deinit(ctx);
+            return error.JSError;
+        }
+        if (first_child.isObject()) {
+            cursor.deinit(ctx);
+            return first_child;
+        }
+        first_child.deinit(ctx);
+
+        const next_sibling = cursor.getPropertyStr(ctx, "nextSibling");
+        if (next_sibling.isException()) {
+            cursor.deinit(ctx);
+            return error.JSError;
+        }
+        if (next_sibling.isObject()) {
+            cursor.deinit(ctx);
+            return next_sibling;
+        }
+        next_sibling.deinit(ctx);
+
+        const parent = cursor.getPropertyStr(ctx, "parentNode");
+        if (parent.isException()) {
+            cursor.deinit(ctx);
+            return error.JSError;
+        }
+        if (!parent.isObject()) {
+            parent.deinit(ctx);
+            cursor.deinit(ctx);
+            return null;
+        }
+        cursor.deinit(ctx);
+        cursor = parent;
+    }
+}
+
+fn rangeChildNodeAtOffset(ctx: *quickjs.Context, node: quickjs.Value, offset: i64) !?quickjs.Value {
+    if (offset < 0 or offset > std.math.maxInt(u32)) return null;
+    const child_nodes = node.getPropertyStr(ctx, "childNodes");
+    defer child_nodes.deinit(ctx);
+    if (child_nodes.isException()) return error.JSError;
+    if (!child_nodes.isObject()) return null;
+
+    const child = child_nodes.getPropertyUint32(ctx, @intCast(offset));
+    if (child.isException()) return error.JSError;
+    if (!child.isObject()) {
+        child.deinit(ctx);
+        return null;
+    }
+    return child;
+}
+
+fn rangeAppendText(out: *std.ArrayList(u8), text: []const u8) !void {
+    try out.appendSlice(std.heap.c_allocator, text);
+}
+
+fn jsRangeToString(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const start = this_value.getPropertyStr(ctx, "startContainer");
+    defer start.deinit(ctx);
+    const end = this_value.getPropertyStr(ctx, "endContainer");
+    defer end.deinit(ctx);
+    const start_offset = getIntProperty(ctx, this_value, "startOffset") orelse 0;
+    const end_offset = getIntProperty(ctx, this_value, "endOffset") orelse 0;
+    if (!start.isObject()) return quickjs.Value.initStringLen(ctx, "");
+
+    if (start.isStrictEqual(ctx, end)) {
+        const slice = rangeNodeTextSliceAlloc(ctx, start, start_offset, end_offset) catch return quickjs.Value.exception;
+        defer std.heap.c_allocator.free(slice);
+        return quickjs.Value.initStringLen(ctx, slice);
+    }
+
+    const start_is_text = rangeIsTextNode(ctx, start);
+    const end_is_text = rangeIsTextNode(ctx, end);
+
+    var start_block = if (start_is_text)
+        (rangeFindTextOwner(ctx, start) catch return quickjs.Value.exception) orelse quickjs.Value.null
+    else
+        start.dup(ctx);
+    defer start_block.deinit(ctx);
+
+    var end_block = if (end_is_text)
+        (rangeFindTextOwner(ctx, end) catch return quickjs.Value.exception) orelse quickjs.Value.null
+    else
+        end.dup(ctx);
+    defer end_block.deinit(ctx);
+
+    if (start_block.isObject() and end_block.isObject() and !start_block.isStrictEqual(ctx, end_block) and rangeIsBodyBlockDiv(ctx, start_block) and rangeIsBodyBlockDiv(ctx, end_block)) {
+        var blocks: std.ArrayListUnmanaged(quickjs.Value) = .empty;
+        defer {
+            for (blocks.items) |block| block.deinit(ctx);
+            blocks.deinit(std.heap.c_allocator);
+        }
+        rangeAppendDocumentDivNodes(ctx, &blocks) catch return quickjs.Value.exception;
+
+        var index: i64 = 0;
+        for (blocks.items, 0..) |block, block_index| {
+            if (block.isStrictEqual(ctx, start_block)) {
+                index = @intCast(block_index + 1);
+                break;
+            }
+        }
+
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(std.heap.c_allocator);
+        const first_segment = if (start_is_text)
+            (rangeNodeTextSliceAlloc(ctx, start, start_offset, null) catch return quickjs.Value.exception)
+        else
+            (rangeNodeTextAlloc(ctx, start_block) catch return quickjs.Value.exception);
+        defer std.heap.c_allocator.free(first_segment);
+        rangeAppendText(&out, first_segment) catch return quickjs.Value.exception;
+
+        while (index >= 1 and index < @as(i64, @intCast(blocks.items.len)) and !blocks.items[@intCast(index)].isStrictEqual(ctx, end_block)) : (index += 1) {
+            const block_text = rangeNodeTextAlloc(ctx, blocks.items[@intCast(index)]) catch return quickjs.Value.exception;
+            defer std.heap.c_allocator.free(block_text);
+            if (out.items.len > 0) rangeAppendText(&out, "\n") catch return quickjs.Value.exception;
+            rangeAppendText(&out, block_text) catch return quickjs.Value.exception;
+        }
+
+        const last_segment = if (end_is_text)
+            (rangeNodeTextSliceAlloc(ctx, end, 0, end_offset) catch return quickjs.Value.exception)
+        else
+            (std.heap.c_allocator.dupe(u8, "") catch return quickjs.Value.exception);
+        defer std.heap.c_allocator.free(last_segment);
+        rangeAppendText(&out, "\n") catch return quickjs.Value.exception;
+        rangeAppendText(&out, last_segment) catch return quickjs.Value.exception;
+        return quickjs.Value.initStringLen(ctx, out.items);
+    }
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(std.heap.c_allocator);
+
+    var cursor_opt: ?quickjs.Value = null;
+    defer if (cursor_opt) |cursor| cursor.deinit(ctx);
+
+    if (start_is_text) {
+        const start_segment = rangeNodeTextSliceAlloc(ctx, start, start_offset, null) catch return quickjs.Value.exception;
+        defer std.heap.c_allocator.free(start_segment);
+        rangeAppendText(&out, start_segment) catch return quickjs.Value.exception;
+        cursor_opt = rangeNextNode(ctx, start) catch return quickjs.Value.exception;
+    } else {
+        cursor_opt = rangeChildNodeAtOffset(ctx, start, start_offset) catch return quickjs.Value.exception;
+        if (cursor_opt == null) {
+            cursor_opt = rangeNextNode(ctx, start) catch return quickjs.Value.exception;
+        }
+    }
+
+    while (cursor_opt) |cursor| {
+        if (cursor.isStrictEqual(ctx, end)) break;
+        if (rangeIsBodyBlockDiv(ctx, cursor) and out.items.len > 0) {
+            rangeAppendText(&out, "\n") catch return quickjs.Value.exception;
+        }
+        if (rangeIsTextNode(ctx, cursor)) {
+            const piece = rangeNodeTextAlloc(ctx, cursor) catch return quickjs.Value.exception;
+            defer std.heap.c_allocator.free(piece);
+            rangeAppendText(&out, piece) catch return quickjs.Value.exception;
+        }
+
+        const next = rangeNextNode(ctx, cursor) catch return quickjs.Value.exception;
+        cursor.deinit(ctx);
+        cursor_opt = next;
+    }
+
+    if (cursor_opt) |cursor| {
+        if (cursor.isStrictEqual(ctx, end) and !end_is_text and rangeIsBodyBlockDiv(ctx, end) and out.items.len > 0) {
+            rangeAppendText(&out, "\n") catch return quickjs.Value.exception;
+        }
+        if (cursor.isStrictEqual(ctx, end) and end_is_text) {
+            const tail = rangeNodeTextSliceAlloc(ctx, end, 0, end_offset) catch return quickjs.Value.exception;
+            defer std.heap.c_allocator.free(tail);
+            rangeAppendText(&out, tail) catch return quickjs.Value.exception;
+        }
+    }
+
+    return quickjs.Value.initStringLen(ctx, out.items);
 }
 
 fn updateRangeCollapsed(ctx: *quickjs.Context, range: quickjs.Value) !void {
