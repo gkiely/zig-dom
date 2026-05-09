@@ -162,6 +162,15 @@ fn resolveAtIndex(ctx: *quickjs.Context, args: []const quickjs.c.JSValue, length
     return if (raw >= 0) raw else length + raw;
 }
 
+fn drainPendingJobs(ctx: *quickjs.Context) !void {
+    const rt = ctx.getRuntime();
+    var iterations: usize = 0;
+    while (rt.isJobPending()) : (iterations += 1) {
+        _ = rt.executePendingJob() catch return error.JSError;
+        if (iterations > 100_000) return error.JSError;
+    }
+}
+
 fn hasOwnPropertyCall(ctx: *quickjs.Context, target: quickjs.Value, key: quickjs.Value) AssertionError!bool {
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
@@ -189,6 +198,7 @@ fn hasOwnPropertyCall(ctx: *quickjs.Context, target: quickjs.Value, key: quickjs
 
 fn jsExpect(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    drainPendingJobs(ctx) catch return quickjs.Value.exception;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const current_count_value = global.getPropertyStr(ctx, "__zigExpectCalls");

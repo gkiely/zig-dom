@@ -2163,14 +2163,23 @@ fn jsConstructObserver(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _:
     return obj;
 }
 
-fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
+fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
     const profile = classProfileEnabled();
     const start = if (profile) classProfileNowNs() else 0;
     defer if (profile) {
         class_perf_stats.computed_style_calls += 1;
         class_perf_stats.computed_style_ns += classProfileNowNs() - start;
     };
+
+    if (args.len > 0 and args[0].isObject()) {
+        const inline_style = args[0].getPropertyStr(ctx, "style");
+        defer inline_style.deinit(ctx);
+        if (!inline_style.isException() and inline_style.isObject()) {
+            return inline_style.dup(ctx);
+        }
+    }
 
     const cached = this_value.getPropertyStr(ctx, "__zigComputedStyle");
     if (!cached.isException() and cached.isObject()) return cached;
@@ -5001,22 +5010,21 @@ fn jsElementFocus(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []co
 
     const document = jsNodeOwnerDocumentGet(ctx, this_value);
     defer document.deinit(ctx);
+
+    var previous_active = quickjs.Value.undefined;
+    defer previous_active.deinit(ctx);
     if (!document.isException() and document.isObject()) {
+        previous_active = document.getPropertyStr(ctx, "activeElement");
         document.setPropertyStr(ctx, "activeElement", this_value.dup(ctx)) catch return quickjs.Value.exception;
     }
-    if (!hasDirectEventHandler(ctx, this_value, "focus", "onfocus")) return quickjs.Value.undefined;
-    const global = ctx.getGlobalObject();
-    defer global.deinit(ctx);
-    const ctor = global.getPropertyStr(ctx, "Event");
-    defer ctor.deinit(ctx);
-    if (ctor.isObject()) {
-        const event_type = quickjs.Value.initStringLen(ctx, "focus");
-        defer event_type.deinit(ctx);
-        const event = createEventObject(ctx, ctor, &.{event_type}, .event);
-        defer event.deinit(ctx);
-        const dispatched = jsEventTargetDispatchEvent(ctx, this_value, @ptrCast(&[_]quickjs.Value{event}));
-        defer dispatched.deinit(ctx);
+
+    if (!previous_active.isException() and previous_active.isObject() and !previous_active.isSameValue(ctx, this_value)) {
+        dispatchFocusLikeEvent(ctx, previous_active, "blur", this_value, false);
+        dispatchFocusLikeEvent(ctx, previous_active, "focusout", this_value, true);
     }
+
+    dispatchFocusLikeEvent(ctx, this_value, "focus", previous_active, false);
+    dispatchFocusLikeEvent(ctx, this_value, "focusin", previous_active, true);
     return quickjs.Value.undefined;
 }
 
@@ -5024,27 +5032,65 @@ fn jsElementBlur(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []con
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const document = jsNodeOwnerDocumentGet(ctx, this_value);
     defer document.deinit(ctx);
+    var next_active = quickjs.Value.undefined;
+    defer next_active.deinit(ctx);
     if (!document.isException() and document.isObject()) {
         const body = jsDocumentBodyGet(ctx, document);
         defer body.deinit(ctx);
         if (!body.isException() and body.isObject()) {
+            next_active = body.dup(ctx);
             document.setPropertyStr(ctx, "activeElement", body.dup(ctx)) catch return quickjs.Value.exception;
         }
     }
-    if (!hasDirectEventHandler(ctx, this_value, "blur", "onblur")) return quickjs.Value.undefined;
-    const global = ctx.getGlobalObject();
-    defer global.deinit(ctx);
-    const ctor = global.getPropertyStr(ctx, "Event");
-    defer ctor.deinit(ctx);
-    if (ctor.isObject()) {
-        const event_type = quickjs.Value.initStringLen(ctx, "blur");
-        defer event_type.deinit(ctx);
-        const event = createEventObject(ctx, ctor, &.{event_type}, .event);
-        defer event.deinit(ctx);
-        const dispatched = jsEventTargetDispatchEvent(ctx, this_value, @ptrCast(&[_]quickjs.Value{event}));
-        defer dispatched.deinit(ctx);
+
+    dispatchFocusLikeEvent(ctx, this_value, "blur", next_active, false);
+    dispatchFocusLikeEvent(ctx, this_value, "focusout", next_active, true);
+    if (!next_active.isException() and next_active.isObject()) {
+        dispatchFocusLikeEvent(ctx, next_active, "focus", this_value, false);
+        dispatchFocusLikeEvent(ctx, next_active, "focusin", this_value, true);
     }
     return quickjs.Value.undefined;
+}
+
+fn dispatchFocusLikeEvent(ctx: *quickjs.Context, target: quickjs.Value, event_name: []const u8, related_target: quickjs.Value, bubbles: bool) void {
+    if (!target.isObject()) return;
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    var ctor = global.getPropertyStr(ctx, "FocusEvent");
+    defer ctor.deinit(ctx);
+    var kind: EventKind = .focus;
+    if (ctor.isException() or !ctor.isObject()) {
+        ctor.deinit(ctx);
+        ctor = global.getPropertyStr(ctx, "Event");
+        kind = .event;
+    }
+    if (!ctor.isObject()) return;
+
+    const event_type = quickjs.Value.initStringLen(ctx, event_name);
+    defer event_type.deinit(ctx);
+    const options = quickjs.Value.initObject(ctx);
+    defer options.deinit(ctx);
+    options.setPropertyStr(ctx, "bubbles", quickjs.Value.initBool(bubbles)) catch return;
+    if (kind == .focus and related_target.isObject()) {
+        options.setPropertyStr(ctx, "relatedTarget", related_target.dup(ctx)) catch return;
+    }
+
+    var event_args = [_]quickjs.Value{ event_type, options };
+    const event = createEventObject(ctx, ctor, &event_args, kind);
+    defer event.deinit(ctx);
+    if (event.isException()) {
+        const exception = ctx.getException();
+        exception.deinit(ctx);
+        return;
+    }
+
+    const dispatched = jsEventTargetDispatchEvent(ctx, target, @ptrCast(&[_]quickjs.Value{event}));
+    defer dispatched.deinit(ctx);
+    if (dispatched.isException()) {
+        const exception = ctx.getException();
+        exception.deinit(ctx);
+    }
 }
 
 fn hasDirectEventHandler(ctx: *quickjs.Context, target: quickjs.Value, event_name: [*:0]const u8, property_name: [*:0]const u8) bool {
@@ -10398,14 +10444,6 @@ fn jsHtmlCollectionDefinePropertyTrap(ctx_opt: ?*quickjs.Context, _: quickjs.Val
     const target = args[0];
     const property = args[1];
     const descriptor = args[2];
-    const property_text = property.toCStringLen(ctx);
-    defer if (property_text) |text| ctx.freeCString(text.ptr);
-    if (property_text) |text| {
-        const key = text.ptr[0..text.len];
-        if (isArrayIndexString(key) or collectionHasNamedItem(ctx, target, key)) {
-            return quickjs.Value.initBool(false);
-        }
-    }
 
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);

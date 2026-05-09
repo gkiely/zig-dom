@@ -31,6 +31,7 @@ var native_timers: std.ArrayListUnmanaged(NativeTimer) = .empty;
 var native_next_timer_id: i32 = 1;
 var crypto_uuid_counter: u64 = 0;
 var crypto_uuid_state: u64 = 0xA409_3822_299F_31D0;
+var object_url_counter: u64 = 0;
 
 pub fn reset(ctx: *quickjs.Context) void {
     if (native_timer_ctx != ctx) return;
@@ -104,10 +105,12 @@ pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
     try linkWindowProperty(ctx, global, window, "clearImmediate");
     try linkWindowProperty(ctx, global, window, "scrollTo");
     try linkWindowProperty(ctx, global, window, "scrollBy");
+    try linkWindowProperty(ctx, global, window, "getComputedStyle");
 
     // Keep global location aligned with window.location.
     // Libraries often read bare `location` instead of `window.location`.
     try syncGlobalWithWindowProperty(ctx, global, window, "location");
+    try syncGlobalWithWindowProperty(ctx, global, window, "getComputedStyle");
 }
 
 fn linkWindowProperty(ctx: *quickjs.Context, global: quickjs.Value, window: quickjs.Value, comptime name: [:0]const u8) PlatformError!void {
@@ -380,11 +383,19 @@ fn installUrl(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
 
     const current = global.getPropertyStr(ctx, "URL");
     defer current.deinit(ctx);
-    if (!current.isUndefined() and !current.isNull()) return;
 
-    const ctor = quickjs.Value.initCFunction2(ctx, jsUrlCtor, "URL", 1, .constructor_or_func, 0);
-    if (ctor.isException()) return error.JSError;
-    global.setPropertyStr(ctx, "URL", ctor) catch return error.JSError;
+    var url_ctor = current.dup(ctx);
+    defer url_ctor.deinit(ctx);
+    if (current.isUndefined() or current.isNull()) {
+        url_ctor.deinit(ctx);
+        url_ctor = quickjs.Value.initCFunction2(ctx, jsUrlCtor, "URL", 1, .constructor_or_func, 0);
+        if (url_ctor.isException()) return error.JSError;
+        global.setPropertyStr(ctx, "URL", url_ctor.dup(ctx)) catch return error.JSError;
+    }
+
+    if (!url_ctor.isObject()) return;
+    try setFunctionIfMissing(ctx, url_ctor, "createObjectURL", jsUrlCreateObjectURL, 1);
+    try setFunctionIfMissing(ctx, url_ctor, "revokeObjectURL", jsUrlRevokeObjectURL, 1);
 }
 
 fn installFetchApi(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -681,7 +692,7 @@ fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
 fn delayToTimerTurns(delay_ms: f64) u32 {
     // Timers are driven through microtasks, so run multiple turns to
     // approximate browser macrotask ordering for setTimeout(..., 0).
-    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 20;
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 40;
     const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 5.0)));
     return @intCast(@max(1, @min(turns, 10_000)));
 }
@@ -1050,6 +1061,19 @@ fn jsUrlCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quick
     obj.setPropertyStr(ctx, "searchParams", params) catch return quickjs.Value.exception;
     setFunction(ctx, obj, "toString", jsUrlToString, 0) catch return quickjs.Value.exception;
     return obj;
+}
+
+fn jsUrlCreateObjectURL(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    object_url_counter +%= 1;
+
+    var buffer: [64]u8 = undefined;
+    const value = std.fmt.bufPrint(&buffer, "blob:zig-dom/{x}", .{object_url_counter}) catch "blob:zig-dom/0";
+    return quickjs.Value.initStringLen(ctx, value);
+}
+
+fn jsUrlRevokeObjectURL(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    return quickjs.Value.undefined;
 }
 
 fn jsUrlToString(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
@@ -1550,15 +1574,20 @@ fn jsImageCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickj
     return obj;
 }
 
-fn jsCollatorCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsCollatorCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const obj = quickjs.Value.initObject(ctx);
     if (obj.isException()) return quickjs.Value.exception;
+    const options = if (args.len > 1) quickjs.Value.fromCVal(args[1]) else quickjs.Value.undefined;
+    const numeric = readCollatorBooleanOption(ctx, options, "numeric");
+    const sensitivity_base = readCollatorSensitivityBase(ctx, options);
+    obj.setPropertyStr(ctx, "__zigCollatorNumeric", quickjs.Value.initBool(numeric)) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "__zigCollatorSensitivityBase", quickjs.Value.initBool(sensitivity_base)) catch return quickjs.Value.exception;
     setFunction(ctx, obj, "compare", jsCollatorCompare, 2) catch return quickjs.Value.exception;
     return obj;
 }
 
-fn jsCollatorCompare(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+fn jsCollatorCompare(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const left = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
     defer if (left) |text| ctx.freeCString(text.ptr);
@@ -1566,12 +1595,131 @@ fn jsCollatorCompare(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []con
     defer if (right) |text| ctx.freeCString(text.ptr);
     const left_slice = if (left) |text| text.ptr[0..text.len] else "";
     const right_slice = if (right) |text| text.ptr[0..text.len] else "";
-    const order: i32 = switch (std.mem.order(u8, left_slice, right_slice)) {
+    const options = readCollatorOptions(ctx, this_value);
+    const order = compareCollatorSlices(left_slice, right_slice, options);
+    return quickjs.Value.initInt32(order);
+}
+
+const CollatorOptions = struct {
+    numeric: bool = false,
+    sensitivity_base: bool = false,
+};
+
+fn readCollatorOptions(ctx: *quickjs.Context, collator: quickjs.Value) CollatorOptions {
+    if (!collator.isObject()) return .{};
+    const numeric_value = collator.getPropertyStr(ctx, "__zigCollatorNumeric");
+    defer numeric_value.deinit(ctx);
+    const base_value = collator.getPropertyStr(ctx, "__zigCollatorSensitivityBase");
+    defer base_value.deinit(ctx);
+
+    return .{
+        .numeric = numeric_value.toBool(ctx) catch false,
+        .sensitivity_base = base_value.toBool(ctx) catch false,
+    };
+}
+
+fn readCollatorBooleanOption(ctx: *quickjs.Context, options: quickjs.Value, key: [:0]const u8) bool {
+    if (!options.isObject()) return false;
+    const value = options.getPropertyStr(ctx, key);
+    defer value.deinit(ctx);
+    return value.toBool(ctx) catch false;
+}
+
+fn readCollatorSensitivityBase(ctx: *quickjs.Context, options: quickjs.Value) bool {
+    if (!options.isObject()) return false;
+    const value = options.getPropertyStr(ctx, "sensitivity");
+    defer value.deinit(ctx);
+    const text = value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(text.ptr);
+    return std.ascii.eqlIgnoreCase(text.ptr[0..text.len], "base");
+}
+
+fn compareCollatorSlices(left: []const u8, right: []const u8, options: CollatorOptions) i32 {
+    var li: usize = 0;
+    var ri: usize = 0;
+
+    while (true) {
+        const left_token = nextCollatorToken(left, &li, options);
+        const right_token = nextCollatorToken(right, &ri, options);
+
+        if (left_token == .end and right_token == .end) return 0;
+        if (left_token == .end) return -1;
+        if (right_token == .end) return 1;
+
+        switch (left_token) {
+            .char => |left_char| switch (right_token) {
+                .char => |right_char| {
+                    if (left_char < right_char) return -1;
+                    if (left_char > right_char) return 1;
+                },
+                .number => return 1,
+                .end => unreachable,
+            },
+            .number => |left_number| switch (right_token) {
+                .number => |right_number| {
+                    const cmp = compareNumberSlices(left_number, right_number);
+                    if (cmp != 0) return cmp;
+                },
+                .char => return -1,
+                .end => unreachable,
+            },
+            .end => unreachable,
+        }
+    }
+}
+
+const CollatorToken = union(enum) {
+    end,
+    char: u8,
+    number: []const u8,
+};
+
+fn nextCollatorToken(text: []const u8, index: *usize, options: CollatorOptions) CollatorToken {
+    while (index.* < text.len and options.sensitivity_base and isCollatorIgnorable(text[index.*])) {
+        index.* += 1;
+    }
+    if (index.* >= text.len) return .end;
+
+    const start = index.*;
+    const first = text[start];
+    if (options.numeric and std.ascii.isDigit(first)) {
+        while (index.* < text.len and std.ascii.isDigit(text[index.*])) {
+            index.* += 1;
+        }
+        return .{ .number = text[start..index.*] };
+    }
+
+    index.* += 1;
+    return .{ .char = normalizeCollatorChar(first, options) };
+}
+
+fn normalizeCollatorChar(value: u8, options: CollatorOptions) u8 {
+    if (options.sensitivity_base) return std.ascii.toLower(value);
+    return value;
+}
+
+fn isCollatorIgnorable(value: u8) bool {
+    return !std.ascii.isAlphanumeric(value);
+}
+
+fn compareNumberSlices(left_raw: []const u8, right_raw: []const u8) i32 {
+    const left = trimLeadingZeros(left_raw);
+    const right = trimLeadingZeros(right_raw);
+
+    if (left.len < right.len) return -1;
+    if (left.len > right.len) return 1;
+
+    return switch (std.mem.order(u8, left, right)) {
         .lt => -1,
         .eq => 0,
         .gt => 1,
     };
-    return quickjs.Value.initInt32(order);
+}
+
+fn trimLeadingZeros(value: []const u8) []const u8 {
+    var start: usize = 0;
+    while (start + 1 < value.len and value[start] == '0') : (start += 1) {}
+    return value[start..];
 }
 
 fn jsDomParserCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {

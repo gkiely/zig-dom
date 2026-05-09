@@ -767,9 +767,13 @@ fn Printer(comptime cfg: Config) type {
     }
 
     fn emitStringLit(self: *Self, value: ast.String) Error!void {
+        try self.emitStringSliceLit(self.tree.string(value));
+    }
+
+    fn emitStringSliceLit(self: *Self, text: []const u8) Error!void {
         const q: u8 = if (self.options.quotes == .single) '\'' else '"';
         try self.writeByte(q);
-        try self.writeEscapedString(self.tree.string(value), q);
+        try self.writeEscapedString(text, q);
         try self.writeByte(q);
     }
 
@@ -2170,9 +2174,11 @@ fn Printer(comptime cfg: Config) type {
         for (self.tree.extra(children)) |idx| {
             switch (self.tree.data(idx)) {
                 .jsx_text => |text| {
-                    if (isAllAsciiWhitespace(self.tree.string(text.value))) continue;
+                    const raw_text = self.tree.string(text.value);
+                    if (isAllAsciiWhitespace(raw_text)) continue;
                     try self.writeStr(", ");
-                    try self.emitStringLit(text.value);
+                    const decoded = try decodeJsxTextEntities(self.arena.allocator(), raw_text);
+                    try self.emitStringSliceLit(decoded);
                 },
                 .jsx_expression_container => |c| {
                     if (self.tree.data(c.expression) == .jsx_empty_expression) continue;
@@ -2203,6 +2209,74 @@ fn isAllAsciiWhitespace(value: []const u8) bool {
         if (!std.ascii.isWhitespace(char)) return false;
     }
     return true;
+}
+
+fn decodeJsxTextEntities(allocator: Allocator, input: []const u8) Error![]const u8 {
+    if (std.mem.indexOfScalar(u8, input, '&') == null) return input;
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var index: usize = 0;
+    while (index < input.len) {
+        if (input[index] != '&') {
+            try out.append(allocator, input[index]);
+            index += 1;
+            continue;
+        }
+
+        const entity_start = index + 1;
+        const remaining = input[entity_start..];
+        const semicolon_offset = std.mem.indexOfScalar(u8, remaining, ';') orelse {
+            try out.append(allocator, input[index]);
+            index += 1;
+            continue;
+        };
+
+        const entity = remaining[0..semicolon_offset];
+        const replacement: ?[]const u8 = if (std.mem.eql(u8, entity, "amp"))
+            "&"
+        else if (std.mem.eql(u8, entity, "lt"))
+            "<"
+        else if (std.mem.eql(u8, entity, "gt"))
+            ">"
+        else if (std.mem.eql(u8, entity, "quot"))
+            "\""
+        else if (std.mem.eql(u8, entity, "apos"))
+            "'"
+        else if (std.mem.eql(u8, entity, "nbsp"))
+            " "
+        else
+            null;
+
+        if (replacement) |decoded| {
+            try out.appendSlice(allocator, decoded);
+            index = entity_start + semicolon_offset + 1;
+            continue;
+        }
+
+        if (entity.len > 1 and entity[0] == '#') {
+            const base: u8 = if (entity.len > 2 and (entity[1] == 'x' or entity[1] == 'X')) 16 else 10;
+            const digits = if (base == 16) entity[2..] else entity[1..];
+            if (digits.len > 0) {
+                const codepoint = std.fmt.parseInt(u21, digits, base) catch 0;
+                if (codepoint > 0 and std.unicode.utf8ValidCodepoint(codepoint)) {
+                    var buf: [4]u8 = undefined;
+                    const len = std.unicode.utf8Encode(codepoint, &buf) catch 0;
+                    if (len > 0) {
+                        try out.appendSlice(allocator, buf[0..len]);
+                        index = entity_start + semicolon_offset + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        try out.append(allocator, input[index]);
+        index += 1;
+    }
+
+    return out.toOwnedSlice(allocator);
 }
 
 fn isWordOp(op: []const u8) bool {
