@@ -1578,21 +1578,44 @@ fn jsFileCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quic
     return obj;
 }
 
+fn resolvePromiseValue(ctx: *quickjs.Context, value: quickjs.Value) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const promise_ctor = global.getPropertyStr(ctx, "Promise");
+    defer promise_ctor.deinit(ctx);
+    if (!promise_ctor.isObject()) return value;
+
+    const resolve = promise_ctor.getPropertyStr(ctx, "resolve");
+    defer resolve.deinit(ctx);
+    if (!resolve.isFunction(ctx)) return value;
+
+    var call_args = [_]quickjs.Value{value.dup(ctx)};
+    defer call_args[0].deinit(ctx);
+    const promise = resolve.call(ctx, promise_ctor, &call_args);
+    if (promise.isException()) return value;
+    value.deinit(ctx);
+    return promise;
+}
+
 fn jsBodyText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const body = this_value.getPropertyStr(ctx, "__zigBody");
-    if (body.isException()) return quickjs.Value.initStringLen(ctx, "");
-    return body;
+    if (body.isException()) {
+        body.deinit(ctx);
+        return resolvePromiseValue(ctx, quickjs.Value.initStringLen(ctx, ""));
+    }
+    return resolvePromiseValue(ctx, body);
 }
 
 fn jsBodyJson(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const body = this_value.getPropertyStr(ctx, "__zigBody");
     defer body.deinit(ctx);
-    if (body.isException() or body.isUndefined()) return quickjs.Value.null;
-    const json = body.toCStringLen(ctx) orelse return quickjs.Value.null;
+    if (body.isException() or body.isUndefined()) return resolvePromiseValue(ctx, quickjs.Value.null);
+    const json = body.toCStringLen(ctx) orelse return resolvePromiseValue(ctx, quickjs.Value.null);
     defer ctx.freeCString(json.ptr);
-    if (json.len == 0) return quickjs.Value.null;
+    if (json.len == 0) return resolvePromiseValue(ctx, quickjs.Value.null);
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const json_obj = global.getPropertyStr(ctx, "JSON");
@@ -1601,7 +1624,9 @@ fn jsBodyJson(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []cons
     defer parse.deinit(ctx);
     var call_args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, json.ptr[0..json.len])};
     defer call_args[0].deinit(ctx);
-    return parse.call(ctx, json_obj, &call_args);
+    const parsed = parse.call(ctx, json_obj, &call_args);
+    if (parsed.isException()) return parsed;
+    return resolvePromiseValue(ctx, parsed);
 }
 
 fn jsBodyBlob(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
@@ -1610,11 +1635,14 @@ fn jsBodyBlob(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []cons
     defer body.deinit(ctx);
     var args = [_]quickjs.Value{body.dup(ctx)};
     defer args[0].deinit(ctx);
-    return jsBlobCtor(ctx, quickjs.Value.undefined, @ptrCast(&args));
+    const blob = jsBlobCtor(ctx, quickjs.Value.undefined, @ptrCast(&args));
+    if (blob.isException()) return blob;
+    return resolvePromiseValue(ctx, blob);
 }
 
-fn jsBodyArrayBuffer(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
-    return quickjs.Value.undefined;
+fn jsBodyArrayBuffer(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    return resolvePromiseValue(ctx, quickjs.Value.undefined);
 }
 
 fn jsFetch(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
@@ -1634,7 +1662,7 @@ fn jsFetch(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
         response.deinit(ctx);
         return quickjs.Value.exception;
     };
-    return response;
+    return resolvePromiseValue(ctx, response);
 }
 
 fn jsImageCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
