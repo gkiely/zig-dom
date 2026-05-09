@@ -36,6 +36,7 @@ pub const Exception = struct {
 
 pub const Runtime = struct {
     allocator: Allocator,
+    io: std.Io,
     rt: *quickjs.Runtime,
     ctx: *quickjs.Context,
     dom_window_handle: u64,
@@ -58,6 +59,7 @@ pub const Runtime = struct {
 
         var runtime: Runtime = .{
             .allocator = allocator,
+            .io = io,
             .rt = rt,
             .ctx = ctx,
             .dom_window_handle = 0,
@@ -600,7 +602,7 @@ pub const Runtime = struct {
     }
 
     fn installHostRunner(self: *Runtime) RuntimeError!void {
-        self.runner_state = runner.HostRunner.init(self.allocator, self.rt, self.ctx) catch |err| {
+        self.runner_state = runner.HostRunner.init(self.allocator, self.io, self.rt, self.ctx) catch |err| {
             return switch (err) {
                 error.OutOfMemory => error.OutOfMemory,
                 else => error.EvaluationFailed,

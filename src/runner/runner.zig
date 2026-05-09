@@ -120,7 +120,7 @@ fn runTestCommand(allocator: Allocator, io: std.Io, command: cli.TestCommand) !u
             file_result.skipped,
             file_result.timed_out,
             file_result.collection_errors,
-            file_result.passed_report,
+            null,
         );
 
         if (file_result.collection_report) |collection_report| {

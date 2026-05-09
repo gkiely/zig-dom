@@ -46,6 +46,12 @@ pub fn printFileHeaderStdout(allocator: std.mem.Allocator, io: std.Io, path: []c
     try std.Io.File.writeStreamingAll(.stdout(), io, text);
 }
 
+pub fn printPassedLineStdout(allocator: std.mem.Allocator, io: std.Io, name: []const u8, elapsed_ms: f64) !void {
+    const text = try std.fmt.allocPrint(allocator, "{s}✓{s} {s}{s}{s} {s}[{d:.2}ms]{s}\n", .{ green, reset, bold, name, reset, dim, elapsed_ms, reset });
+    defer allocator.free(text);
+    try std.Io.File.writeStreamingAll(.stdout(), io, text);
+}
+
 pub fn printFileResult(
     path: []const u8,
     passed: usize,

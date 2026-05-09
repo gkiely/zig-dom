@@ -1,5 +1,6 @@
 const std = @import("std");
 const quickjs = @import("quickjs");
+const reporter = @import("../runner/reporter.zig");
 
 const Allocator = std.mem.Allocator;
 const DEFAULT_TIMEOUT_MS: i64 = 5000;
@@ -84,28 +85,16 @@ const Failure = struct {
     }
 };
 
-const PassedTest = struct {
-    name: []u8,
-    elapsed_ms: f64,
-
-    fn deinit(self: *PassedTest, allocator: Allocator) void {
-        allocator.free(self.name);
-    }
-};
-
 const RunResult = struct {
     passed: i32 = 0,
     failed: i32 = 0,
     skipped: i32 = 0,
     timed_out: i32 = 0,
     failures: std.ArrayList(Failure) = .empty,
-    passed_tests: std.ArrayList(PassedTest) = .empty,
 
     fn deinit(self: *RunResult, allocator: Allocator) void {
         for (self.failures.items) |*failure| failure.deinit(allocator);
         self.failures.deinit(allocator);
-        for (self.passed_tests.items) |*passed_test| passed_test.deinit(allocator);
-        self.passed_tests.deinit(allocator);
     }
 };
 
@@ -124,6 +113,7 @@ fn profileNowNs() i128 {
 
 pub const HostRunner = struct {
     allocator: Allocator,
+    io: std.Io,
     rt: *quickjs.Runtime,
     ctx: *quickjs.Context,
     root_scope: *Scope,
@@ -131,7 +121,7 @@ pub const HostRunner = struct {
     collection_errors: std.ArrayList([]u8) = .empty,
     registered_test_count: i32 = 0,
 
-    pub fn init(allocator: Allocator, rt: *quickjs.Runtime, ctx: *quickjs.Context) HostRunnerError!*HostRunner {
+    pub fn init(allocator: Allocator, io: std.Io, rt: *quickjs.Runtime, ctx: *quickjs.Context) HostRunnerError!*HostRunner {
         const runner = allocator.create(HostRunner) catch return error.OutOfMemory;
         errdefer allocator.destroy(runner);
         const root = allocator.create(Scope) catch return error.OutOfMemory;
@@ -143,6 +133,7 @@ pub const HostRunner = struct {
         };
         runner.* = .{
             .allocator = allocator,
+            .io = io,
             .rt = rt,
             .ctx = ctx,
             .root_scope = root,
@@ -469,10 +460,7 @@ pub const HostRunner = struct {
         }
         result.passed += 1;
         const elapsed_ms = @as(f64, @floatFromInt(profileNowNs() - profile_start)) / 1_000_000.0;
-        try result.passed_tests.append(self.allocator, .{
-            .name = try self.allocator.dupe(u8, full_name),
-            .elapsed_ms = elapsed_ms,
-        });
+        try reporter.printPassedLineStdout(self.allocator, self.io, full_name, elapsed_ms);
     }
 
     fn collectBeforeEach(self: *HostRunner, scope: *Scope, out: *std.ArrayList(Hook)) !void {
@@ -560,25 +548,13 @@ pub const HostRunner = struct {
         global.setPropertyStr(ctx, "__zigRegisteredTests", quickjs.Value.initInt32(self.registered_test_count)) catch return error.JSError;
         global.setPropertyStr(ctx, "__zigOnlyMode", quickjs.Value.initBool(only_mode)) catch return error.JSError;
         global.setPropertyStr(ctx, "__zigHasRunnable", quickjs.Value.initBool(has_runnable)) catch return error.JSError;
-        const passed_text = try self.buildPassedText(result.passed_tests.items);
-        defer self.allocator.free(passed_text);
         const failures_text = try self.buildFailuresText(result.failures.items);
         defer self.allocator.free(failures_text);
         const collection_text = try self.buildCollectionText();
         defer self.allocator.free(collection_text);
-        global.setPropertyStr(ctx, "__zigPassedText", quickjs.Value.initStringLen(ctx, passed_text)) catch return error.JSError;
+        global.setPropertyStr(ctx, "__zigPassedText", quickjs.Value.initStringLen(ctx, "")) catch return error.JSError;
         global.setPropertyStr(ctx, "__zigFailuresText", quickjs.Value.initStringLen(ctx, failures_text)) catch return error.JSError;
         global.setPropertyStr(ctx, "__zigCollectionText", quickjs.Value.initStringLen(ctx, collection_text)) catch return error.JSError;
-    }
-
-    fn buildPassedText(self: *HostRunner, passed_tests: []const PassedTest) ![]u8 {
-        var builder: std.ArrayList(u8) = .empty;
-        for (passed_tests) |passed_test| {
-            const line = try std.fmt.allocPrint(self.allocator, "{s}\t{d:.2}\n", .{ passed_test.name, passed_test.elapsed_ms });
-            defer self.allocator.free(line);
-            try builder.appendSlice(self.allocator, line);
-        }
-        return builder.toOwnedSlice(self.allocator);
     }
 
     fn buildFailuresText(self: *HostRunner, failures: []const Failure) ![]u8 {
