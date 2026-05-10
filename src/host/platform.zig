@@ -758,9 +758,7 @@ fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
 }
 
 fn delayToTimerTurns(delay_ms: f64) u32 {
-    // Timers are driven through microtasks, so run multiple turns to
-    // approximate browser macrotask ordering for setTimeout(..., 0).
-    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 15;
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 1;
     const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 25.0)));
     return @intCast(@max(1, @min(turns, 10_000)));
 }
@@ -788,26 +786,10 @@ fn enqueueMicrotaskCallback(ctx: *quickjs.Context, callback: quickjs.Value) bool
     return true;
 }
 
-fn scheduleNativeTimerTick(ctx: *quickjs.Context, id: i32) bool {
-    var data = [_]quickjs.Value{quickjs.Value.initInt32(id)};
-    defer data[0].deinit(ctx);
-
-    const tick = quickjs.Value.initCFunctionData2(ctx, jsNativeTimerTick, "__zigNativeTimerTick", 0, 0, &data);
-    defer tick.deinit(ctx);
-    if (tick.isException()) return false;
-
-    return enqueueMicrotaskCallback(ctx, tick);
-}
-
-fn invokeNativeTimer(ctx: *quickjs.Context, id: i32) quickjs.Value {
-    const initial_index = findNativeTimerIndex(id) orelse return quickjs.Value.undefined;
+fn invokeNativeTimerAt(ctx: *quickjs.Context, initial_index: usize) quickjs.Value {
+    if (initial_index >= native_timers.items.len) return quickjs.Value.undefined;
     const timer = &native_timers.items[initial_index];
-    if (timer.remaining_turns > 1) {
-        timer.remaining_turns -= 1;
-        _ = scheduleNativeTimerTick(ctx, id);
-        return quickjs.Value.undefined;
-    }
-
+    const id = timer.id;
     const callback = timer.callback.dup(ctx);
     defer callback.deinit(ctx);
 
@@ -834,7 +816,6 @@ fn invokeNativeTimer(ctx: *quickjs.Context, id: i32) quickjs.Value {
         .timeout => removeNativeTimerAt(ctx, current_index),
         .interval => {
             current.remaining_turns = current.interval_turns;
-            _ = scheduleNativeTimerTick(ctx, id);
         },
     }
 
@@ -873,7 +854,6 @@ fn installNativeTimer(
     native_timers.append(c_allocator, timer) catch return quickjs.Value.exception;
     const id = timer.id;
     native_next_timer_id += 1;
-    _ = scheduleNativeTimerTick(ctx, id);
     return quickjs.Value.initInt32(id);
 }
 
@@ -944,16 +924,32 @@ fn jsClearImmediate(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []cons
     return jsClearTimeout(maybe_ctx, quickjs.Value.undefined, args);
 }
 
-fn jsNativeTimerTick(
-    maybe_ctx: ?*quickjs.Context,
-    _: quickjs.Value,
-    _: []const quickjs.c.JSValue,
-    _: i32,
-    data: [*c]quickjs.c.JSValue,
-) quickjs.Value {
+pub fn hasPendingNativeTimers() bool {
+    return native_timers.items.len > 0;
+}
+
+pub fn runNativeTimerTurn(ctx: *quickjs.Context) quickjs.Value {
+    if (native_timers.items.len == 0) return quickjs.Value.undefined;
+
+    var due_index: ?usize = null;
+    for (native_timers.items, 0..) |*timer, index| {
+        if (timer.remaining_turns <= 1) {
+            due_index = index;
+            break;
+        }
+        timer.remaining_turns -= 1;
+    }
+
+    if (due_index) |index| {
+        return invokeNativeTimerAt(ctx, index);
+    }
+
+    return quickjs.Value.undefined;
+}
+
+fn jsNativeTimerTick(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const id = quickjs.Value.fromCVal(data[0]).toInt32(ctx) catch return quickjs.Value.undefined;
-    return invokeNativeTimer(ctx, id);
+    return runNativeTimerTurn(ctx);
 }
 
 fn jsProcessCwd(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {

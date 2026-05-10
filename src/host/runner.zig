@@ -1,6 +1,7 @@
 const std = @import("std");
 const quickjs = @import("quickjs");
 const reporter = @import("../runner/reporter.zig");
+const zig_dom = @import("../dom/dom.zig");
 
 const Allocator = std.mem.Allocator;
 const DEFAULT_TIMEOUT_MS: i64 = 5000;
@@ -1009,26 +1010,7 @@ fn jsRunnerDomCleanup(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const q
     const document = global.getPropertyStr(ctx, "document");
     defer document.deinit(ctx);
     if (!document.isException() and document.isObject()) {
-        const body = document.getPropertyStr(ctx, "body");
-        defer body.deinit(ctx);
-        if (!body.isException() and body.isObject()) {
-            body.setPropertyStr(ctx, "innerHTML", quickjs.Value.initStringLen(ctx, "")) catch {
-                clearPendingException(ctx);
-            };
-        } else if (body.isException()) {
-            clearPendingException(ctx);
-        }
-
-        const head = document.getPropertyStr(ctx, "head");
-        defer head.deinit(ctx);
-        if (!head.isException() and head.isObject()) {
-            head.setPropertyStr(ctx, "innerHTML", quickjs.Value.initStringLen(ctx, "")) catch {
-                clearPendingException(ctx);
-            };
-        } else if (head.isException()) {
-            clearPendingException(ctx);
-        }
-
+        clearDocumentWindowNodes(ctx, document);
         document.setPropertyStr(ctx, "__zigCookie", quickjs.Value.initStringLen(ctx, "")) catch {
             clearPendingException(ctx);
         };
@@ -1040,6 +1022,28 @@ fn jsRunnerDomCleanup(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const q
     clearStorageObject(ctx, global, "sessionStorage");
 
     return quickjs.Value.undefined;
+}
+
+fn clearDocumentWindowNodes(ctx: *quickjs.Context, document: quickjs.Value) void {
+    const window_handle_value = document.getPropertyStr(ctx, "_windowHandle");
+    defer window_handle_value.deinit(ctx);
+    if (window_handle_value.isException()) {
+        clearPendingException(ctx);
+        return;
+    }
+    const window_handle_raw = window_handle_value.toInt64(ctx) catch return;
+    if (window_handle_raw <= 0) return;
+    const window_handle: u64 = @intCast(window_handle_raw);
+
+    var body_handle: u64 = 0;
+    if (zig_dom.zig_dom_window_body(window_handle, &body_handle) == 0 and body_handle != 0) {
+        _ = zig_dom.zig_dom_node_set_inner_html(body_handle, "", 0);
+    }
+
+    var head_handle: u64 = 0;
+    if (zig_dom.zig_dom_window_head(window_handle, &head_handle) == 0 and head_handle != 0) {
+        _ = zig_dom.zig_dom_node_set_inner_html(head_handle, "", 0);
+    }
 }
 
 fn clearStorageObject(ctx: *quickjs.Context, global: quickjs.Value, comptime name: [:0]const u8) void {

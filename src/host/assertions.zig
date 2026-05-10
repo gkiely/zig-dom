@@ -873,6 +873,7 @@ fn matcherToBeVisible(ctx: *quickjs.Context, received: quickjs.Value) !bool {
         if (hasTruthyAttribute(ctx, current, "hidden")) return false;
         if (hasAttributeValue(ctx, current, "aria-hidden", "true")) return false;
         if (elementClassContains(ctx, current, "MuiCollapse-hidden")) return false;
+        if (stylesheetClassSetsDisplayNone(ctx, current)) return false;
 
         const display = try getElementStyleValue(ctx, current, "display");
         defer std.heap.c_allocator.free(display);
@@ -899,14 +900,11 @@ fn matcherToBeVisible(ctx: *quickjs.Context, received: quickjs.Value) !bool {
 }
 
 fn hasTruthyAttribute(ctx: *quickjs.Context, element: quickjs.Value, name: []const u8) bool {
-    var name_buffer: [64]u8 = undefined;
-    const name_z = std.fmt.bufPrintZ(&name_buffer, "{s}", .{name}) catch return false;
     const has_attribute = element.getPropertyStr(ctx, "hasAttribute");
     defer has_attribute.deinit(ctx);
     if (!has_attribute.isFunction(ctx)) return false;
     const name_value = quickjs.Value.initStringLen(ctx, name);
     defer name_value.deinit(ctx);
-    _ = name_z;
     const result = has_attribute.call(ctx, element, &.{name_value});
     defer result.deinit(ctx);
     return result.toBool(ctx) catch false;
@@ -932,7 +930,102 @@ fn elementClassContains(ctx: *quickjs.Context, element: quickjs.Value, needle: [
     if (class_name.isException() or class_name.isNull() or class_name.isUndefined()) return false;
     const text = class_name.toCStringLen(ctx) orelse return false;
     defer ctx.freeCString(text.ptr);
-    return std.mem.indexOf(u8, text.ptr[0..text.len], needle) != null;
+    var parts = std.mem.tokenizeAny(u8, text.ptr[0..text.len], " \t\r\n");
+    while (parts.next()) |part| {
+        if (std.mem.eql(u8, part, needle)) return true;
+    }
+    return false;
+}
+
+fn stylesheetClassSetsDisplayNone(ctx: *quickjs.Context, element: quickjs.Value) bool {
+    const class_name = element.getPropertyStr(ctx, "className");
+    defer class_name.deinit(ctx);
+    if (class_name.isException() or class_name.isNull() or class_name.isUndefined()) return false;
+    const class_text = class_name.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(class_text.ptr);
+    if (class_text.len == 0) return false;
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) return false;
+    const head = document.getPropertyStr(ctx, "head");
+    defer head.deinit(ctx);
+    if (head.isException() or !head.isObject()) return false;
+    const children = head.getPropertyStr(ctx, "children");
+    defer children.deinit(ctx);
+    if (children.isException() or !children.isObject()) return false;
+
+    const length = getLength(ctx, children);
+    var index: i64 = 0;
+    while (index < length) : (index += 1) {
+        const child = children.getPropertyInt64(ctx, index);
+        defer child.deinit(ctx);
+        if (child.isException() or !child.isObject()) continue;
+        const tag_name = child.getPropertyStr(ctx, "tagName");
+        defer tag_name.deinit(ctx);
+        const tag = tag_name.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(tag.ptr);
+        if (!std.ascii.eqlIgnoreCase(tag.ptr[0..tag.len], "style")) continue;
+
+        const text_content = child.getPropertyStr(ctx, "textContent");
+        defer text_content.deinit(ctx);
+        if (text_content.isException() or text_content.isNull() or text_content.isUndefined()) continue;
+        const css_text = text_content.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(css_text.ptr);
+        if (stylesheetTextClassSetsDisplayNone(class_text.ptr[0..class_text.len], css_text.ptr[0..css_text.len])) return true;
+    }
+
+    return false;
+}
+
+fn stylesheetTextClassSetsDisplayNone(class_text: []const u8, css_text: []const u8) bool {
+    var classes = std.mem.tokenizeAny(u8, class_text, " \t\r\n");
+    while (classes.next()) |class_name| {
+        var cursor: usize = 0;
+        while (cursor < css_text.len) {
+            const open = std.mem.indexOfPos(u8, css_text, cursor, "{") orelse break;
+            const close = std.mem.indexOfPos(u8, css_text, open + 1, "}") orelse break;
+            const selector = std.mem.trim(u8, css_text[cursor..open], " \t\r\n");
+            const declarations = css_text[open + 1 .. close];
+            if (selectorContainsClass(selector, class_name) and declarationsContainDisplayNone(declarations)) return true;
+            cursor = close + 1;
+        }
+    }
+    return false;
+}
+
+fn selectorContainsClass(selector_text: []const u8, class_name: []const u8) bool {
+    var selectors = std.mem.splitScalar(u8, selector_text, ',');
+    while (selectors.next()) |raw| {
+        var selector = std.mem.trim(u8, raw, " \t\r\n");
+        if (std.mem.indexOfScalar(u8, selector, ':')) |pseudo_index| {
+            selector = std.mem.trim(u8, selector[0..pseudo_index], " \t\r\n");
+        }
+        if (selector.len < class_name.len + 1) continue;
+        if (selector[0] != '.') continue;
+        var remaining = selector[1..];
+        while (remaining.len > 0) {
+            const next_dot = std.mem.indexOfScalar(u8, remaining, '.') orelse remaining.len;
+            if (std.mem.eql(u8, remaining[0..next_dot], class_name)) return true;
+            if (next_dot == remaining.len) break;
+            remaining = remaining[next_dot + 1 ..];
+        }
+    }
+    return false;
+}
+
+fn declarationsContainDisplayNone(declarations: []const u8) bool {
+    var parts = std.mem.splitScalar(u8, declarations, ';');
+    while (parts.next()) |raw| {
+        const part = std.mem.trim(u8, raw, " \t\r\n");
+        const colon = std.mem.indexOfScalar(u8, part, ':') orelse continue;
+        const name = std.mem.trim(u8, part[0..colon], " \t\r\n");
+        const value = std.mem.trim(u8, part[colon + 1 ..], " \t\r\n");
+        if (std.ascii.eqlIgnoreCase(name, "display") and std.ascii.eqlIgnoreCase(value, "none")) return true;
+    }
+    return false;
 }
 
 fn getElementStyleValue(ctx: *quickjs.Context, element: quickjs.Value, property_name: []const u8) ![]u8 {
