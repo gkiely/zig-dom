@@ -11,6 +11,12 @@ bun run test basic.test
 bun run test:perf
 ```
 
+Sample a command on macOS:
+
+```sh
+bun run sample -- zig-out/bin/zig-dom test --root ../youneedawiki src/components/Tree/Tree.test.tsx
+```
+
 The `test` command runs JavaScript, TypeScript, JSX, and TSX tests through the embedded QuickJS-ng runtime. DOM support can be enabled for all files with `--dom`, is enabled automatically for `.jsx` and `.tsx`, or can be customized with suffixes:
 
 ```sh
