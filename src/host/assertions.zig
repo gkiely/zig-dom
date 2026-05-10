@@ -324,7 +324,9 @@ fn installCustomMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted:
         const key_text = key_value.toCStringLen(ctx) orelse return error.JSError;
         defer ctx.freeCString(key_text.ptr);
 
-        if (object.hasPropertyStr(ctx, key_text.ptr) catch false) continue;
+        if (object.hasPropertyStr(ctx, key_text.ptr) catch false) {
+            if (!customMatcherCanOverrideBuiltIn(key_text.ptr[0..key_text.len])) continue;
+        }
 
         const matcher_fn = custom.getPropertyStr(ctx, key_text.ptr);
         defer matcher_fn.deinit(ctx);
@@ -345,6 +347,10 @@ fn installCustomMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted:
 
         object.setPropertyStr(ctx, key_text.ptr, func) catch return error.JSError;
     }
+}
+
+fn customMatcherCanOverrideBuiltIn(name: []const u8) bool {
+    return std.mem.eql(u8, name, "toBeInTheDocument");
 }
 
 fn jsExpectExtend(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
