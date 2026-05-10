@@ -33,6 +33,13 @@ pub fn install(ctx: *quickjs.Context) AssertionError!void {
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
 
+    const profile_env = std.c.getenv("ZIG_DOM_PROFILE");
+    const track_expect_calls = profile_env != null and !std.mem.eql(u8, std.mem.span(profile_env.?), "0");
+    global.setPropertyStr(ctx, "__zigTrackExpectCalls", quickjs.Value.initBool(track_expect_calls)) catch return error.JSError;
+    if (track_expect_calls) {
+        global.setPropertyStr(ctx, "__zigExpectCalls", quickjs.Value.initInt32(0)) catch return error.JSError;
+    }
+
     try installRuntimeCompatPolyfills(ctx, global);
 
     const custom_matchers = quickjs.Value.initObject(ctx);
@@ -204,10 +211,20 @@ fn jsExpect(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickj
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
-    const current_count_value = global.getPropertyStr(ctx, "__zigExpectCalls");
-    defer current_count_value.deinit(ctx);
-    const current_count = current_count_value.toInt32(ctx) catch 0;
-    global.setPropertyStr(ctx, "__zigExpectCalls", quickjs.Value.initInt32(current_count + 1)) catch return quickjs.Value.exception;
+
+    const track_expect_calls = blk: {
+        const track_value = global.getPropertyStr(ctx, "__zigTrackExpectCalls");
+        defer track_value.deinit(ctx);
+        if (track_value.isException()) break :blk false;
+        break :blk track_value.toBool(ctx) catch false;
+    };
+
+    if (track_expect_calls) {
+        const current_count_value = global.getPropertyStr(ctx, "__zigExpectCalls");
+        defer current_count_value.deinit(ctx);
+        const current_count = current_count_value.toInt32(ctx) catch 0;
+        global.setPropertyStr(ctx, "__zigExpectCalls", quickjs.Value.initInt32(current_count + 1)) catch return quickjs.Value.exception;
+    }
 
     const received = if (args.len > 0) quickjs.Value.fromCVal(args[0]).dup(ctx) else quickjs.Value.undefined;
     defer received.deinit(ctx);

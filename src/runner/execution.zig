@@ -291,6 +291,8 @@ const ModuleLoaderState = struct {
     entry_module_id: []const u8,
     loaded_modules: std.StringHashMap(*ModuleDef),
     source_cache: std.StringHashMap([]u8),
+    require_specifier_cache: std.StringHashMap([]u8),
+    cjs_lazy_compat_cache: std.StringHashMap(bool),
     mock_module_sources: std.StringHashMap([]u8),
     requested_exports: std.StringHashMap(ExportNameSet),
     path_alias_root: ?[]u8,
@@ -308,6 +310,68 @@ const ModuleLoaderState = struct {
     profile_runner_ns: i128,
     profile_transform_count: usize,
     profile_module_count: usize,
+    profile_normalize_calls: usize,
+    profile_normalize_ns: i128,
+    profile_normalize_failures: usize,
+    profile_normalize_builtin_hits: usize,
+    profile_normalize_mock_hits: usize,
+    profile_normalize_alias_hits: usize,
+    profile_normalize_absolute_hits: usize,
+    profile_normalize_relative_hits: usize,
+    profile_normalize_node_module_hits: usize,
+    profile_resolve_node_module_calls: usize,
+    profile_resolve_node_module_ns: i128,
+    profile_resolve_node_module_hits: usize,
+    profile_resolve_node_module_misses: usize,
+    profile_resolve_node_module_dirs_scanned: usize,
+    profile_resolve_node_module_require_calls: usize,
+    profile_resolve_node_module_require_ns: i128,
+    profile_resolve_node_module_require_hits: usize,
+    profile_resolve_node_module_require_misses: usize,
+    profile_resolve_node_module_require_dirs_scanned: usize,
+    profile_source_cache_calls: usize,
+    profile_source_cache_hits: usize,
+    profile_source_cache_misses: usize,
+    profile_source_cache_read_ns: i128,
+    profile_source_cache_read_bytes: usize,
+    profile_import_scan_calls: usize,
+    profile_import_scan_ns: i128,
+    profile_import_scan_statements: usize,
+    profile_import_scan_resolved: usize,
+    profile_import_scan_resolve_failures: usize,
+    profile_import_graph_modules: usize,
+    profile_rewrite_named_import_calls: usize,
+    profile_rewrite_named_import_ns: i128,
+    profile_rewrite_named_import_replacements: usize,
+    profile_load_module_source_calls: usize,
+    profile_load_builtin_count: usize,
+    profile_load_mock_count: usize,
+    profile_load_onload_hit_count: usize,
+    profile_load_onload_miss_count: usize,
+    profile_load_js_count: usize,
+    profile_load_cjs_count: usize,
+    profile_load_json_count: usize,
+    profile_load_transformed_count: usize,
+    profile_transform_rewrite_ns: i128,
+    profile_transform_engine_ns: i128,
+    profile_module_normalize_calls: usize,
+    profile_module_normalize_ns: i128,
+    profile_module_normalize_failures: usize,
+    profile_module_load_calls: usize,
+    profile_module_load_cache_hits: usize,
+    profile_module_load_builtin_hits: usize,
+    profile_cjs_require_calls: usize,
+    profile_cjs_require_ns: i128,
+    profile_cjs_require_cache_hits: usize,
+    profile_cjs_require_cache_misses: usize,
+    profile_cjs_require_json_count: usize,
+    profile_cjs_require_onload_count: usize,
+    profile_cjs_require_compile_count: usize,
+    profile_cjs_require_compile_ns: i128,
+    profile_require_specifier_cache_hits: usize,
+    profile_require_specifier_cache_misses: usize,
+    profile_cjs_lazy_compat_cache_hits: usize,
+    profile_cjs_lazy_compat_cache_misses: usize,
 
     fn init(allocator: Allocator, io: std.Io) ModuleLoaderState {
         return .{
@@ -317,6 +381,8 @@ const ModuleLoaderState = struct {
             .entry_module_id = "",
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
             .source_cache = std.StringHashMap([]u8).init(allocator),
+            .require_specifier_cache = std.StringHashMap([]u8).init(allocator),
+            .cjs_lazy_compat_cache = std.StringHashMap(bool).init(allocator),
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
             .requested_exports = std.StringHashMap(ExportNameSet).init(allocator),
             .path_alias_root = null,
@@ -334,6 +400,68 @@ const ModuleLoaderState = struct {
             .profile_runner_ns = 0,
             .profile_transform_count = 0,
             .profile_module_count = 0,
+            .profile_normalize_calls = 0,
+            .profile_normalize_ns = 0,
+            .profile_normalize_failures = 0,
+            .profile_normalize_builtin_hits = 0,
+            .profile_normalize_mock_hits = 0,
+            .profile_normalize_alias_hits = 0,
+            .profile_normalize_absolute_hits = 0,
+            .profile_normalize_relative_hits = 0,
+            .profile_normalize_node_module_hits = 0,
+            .profile_resolve_node_module_calls = 0,
+            .profile_resolve_node_module_ns = 0,
+            .profile_resolve_node_module_hits = 0,
+            .profile_resolve_node_module_misses = 0,
+            .profile_resolve_node_module_dirs_scanned = 0,
+            .profile_resolve_node_module_require_calls = 0,
+            .profile_resolve_node_module_require_ns = 0,
+            .profile_resolve_node_module_require_hits = 0,
+            .profile_resolve_node_module_require_misses = 0,
+            .profile_resolve_node_module_require_dirs_scanned = 0,
+            .profile_source_cache_calls = 0,
+            .profile_source_cache_hits = 0,
+            .profile_source_cache_misses = 0,
+            .profile_source_cache_read_ns = 0,
+            .profile_source_cache_read_bytes = 0,
+            .profile_import_scan_calls = 0,
+            .profile_import_scan_ns = 0,
+            .profile_import_scan_statements = 0,
+            .profile_import_scan_resolved = 0,
+            .profile_import_scan_resolve_failures = 0,
+            .profile_import_graph_modules = 0,
+            .profile_rewrite_named_import_calls = 0,
+            .profile_rewrite_named_import_ns = 0,
+            .profile_rewrite_named_import_replacements = 0,
+            .profile_load_module_source_calls = 0,
+            .profile_load_builtin_count = 0,
+            .profile_load_mock_count = 0,
+            .profile_load_onload_hit_count = 0,
+            .profile_load_onload_miss_count = 0,
+            .profile_load_js_count = 0,
+            .profile_load_cjs_count = 0,
+            .profile_load_json_count = 0,
+            .profile_load_transformed_count = 0,
+            .profile_transform_rewrite_ns = 0,
+            .profile_transform_engine_ns = 0,
+            .profile_module_normalize_calls = 0,
+            .profile_module_normalize_ns = 0,
+            .profile_module_normalize_failures = 0,
+            .profile_module_load_calls = 0,
+            .profile_module_load_cache_hits = 0,
+            .profile_module_load_builtin_hits = 0,
+            .profile_cjs_require_calls = 0,
+            .profile_cjs_require_ns = 0,
+            .profile_cjs_require_cache_hits = 0,
+            .profile_cjs_require_cache_misses = 0,
+            .profile_cjs_require_json_count = 0,
+            .profile_cjs_require_onload_count = 0,
+            .profile_cjs_require_compile_count = 0,
+            .profile_cjs_require_compile_ns = 0,
+            .profile_require_specifier_cache_hits = 0,
+            .profile_require_specifier_cache_misses = 0,
+            .profile_cjs_lazy_compat_cache_hits = 0,
+            .profile_cjs_lazy_compat_cache_misses = 0,
         };
     }
 
@@ -364,6 +492,19 @@ const ModuleLoaderState = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.source_cache.deinit();
+
+        var require_specifier_iterator = self.require_specifier_cache.iterator();
+        while (require_specifier_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.require_specifier_cache.deinit();
+
+        var cjs_lazy_compat_iterator = self.cjs_lazy_compat_cache.iterator();
+        while (cjs_lazy_compat_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.cjs_lazy_compat_cache.deinit();
 
         var loaded_iterator = self.loaded_modules.iterator();
         while (loaded_iterator.next()) |entry| {
@@ -411,7 +552,14 @@ const ModuleLoaderState = struct {
     }
 
     fn readFileCached(self: *ModuleLoaderState, path: []const u8, max_bytes: usize) ![]const u8 {
-        if (self.source_cache.get(path)) |source| return source;
+        if (self.profile_enabled) self.profile_source_cache_calls += 1;
+        if (self.source_cache.get(path)) |source| {
+            if (self.profile_enabled) self.profile_source_cache_hits += 1;
+            return source;
+        }
+        if (self.profile_enabled) self.profile_source_cache_misses += 1;
+
+        const read_start = if (self.profile_enabled) self.profileNow() else 0;
 
         const source = try std.Io.Dir.cwd().readFileAlloc(
             self.io,
@@ -419,6 +567,10 @@ const ModuleLoaderState = struct {
             self.allocator,
             .limited(max_bytes),
         );
+        if (self.profile_enabled) {
+            self.profile_source_cache_read_ns += self.profileNow() - read_start;
+            self.profile_source_cache_read_bytes += source.len;
+        }
         errdefer self.allocator.free(source);
         const key = try self.allocator.dupe(u8, path);
         errdefer self.allocator.free(key);
@@ -445,31 +597,47 @@ const ModuleLoaderState = struct {
     }
 
     fn normalizeSpecifier(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) ![]u8 {
+        const profile = self.profile_enabled;
+        if (profile) self.profile_normalize_calls += 1;
+        const start = if (profile) self.profileNow() else 0;
+        defer if (profile) {
+            self.profile_normalize_ns += self.profileNow() - start;
+        };
+        errdefer if (profile) {
+            self.profile_normalize_failures += 1;
+        };
+
         if (self.runtime) |runtime| {
             try self.syncMockModulesFromRuntime(runtime);
         }
 
         if (builtInModuleSource(module_name) != null) {
+            if (profile) self.profile_normalize_builtin_hits += 1;
             return self.allocator.dupe(u8, module_name);
         }
 
         if (self.mock_module_sources.contains(module_name)) {
+            if (profile) self.profile_normalize_mock_hits += 1;
             return std.fmt.allocPrint(self.allocator, "__zig_mock__/{s}", .{module_name});
         }
 
         if (try self.resolvePathAlias(module_base_name, module_name)) |resolved| {
+            if (profile) self.profile_normalize_alias_hits += 1;
             return resolved;
         }
 
         if (std.fs.path.isAbsolute(module_name)) {
+            if (profile) self.profile_normalize_absolute_hits += 1;
             return self.resolveAbsolutePath(module_name);
         }
 
         if (isRelativeSpecifier(module_name)) {
+            if (profile) self.profile_normalize_relative_hits += 1;
             return self.resolveRelativePath(module_base_name, module_name);
         }
 
         if (try self.resolveNodeModule(module_base_name, module_name)) |resolved| {
+            if (profile) self.profile_normalize_node_module_hits += 1;
             return resolved;
         }
 
@@ -536,15 +704,18 @@ const ModuleLoaderState = struct {
     }
 
     fn loadModuleSource(self: *ModuleLoaderState, module_id: []const u8) ![]u8 {
+        if (self.profile_enabled) self.profile_load_module_source_calls += 1;
         if (std.c.getenv("ZIG_DOM_MODULE_DEBUG") != null) {
             std.debug.print("[zig-dom module] {s}\n", .{module_id});
         }
 
         if (builtInModuleSource(module_id)) |shim_source| {
+            if (self.profile_enabled) self.profile_load_builtin_count += 1;
             return self.allocator.dupe(u8, shim_source);
         }
 
         if (isMockModuleId(module_id)) {
+            if (self.profile_enabled) self.profile_load_mock_count += 1;
             const specifier = module_id["__zig_mock__/".len..];
             const source = self.mock_module_sources.get(specifier) orelse return error.ModuleNotFound;
             return self.allocator.dupe(u8, source);
@@ -557,9 +728,11 @@ const ModuleLoaderState = struct {
         }
 
         if (std.mem.eql(u8, default_loader, "js")) {
+            if (self.profile_enabled) self.profile_load_js_count += 1;
             const source = try self.readFileCached(module_id, max_module_source_bytes);
 
             if (isCommonJsSource(module_id, source)) {
+                if (self.profile_enabled) self.profile_load_cjs_count += 1;
                 return try self.loadCommonJsModuleSource(module_id);
             }
 
@@ -567,6 +740,7 @@ const ModuleLoaderState = struct {
         }
 
         if (std.mem.eql(u8, default_loader, "json")) {
+            if (self.profile_enabled) self.profile_load_json_count += 1;
             const json = try self.readFileCached(module_id, max_module_source_bytes);
 
             var source: std.ArrayList(u8) = .empty;
@@ -580,11 +754,20 @@ const ModuleLoaderState = struct {
         if (std.c.getenv("ZIG_DOM_TRANSFORM_DEBUG") != null) {
             std.debug.print("[zig-dom transform] {s} {s}\n", .{ default_loader, module_id });
         }
+        if (self.profile_enabled) self.profile_load_transformed_count += 1;
         const start = if (self.profile_enabled) self.profileNow() else 0;
         const raw_source = try self.readFileCached(module_id, max_module_source_bytes);
+        const rewrite_start = if (self.profile_enabled) self.profileNow() else 0;
         const linked_source = try self.rewriteBarePackageNamedImports(module_id, raw_source);
+        if (self.profile_enabled) {
+            self.profile_transform_rewrite_ns += self.profileNow() - rewrite_start;
+        }
         defer self.allocator.free(linked_source);
+        const transform_start = if (self.profile_enabled) self.profileNow() else 0;
         const transformed = try yuku_transform.transformSource(self.allocator, module_id, linked_source, default_loader);
+        if (self.profile_enabled) {
+            self.profile_transform_engine_ns += self.profileNow() - transform_start;
+        }
         if (std.c.getenv("ZIG_DOM_DUMP_TRANSFORMED")) |dump_path_raw| {
             if (std.mem.indexOf(u8, module_id, "Tree.test.tsx") != null) {
                 _ = std.Io.Dir.cwd().writeFile(self.io, .{
@@ -726,6 +909,12 @@ const ModuleLoaderState = struct {
     }
 
     fn shouldLazyLoadCommonJsDependency(self: *ModuleLoaderState, resolved: []const u8) !bool {
+        if (self.cjs_lazy_compat_cache.get(resolved)) |cached| {
+            if (self.profile_enabled) self.profile_cjs_lazy_compat_cache_hits += 1;
+            return cached;
+        }
+        if (self.profile_enabled) self.profile_cjs_lazy_compat_cache_misses += 1;
+
         if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) return false;
         if (std.mem.endsWith(u8, resolved, ".json")) return true;
 
@@ -734,8 +923,18 @@ const ModuleLoaderState = struct {
 
         const source = self.readFileCached(resolved, max_module_source_bytes) catch return false;
 
-        if (!isCommonJsSource(resolved, source)) return false;
-        return try self.commonJsSourceRequiresOnlyLazyCompatible(resolved, source);
+        if (!isCommonJsSource(resolved, source)) {
+            const key = try self.allocator.dupe(u8, resolved);
+            errdefer self.allocator.free(key);
+            try self.cjs_lazy_compat_cache.put(key, false);
+            return false;
+        }
+
+        const lazy = try self.commonJsSourceRequiresOnlyLazyCompatible(resolved, source);
+        const key = try self.allocator.dupe(u8, resolved);
+        errdefer self.allocator.free(key);
+        try self.cjs_lazy_compat_cache.put(key, lazy);
+        return lazy;
     }
 
     fn commonJsSourceRequiresOnlyLazyCompatible(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) !bool {
@@ -750,7 +949,7 @@ const ModuleLoaderState = struct {
             defer self.allocator.free(resolved);
 
             if (std.mem.endsWith(u8, resolved, ".json")) continue;
-            if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) return false;
+            if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) continue;
 
             const loader = transform.loaderForPath(resolved) orelse return false;
             if (!std.mem.eql(u8, loader, "js")) return false;
@@ -788,6 +987,13 @@ const ModuleLoaderState = struct {
     }
 
     fn loadCommonJsValue(self: *ModuleLoaderState, ctx: *ModuleContext, parent_id: []const u8, specifier: []const u8, resolved_hint: []const u8) !quickjs.Value {
+        const profile = self.profile_enabled;
+        if (profile) self.profile_cjs_require_calls += 1;
+        const start = if (profile) self.profileNow() else 0;
+        defer if (profile) {
+            self.profile_cjs_require_ns += self.profileNow() - start;
+        };
+
         const resolved = if (resolved_hint.len > 0)
             try self.allocator.dupe(u8, resolved_hint)
         else
@@ -795,15 +1001,19 @@ const ModuleLoaderState = struct {
         defer self.allocator.free(resolved);
 
         if (try self.getCachedCommonJsValue(ctx, resolved)) |cached| {
+            if (profile) self.profile_cjs_require_cache_hits += 1;
             return cached;
         }
+        if (profile) self.profile_cjs_require_cache_misses += 1;
 
         if (std.mem.endsWith(u8, resolved, ".json")) {
+            if (profile) self.profile_cjs_require_json_count += 1;
             return self.loadCommonJsJsonValue(ctx, resolved);
         }
 
         if (transform.loaderForPath(resolved)) |default_loader| {
             if (try self.loadModuleSourceFromOnLoad(resolved, default_loader)) |hook_source| {
+                if (profile) self.profile_cjs_require_onload_count += 1;
                 defer self.allocator.free(hook_source);
                 return self.loadOnLoadModuleAsCommonJsValue(ctx, resolved, hook_source);
             }
@@ -827,6 +1037,8 @@ const ModuleLoaderState = struct {
             const elapsed = self.profileNow() - compile_start;
             self.profile_compile_ns += elapsed;
             self.profile_module_count += 1;
+            self.profile_cjs_require_compile_count += 1;
+            self.profile_cjs_require_compile_ns += elapsed;
             try self.recordProfileModule(.cjs, elapsed, resolved);
         }
         if (value.isException()) return error.EvaluationFailed;
@@ -935,27 +1147,47 @@ const ModuleLoaderState = struct {
     }
 
     fn normalizeRequireSpecifier(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) ![]u8 {
-        if (builtInModuleSource(module_name) != null) {
-            return self.allocator.dupe(u8, module_name);
-        }
+        const cache_key = try std.fmt.allocPrint(self.allocator, "{s}\x1f{s}", .{ module_base_name, module_name });
+        defer self.allocator.free(cache_key);
 
-        if (self.mock_module_sources.contains(module_name)) {
-            return std.fmt.allocPrint(self.allocator, "__zig_mock__/{s}", .{module_name});
+        if (self.require_specifier_cache.get(cache_key)) |cached| {
+            if (self.profile_enabled) self.profile_require_specifier_cache_hits += 1;
+            return self.allocator.dupe(u8, cached);
         }
+        if (self.profile_enabled) self.profile_require_specifier_cache_misses += 1;
 
-        if (std.fs.path.isAbsolute(module_name)) {
-            return self.resolveRequireAbsolutePath(module_name);
-        }
+        const resolved = blk: {
+            if (builtInModuleSource(module_name) != null) {
+                break :blk try self.allocator.dupe(u8, module_name);
+            }
 
-        if (isRelativeSpecifier(module_name)) {
-            return self.resolveRequireRelativePath(module_base_name, module_name);
-        }
+            if (self.mock_module_sources.contains(module_name)) {
+                break :blk try std.fmt.allocPrint(self.allocator, "__zig_mock__/{s}", .{module_name});
+            }
 
-        if (try self.resolveNodeModuleRequire(module_base_name, module_name)) |resolved| {
-            return resolved;
-        }
+            if (std.fs.path.isAbsolute(module_name)) {
+                break :blk try self.resolveRequireAbsolutePath(module_name);
+            }
 
-        return self.normalizeSpecifier(module_base_name, module_name);
+            if (isRelativeSpecifier(module_name)) {
+                break :blk try self.resolveRequireRelativePath(module_base_name, module_name);
+            }
+
+            if (try self.resolveNodeModuleRequire(module_base_name, module_name)) |node_resolved| {
+                break :blk node_resolved;
+            }
+
+            break :blk try self.normalizeSpecifier(module_base_name, module_name);
+        };
+        errdefer self.allocator.free(resolved);
+
+        const key_copy = try self.allocator.dupe(u8, cache_key);
+        errdefer self.allocator.free(key_copy);
+        const value_copy = try self.allocator.dupe(u8, resolved);
+        errdefer self.allocator.free(value_copy);
+        try self.require_specifier_cache.put(key_copy, value_copy);
+
+        return resolved;
     }
 
     fn resolveRequireRelativePath(self: *ModuleLoaderState, module_base_name: []const u8, specifier: []const u8) ![]u8 {
@@ -997,6 +1229,13 @@ const ModuleLoaderState = struct {
     }
 
     fn resolveNodeModuleRequire(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) !?[]u8 {
+        const profile = self.profile_enabled;
+        if (profile) self.profile_resolve_node_module_require_calls += 1;
+        const start = if (profile) self.profileNow() else 0;
+        defer if (profile) {
+            self.profile_resolve_node_module_require_ns += self.profileNow() - start;
+        };
+
         const parsed = parseBarePackageSpecifier(module_name) orelse return null;
         if (!std.fs.path.isAbsolute(module_base_name)) return null;
 
@@ -1004,11 +1243,13 @@ const ModuleLoaderState = struct {
         defer self.allocator.free(current_dir);
 
         while (true) {
+            if (profile) self.profile_resolve_node_module_require_dirs_scanned += 1;
             const package_dir = try std.fs.path.resolve(self.allocator, &.{ current_dir, "node_modules", parsed.package_name });
             defer self.allocator.free(package_dir);
 
             if (self.pathIsDirectory(package_dir)) {
                 if (try self.resolveNodeModuleRequireFromDirectory(package_dir, parsed.subpath)) |resolved| {
+                    if (profile) self.profile_resolve_node_module_require_hits += 1;
                     return resolved;
                 }
             }
@@ -1021,6 +1262,7 @@ const ModuleLoaderState = struct {
             current_dir = next_dir;
         }
 
+        if (profile) self.profile_resolve_node_module_require_misses += 1;
         return null;
     }
 
@@ -1257,12 +1499,14 @@ const ModuleLoaderState = struct {
         }
         var hook_result = (try runtime.loadFromOnLoad(module_id)) orelse {
             if (self.profile_enabled) self.profile_onload_ns += self.profileNow() - start;
+            if (self.profile_enabled) self.profile_load_onload_miss_count += 1;
             if (debug_onload) {
                 std.debug.print("[zig-dom onload] miss {s}\n", .{module_id});
             }
             return null;
         };
         if (self.profile_enabled) self.profile_onload_ns += self.profileNow() - start;
+        if (self.profile_enabled) self.profile_load_onload_hit_count += 1;
         defer hook_result.deinit(self.allocator);
 
         const effective_loader = hook_result.loader orelse default_loader;
@@ -1357,6 +1601,13 @@ const ModuleLoaderState = struct {
     }
 
     fn rewriteBarePackageNamedImports(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
+        const profile = self.profile_enabled;
+        if (profile) self.profile_rewrite_named_import_calls += 1;
+        const profile_start = if (profile) self.profileNow() else 0;
+        defer if (profile) {
+            self.profile_rewrite_named_import_ns += self.profileNow() - profile_start;
+        };
+
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(self.allocator);
 
@@ -1393,6 +1644,7 @@ const ModuleLoaderState = struct {
         }
 
         try out.appendSlice(self.allocator, source[cursor..]);
+        if (profile) self.profile_rewrite_named_import_replacements += rewrite_index;
         const owned = try out.toOwnedSlice(self.allocator);
         return owned;
     }
@@ -1464,6 +1716,13 @@ const ModuleLoaderState = struct {
     }
 
     fn recordStaticImportRequests(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) !void {
+        const profile = self.profile_enabled;
+        if (profile) self.profile_import_scan_calls += 1;
+        const profile_start = if (profile) self.profileNow() else 0;
+        defer if (profile) {
+            self.profile_import_scan_ns += self.profileNow() - profile_start;
+        };
+
         var cursor: usize = 0;
         while (std.mem.indexOfPos(u8, source, cursor, "import")) |start| {
             if (!hasWordAt(source, start, "import")) {
@@ -1477,12 +1736,15 @@ const ModuleLoaderState = struct {
                 cursor = end;
                 continue;
             };
+            if (profile) self.profile_import_scan_statements += 1;
 
             const resolved = self.normalizeSpecifier(module_id, parsed.specifier) catch {
+                if (profile) self.profile_import_scan_resolve_failures += 1;
                 cursor = end;
                 continue;
             };
             defer self.allocator.free(resolved);
+            if (profile) self.profile_import_scan_resolved += 1;
 
             if (parsed.all) {
                 try self.recordAllRequestedExports(resolved);
@@ -1507,6 +1769,7 @@ const ModuleLoaderState = struct {
 
     fn collectImportGraphInto(self: *ModuleLoaderState, module_id: []const u8, visited: *std.StringHashMap(void)) !void {
         if (visited.contains(module_id)) return;
+        if (self.profile_enabled) self.profile_import_graph_modules += 1;
         const visited_key = try self.allocator.dupe(u8, module_id);
         errdefer self.allocator.free(visited_key);
         try visited.put(visited_key, {});
@@ -1534,6 +1797,13 @@ const ModuleLoaderState = struct {
         source: []const u8,
         imports: *std.ArrayList([]u8),
     ) !void {
+        const profile = self.profile_enabled;
+        if (profile) self.profile_import_scan_calls += 1;
+        const profile_start = if (profile) self.profileNow() else 0;
+        defer if (profile) {
+            self.profile_import_scan_ns += self.profileNow() - profile_start;
+        };
+
         var cursor: usize = 0;
         while (std.mem.indexOfPos(u8, source, cursor, "import")) |start| {
             if (!hasWordAt(source, start, "import")) {
@@ -1547,12 +1817,15 @@ const ModuleLoaderState = struct {
                 cursor = end;
                 continue;
             };
+            if (profile) self.profile_import_scan_statements += 1;
 
             const resolved = self.normalizeSpecifier(module_id, parsed.specifier) catch {
+                if (profile) self.profile_import_scan_resolve_failures += 1;
                 cursor = end;
                 continue;
             };
             errdefer self.allocator.free(resolved);
+            if (profile) self.profile_import_scan_resolved += 1;
 
             if (parsed.all) {
                 try self.recordAllRequestedExports(resolved);
@@ -1699,6 +1972,13 @@ const ModuleLoaderState = struct {
     }
 
     fn resolveNodeModule(self: *ModuleLoaderState, module_base_name: []const u8, module_name: []const u8) !?[]u8 {
+        const profile = self.profile_enabled;
+        if (profile) self.profile_resolve_node_module_calls += 1;
+        const start = if (profile) self.profileNow() else 0;
+        defer if (profile) {
+            self.profile_resolve_node_module_ns += self.profileNow() - start;
+        };
+
         const parsed = parseBarePackageSpecifier(module_name) orelse return null;
         if (!std.fs.path.isAbsolute(module_base_name)) {
             return null;
@@ -1708,11 +1988,13 @@ const ModuleLoaderState = struct {
         defer self.allocator.free(current_dir);
 
         while (true) {
+            if (profile) self.profile_resolve_node_module_dirs_scanned += 1;
             const package_dir = try std.fs.path.resolve(self.allocator, &.{ current_dir, "node_modules", parsed.package_name });
             defer self.allocator.free(package_dir);
 
             if (self.pathIsDirectory(package_dir)) {
                 const resolved = try self.resolveNodeModuleFromDirectory(package_dir, parsed.subpath);
+                if (profile) self.profile_resolve_node_module_hits += 1;
                 return resolved;
             }
 
@@ -1726,6 +2008,7 @@ const ModuleLoaderState = struct {
             current_dir = next_dir;
         }
 
+        if (profile) self.profile_resolve_node_module_misses += 1;
         return null;
     }
 
@@ -3172,6 +3455,83 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
                 @as(f64, @floatFromInt(module_loader_state.profile_compile_ns)) / 1_000_000.0,
             },
         );
+        std.debug.print(
+            "[zig-dom profile imports] normalize(calls={d} ms={d:.3} fail={d} builtin={d} mock={d} alias={d} abs={d} rel={d} node={d}) node_resolve(calls={d} hits={d} miss={d} dirs={d} ms={d:.3}) require_resolve(calls={d} hits={d} miss={d} dirs={d} ms={d:.3}) import_scan(calls={d} stmts={d} resolved={d} fail={d} graph_modules={d} ms={d:.3}) rewrite(calls={d} replacements={d} ms={d:.3})\n",
+            .{
+                module_loader_state.profile_normalize_calls,
+                @as(f64, @floatFromInt(module_loader_state.profile_normalize_ns)) / 1_000_000.0,
+                module_loader_state.profile_normalize_failures,
+                module_loader_state.profile_normalize_builtin_hits,
+                module_loader_state.profile_normalize_mock_hits,
+                module_loader_state.profile_normalize_alias_hits,
+                module_loader_state.profile_normalize_absolute_hits,
+                module_loader_state.profile_normalize_relative_hits,
+                module_loader_state.profile_normalize_node_module_hits,
+                module_loader_state.profile_resolve_node_module_calls,
+                module_loader_state.profile_resolve_node_module_hits,
+                module_loader_state.profile_resolve_node_module_misses,
+                module_loader_state.profile_resolve_node_module_dirs_scanned,
+                @as(f64, @floatFromInt(module_loader_state.profile_resolve_node_module_ns)) / 1_000_000.0,
+                module_loader_state.profile_resolve_node_module_require_calls,
+                module_loader_state.profile_resolve_node_module_require_hits,
+                module_loader_state.profile_resolve_node_module_require_misses,
+                module_loader_state.profile_resolve_node_module_require_dirs_scanned,
+                @as(f64, @floatFromInt(module_loader_state.profile_resolve_node_module_require_ns)) / 1_000_000.0,
+                module_loader_state.profile_import_scan_calls,
+                module_loader_state.profile_import_scan_statements,
+                module_loader_state.profile_import_scan_resolved,
+                module_loader_state.profile_import_scan_resolve_failures,
+                module_loader_state.profile_import_graph_modules,
+                @as(f64, @floatFromInt(module_loader_state.profile_import_scan_ns)) / 1_000_000.0,
+                module_loader_state.profile_rewrite_named_import_calls,
+                module_loader_state.profile_rewrite_named_import_replacements,
+                @as(f64, @floatFromInt(module_loader_state.profile_rewrite_named_import_ns)) / 1_000_000.0,
+            },
+        );
+        std.debug.print(
+            "[zig-dom profile loader] module_normalize(calls={d} fail={d} ms={d:.3}) module_load(calls={d} cache_hit={d} builtin_hit={d}) load_source(calls={d} builtin={d} mock={d} onload_hit={d} onload_miss={d} js={d} cjs={d} json={d} transformed={d}) transform_split(rewrite_ms={d:.3} yuku_ms={d:.3}) cjs_require(calls={d} cache_hit={d} cache_miss={d} json={d} onload={d} compile_count={d} compile_ms={d:.3} total_ms={d:.3}) require_spec_cache(hit={d} miss={d}) cjs_lazy_cache(hit={d} miss={d})\n",
+            .{
+                module_loader_state.profile_module_normalize_calls,
+                module_loader_state.profile_module_normalize_failures,
+                @as(f64, @floatFromInt(module_loader_state.profile_module_normalize_ns)) / 1_000_000.0,
+                module_loader_state.profile_module_load_calls,
+                module_loader_state.profile_module_load_cache_hits,
+                module_loader_state.profile_module_load_builtin_hits,
+                module_loader_state.profile_load_module_source_calls,
+                module_loader_state.profile_load_builtin_count,
+                module_loader_state.profile_load_mock_count,
+                module_loader_state.profile_load_onload_hit_count,
+                module_loader_state.profile_load_onload_miss_count,
+                module_loader_state.profile_load_js_count,
+                module_loader_state.profile_load_cjs_count,
+                module_loader_state.profile_load_json_count,
+                module_loader_state.profile_load_transformed_count,
+                @as(f64, @floatFromInt(module_loader_state.profile_transform_rewrite_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_transform_engine_ns)) / 1_000_000.0,
+                module_loader_state.profile_cjs_require_calls,
+                module_loader_state.profile_cjs_require_cache_hits,
+                module_loader_state.profile_cjs_require_cache_misses,
+                module_loader_state.profile_cjs_require_json_count,
+                module_loader_state.profile_cjs_require_onload_count,
+                module_loader_state.profile_cjs_require_compile_count,
+                @as(f64, @floatFromInt(module_loader_state.profile_cjs_require_compile_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_cjs_require_ns)) / 1_000_000.0,
+                module_loader_state.profile_require_specifier_cache_hits,
+                module_loader_state.profile_require_specifier_cache_misses,
+                module_loader_state.profile_cjs_lazy_compat_cache_hits,
+                module_loader_state.profile_cjs_lazy_compat_cache_misses,
+            },
+        );
+        std.debug.print(
+            "[zig-dom profile cache] source_cache(calls={d} hits={d} misses={d} read_ms={d:.3} read_mb={d:.3})\n",
+            .{
+                module_loader_state.profile_source_cache_calls,
+                module_loader_state.profile_source_cache_hits,
+                module_loader_state.profile_source_cache_misses,
+                @as(f64, @floatFromInt(module_loader_state.profile_source_cache_read_ns)) / 1_000_000.0,
+                @as(f64, @floatFromInt(module_loader_state.profile_source_cache_read_bytes)) / (1024.0 * 1024.0),
+            },
+        );
     }
 
     return .{
@@ -3249,25 +3609,60 @@ fn jsNativeRequire(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const q
         return quickjs.Value.exception;
     }
 
-    const parent = dupArgString(state.allocator, ctx, args[0]) catch return quickjs.Value.exception;
-    defer state.allocator.free(parent);
-    const specifier = dupArgString(state.allocator, ctx, args[1]) catch return quickjs.Value.exception;
-    defer state.allocator.free(specifier);
-    const resolved_hint = if (args.len > 2)
-        dupArgString(state.allocator, ctx, args[2]) catch return quickjs.Value.exception
-    else
-        state.allocator.dupe(u8, "") catch return quickjs.Value.exception;
-    defer state.allocator.free(resolved_hint);
+    const parent_value = quickjs.Value.fromCVal(args[0]);
+    const parent_c = parent_value.toCStringLen(ctx) orelse {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "__zigNativeRequire parent must be a string");
+        return quickjs.Value.exception;
+    };
+    defer ctx.freeCString(parent_c.ptr);
 
-    return state.loadCommonJsValue(ctx, parent, specifier, resolved_hint) catch |err| {
+    const specifier_value = quickjs.Value.fromCVal(args[1]);
+    const specifier_c = specifier_value.toCStringLen(ctx) orelse {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "__zigNativeRequire specifier must be a string");
+        return quickjs.Value.exception;
+    };
+    defer ctx.freeCString(specifier_c.ptr);
+
+    const parent_slice = parent_c.ptr[0..parent_c.len];
+    const specifier_slice = specifier_c.ptr[0..specifier_c.len];
+
+    if (args.len > 2) {
+        const resolved_hint_value = quickjs.Value.fromCVal(args[2]);
+        const resolved_hint_c = resolved_hint_value.toCStringLen(ctx) orelse {
+            _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "__zigNativeRequire resolved hint must be a string");
+            return quickjs.Value.exception;
+        };
+        defer ctx.freeCString(resolved_hint_c.ptr);
+
+        return state.loadCommonJsValue(
+            ctx,
+            parent_slice,
+            specifier_slice,
+            resolved_hint_c.ptr[0..resolved_hint_c.len],
+        ) catch |err| {
+            if (err == error.EvaluationFailed) {
+                return quickjs.Value.exception;
+            }
+            _ = quickjs.c.JS_ThrowReferenceError(
+                ctx.cval(),
+                "native CommonJS require failed: %s from %s (%s)",
+                specifier_c.ptr,
+                parent_c.ptr,
+                @errorName(err).ptr,
+            );
+            return quickjs.Value.exception;
+        };
+    }
+
+    return state.loadCommonJsValue(ctx, parent_slice, specifier_slice, "") catch |err| {
         if (err == error.EvaluationFailed) {
             return quickjs.Value.exception;
         }
         _ = quickjs.c.JS_ThrowReferenceError(
             ctx.cval(),
             "native CommonJS require failed: %s from %s (%s)",
-            specifier.ptr,
-            parent.ptr,
+            specifier_c.ptr,
+            parent_c.ptr,
             @errorName(err).ptr,
         );
         return quickjs.Value.exception;
@@ -3429,8 +3824,15 @@ fn moduleNormalize(
     module_name: [:0]const u8,
 ) ?[*:0]u8 {
     const state = state_opt orelse return null;
+    const profile = state.profile_enabled;
+    if (profile) state.profile_module_normalize_calls += 1;
+    const start = if (profile) state.profileNow() else 0;
+    defer if (profile) {
+        state.profile_module_normalize_ns += state.profileNow() - start;
+    };
 
     const resolved = state.normalizeSpecifier(module_base_name, module_name) catch {
+        if (profile) state.profile_module_normalize_failures += 1;
         _ = quickjs.c.JS_ThrowReferenceError(
             ctx.cval(),
             "module resolution failed: %s (from %s)",
@@ -3453,13 +3855,16 @@ fn moduleLoad(
     module_name: [:0]const u8,
 ) ?*ModuleDef {
     const state = state_opt orelse return null;
+    if (state.profile_enabled) state.profile_module_load_calls += 1;
     const module_id: []const u8 = module_name;
 
     if (state.loaded_modules.get(module_id)) |existing| {
+        if (state.profile_enabled) state.profile_module_load_cache_hits += 1;
         return existing;
     }
 
     if (loadNativeBuiltInModule(ctx, module_name)) |native_module| {
+        if (state.profile_enabled) state.profile_module_load_builtin_hits += 1;
         const key = state.allocator.dupe(u8, module_id) catch {
             _ = quickjs.c.JS_ThrowOutOfMemory(ctx.cval());
             return null;
@@ -3780,9 +4185,6 @@ fn initNativeNodeAssertModule(ctx: *ModuleContext, module: *ModuleDef) bool {
 fn jsNodeAssert(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const condition = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toBool(ctx) catch false else false;
-    if (std.c.getenv("ZIG_DOM_DEBUG_NODE_ASSERT") != null) {
-        std.debug.print("[zig-dom assert] called truthy={}\n", .{condition});
-    }
     if (condition) return quickjs.Value.undefined;
     _ = quickjs.c.JS_ThrowInternalError(ctx.cval(), "Assertion failed");
     return quickjs.Value.exception;

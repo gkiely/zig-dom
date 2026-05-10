@@ -1656,6 +1656,82 @@ const SimpleRoleSelectorList = struct {
     }
 };
 
+const SimpleFormControlSelector = union(enum) {
+    input_type: []const u8,
+    input_type_without_list: []const u8,
+    input_type_with_non_empty_list: []const u8,
+    select_single,
+};
+
+fn quotedAttrValue(selector: []const u8, prefix: []const u8, suffix: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, selector, prefix) or !std.mem.endsWith(u8, selector, suffix)) return null;
+    if (selector.len <= prefix.len + suffix.len) return null;
+    return selector[prefix.len .. selector.len - suffix.len];
+}
+
+fn parseSimpleFormControlSelector(selector: []const u8) ?SimpleFormControlSelector {
+    const trimmed = std.mem.trim(u8, selector, " \t\n\r\x0c");
+    if (quotedAttrValue(trimmed, "input[type=\"", "\"]")) |value| {
+        return .{ .input_type = value };
+    }
+    if (quotedAttrValue(trimmed, "input:not([list])[type=\"", "\"]")) |value| {
+        return .{ .input_type_without_list = value };
+    }
+    if (quotedAttrValue(trimmed, "input[list]:not([list=\"\"])[type=\"", "\"]")) |value| {
+        return .{ .input_type_with_non_empty_list = value };
+    }
+    if (std.mem.eql(u8, trimmed, "select:not([multiple]):not([size])")) {
+        return .select_single;
+    }
+    return null;
+}
+
+fn nodeAttrEqualsIgnoreCase(node: *Node, name: []const u8, expected: []const u8) bool {
+    const actual = getAttribute(node, name) orelse return false;
+    return std.ascii.eqlIgnoreCase(actual, expected);
+}
+
+fn nodeHasNonEmptyAttr(node: *Node, name: []const u8) bool {
+    const actual = getAttribute(node, name) orelse return false;
+    return actual.len > 0;
+}
+
+fn matchesSimpleFormControlSelector(node: *Node, selector: SimpleFormControlSelector) bool {
+    if (node.kind != .element) return false;
+    return switch (selector) {
+        .input_type => |type_name| std.ascii.eqlIgnoreCase(node.name, "input") and nodeAttrEqualsIgnoreCase(node, "type", type_name),
+        .input_type_without_list => |type_name| std.ascii.eqlIgnoreCase(node.name, "input") and
+            getAttribute(node, "list") == null and
+            nodeAttrEqualsIgnoreCase(node, "type", type_name),
+        .input_type_with_non_empty_list => |type_name| std.ascii.eqlIgnoreCase(node.name, "input") and
+            nodeHasNonEmptyAttr(node, "list") and
+            nodeAttrEqualsIgnoreCase(node, "type", type_name),
+        .select_single => std.ascii.eqlIgnoreCase(node.name, "select") and
+            getAttribute(node, "multiple") == null and
+            getAttribute(node, "size") == null,
+    };
+}
+
+fn collectSimpleFormControlSelectorElements(window: *Window, root_handle: u64, selector: SimpleFormControlSelector, include_root: bool, output: *std.ArrayListUnmanaged(u64)) !void {
+    const root = resolveNode(window, root_handle) orelse return;
+    var stack: std.ArrayListUnmanaged(u64) = .empty;
+    defer stack.deinit(c_allocator);
+    if (include_root) {
+        try stack.append(c_allocator, root_handle);
+    } else {
+        try pushChildrenReverse(window, root, &stack);
+    }
+    while (stack.items.len > 0) {
+        const handle = stack.items[stack.items.len - 1];
+        stack.items.len -= 1;
+        const node = resolveNode(window, handle) orelse continue;
+        if (matchesSimpleFormControlSelector(node, selector)) {
+            try output.append(c_allocator, handle);
+        }
+        try pushChildrenReverse(window, node, &stack);
+    }
+}
+
 fn parseSimpleRoleSelectorList(selector: []const u8) ?SimpleRoleSelectorList {
     if (std.mem.indexOfScalar(u8, selector, ',') == null) return null;
 
@@ -2466,6 +2542,18 @@ pub export fn zig_dom_document_query_selector_all(document: u64, selector_ptr: [
         return outputOwnedHandleArray(&matches, out_ptr, out_len);
     }
 
+    if (parseSimpleFormControlSelector(selector)) |simple_form_selector| {
+        var matches: std.ArrayListUnmanaged(u64) = .empty;
+        defer matches.deinit(c_allocator);
+        var cursor = doc_node.first_child;
+        while (cursor != 0) {
+            collectSimpleFormControlSelectorElements(window, cursor, simple_form_selector, true, &matches) catch return STATUS_OOM;
+            const child = resolveNode(window, cursor) orelse break;
+            cursor = child.next_sibling;
+        }
+        return outputOwnedHandleArray(&matches, out_ptr, out_len);
+    }
+
     var selectors: std.ArrayListUnmanaged(SelectorChain) = .empty;
     defer deinitSelectorChains(&selectors);
 
@@ -2514,6 +2602,13 @@ pub export fn zig_dom_node_query_selector_all(root: u64, selector_ptr: [*]const 
         var matches: std.ArrayListUnmanaged(u64) = .empty;
         defer matches.deinit(c_allocator);
         collectSimpleRoleSelectorElements(window, root, simple_role_selector, false, &matches) catch return STATUS_OOM;
+        return outputOwnedHandleArray(&matches, out_ptr, out_len);
+    }
+
+    if (parseSimpleFormControlSelector(selector)) |simple_form_selector| {
+        var matches: std.ArrayListUnmanaged(u64) = .empty;
+        defer matches.deinit(c_allocator);
+        collectSimpleFormControlSelectorElements(window, root, simple_form_selector, false, &matches) catch return STATUS_OOM;
         return outputOwnedHandleArray(&matches, out_ptr, out_len);
     }
 

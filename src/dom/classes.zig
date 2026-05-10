@@ -30,10 +30,44 @@ const ClassPerfStats = struct {
     focus_ns: i128 = 0,
 };
 
+const ClassPerfDetailStats = struct {
+    dispatch_click_calls: u64 = 0,
+    dispatch_input_calls: u64 = 0,
+    dispatch_change_calls: u64 = 0,
+    dispatch_focus_calls: u64 = 0,
+    dispatch_blur_calls: u64 = 0,
+    dispatch_submit_calls: u64 = 0,
+    dispatch_other_calls: u64 = 0,
+    dispatch_path_nodes_total: u64 = 0,
+    dispatch_path_nodes_max: u64 = 0,
+    dispatch_listener_calls: u64 = 0,
+    dispatch_listener_invocations: u64 = 0,
+    dispatch_listener_callback_ns: i128 = 0,
+    dispatch_property_calls: u64 = 0,
+    dispatch_property_invocations: u64 = 0,
+    dispatch_property_callback_ns: i128 = 0,
+    dispatch_property_skipped_no_handlers: u64 = 0,
+    dispatch_property_skipped_no_inline_doc: u64 = 0,
+    dispatch_property_skipped_inline_cache: u64 = 0,
+    dispatch_property_inline_attr_miss: u64 = 0,
+    inline_doc_cache_hits: u64 = 0,
+    inline_doc_cache_misses: u64 = 0,
+    inline_doc_queries: u64 = 0,
+    computed_style_default_returns: u64 = 0,
+    computed_style_cache_hits: u64 = 0,
+    computed_style_cache_misses: u64 = 0,
+};
+
 var class_perf_stats = ClassPerfStats{};
+var class_perf_detail_stats = ClassPerfDetailStats{};
 
 fn classProfileEnabled() bool {
     const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM") orelse return false;
+    return !std.mem.eql(u8, std.mem.span(raw), "0");
+}
+
+fn classProfileDetailEnabled() bool {
+    const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM_DETAIL") orelse return false;
     return !std.mem.eql(u8, std.mem.span(raw), "0");
 }
 
@@ -60,7 +94,43 @@ fn printClassPerfStats() void {
             @as(f64, @floatFromInt(class_perf_stats.focus_ns)) / 1_000_000.0,
         },
     );
+    if (classProfileDetailEnabled()) {
+        std.debug.print(
+            "[zig-dom class profile detail] events(click={d} input={d} change={d} focus={d} blur={d} submit={d} other={d}) path(avg={d:.2} max={d}) listeners(calls={d} invokes={d} cb_ms={d:.3}) property(calls={d} invokes={d} cb_ms={d:.3} skip_no_handlers={d} skip_no_inline_doc={d} skip_inline_cache={d} attr_miss={d}) inline_doc(cache_hit={d} cache_miss={d} queries={d}) computed_style(default={d} cache_hit={d} cache_miss={d})\n",
+            .{
+                class_perf_detail_stats.dispatch_click_calls,
+                class_perf_detail_stats.dispatch_input_calls,
+                class_perf_detail_stats.dispatch_change_calls,
+                class_perf_detail_stats.dispatch_focus_calls,
+                class_perf_detail_stats.dispatch_blur_calls,
+                class_perf_detail_stats.dispatch_submit_calls,
+                class_perf_detail_stats.dispatch_other_calls,
+                if (class_perf_stats.dispatch_event_calls > 0)
+                    @as(f64, @floatFromInt(class_perf_detail_stats.dispatch_path_nodes_total)) / @as(f64, @floatFromInt(class_perf_stats.dispatch_event_calls))
+                else
+                    0.0,
+                class_perf_detail_stats.dispatch_path_nodes_max,
+                class_perf_detail_stats.dispatch_listener_calls,
+                class_perf_detail_stats.dispatch_listener_invocations,
+                @as(f64, @floatFromInt(class_perf_detail_stats.dispatch_listener_callback_ns)) / 1_000_000.0,
+                class_perf_detail_stats.dispatch_property_calls,
+                class_perf_detail_stats.dispatch_property_invocations,
+                @as(f64, @floatFromInt(class_perf_detail_stats.dispatch_property_callback_ns)) / 1_000_000.0,
+                class_perf_detail_stats.dispatch_property_skipped_no_handlers,
+                class_perf_detail_stats.dispatch_property_skipped_no_inline_doc,
+                class_perf_detail_stats.dispatch_property_skipped_inline_cache,
+                class_perf_detail_stats.dispatch_property_inline_attr_miss,
+                class_perf_detail_stats.inline_doc_cache_hits,
+                class_perf_detail_stats.inline_doc_cache_misses,
+                class_perf_detail_stats.inline_doc_queries,
+                class_perf_detail_stats.computed_style_default_returns,
+                class_perf_detail_stats.computed_style_cache_hits,
+                class_perf_detail_stats.computed_style_cache_misses,
+            },
+        );
+    }
     class_perf_stats = .{};
+    class_perf_detail_stats = .{};
 }
 
 const EventTargetCallbacks = struct {
@@ -1631,9 +1701,7 @@ fn jsEventStopImmediatePropagation(ctx_opt: ?*quickjs.Context, this_value: quick
 }
 
 fn resetEventDispatchState(ctx: *quickjs.Context, event: quickjs.Value) quickjs.Value {
-    event.setPropertyStr(ctx, "_eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
-    event.setPropertyStr(ctx, "_currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "currentTarget", quickjs.Value.null) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "_stopped", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     event.setPropertyStr(ctx, "_immediateStopped", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
@@ -1647,8 +1715,63 @@ fn jsEventComposedPath(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _:
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const path = this_value.getPropertyStr(ctx, "_path");
     defer path.deinit(ctx);
-    if (!path.isException() and path.isObject()) return path.dup(ctx);
-    return quickjs.Value.initArray(ctx);
+    if (!path.isException() and path.isObject() and arrayLength(ctx, path) > 0) return path.dup(ctx);
+
+    const target = this_value.getPropertyStr(ctx, "target");
+    defer target.deinit(ctx);
+    if (!target.isObject()) return quickjs.Value.initArray(ctx);
+
+    const composed = boolProperty(ctx, this_value, "composed");
+    var stack = [_]quickjs.Value{quickjs.Value.undefined} ** 64;
+    var stack_len: usize = 0;
+    var cursor = target.dup(ctx);
+    defer cursor.deinit(ctx);
+    while (stack_len < stack.len and cursor.isObject()) {
+        stack[stack_len] = cursor.dup(ctx);
+        stack_len += 1;
+        var parent = cursor.getPropertyStr(ctx, "parentNode");
+        if ((parent.isNull() or parent.isUndefined() or parent.isException()) and composed) {
+            parent.deinit(ctx);
+            parent = cursor.getPropertyStr(ctx, "host");
+        }
+        cursor.deinit(ctx);
+        cursor = parent;
+        if (cursor.isNull() or cursor.isUndefined() or cursor.isException()) break;
+    }
+
+    if (stack_len < stack.len) {
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const owner_document = jsNodeOwnerDocumentGet(ctx, target);
+        defer owner_document.deinit(ctx);
+        const global_document = global.getPropertyStr(ctx, "document");
+        defer global_document.deinit(ctx);
+        const is_global_document_target = !global_document.isException() and global_document.isObject() and target.isStrictEqual(ctx, global_document);
+        const is_global_document_owner = !owner_document.isException() and owner_document.isObject() and !global_document.isException() and global_document.isObject() and owner_document.isStrictEqual(ctx, global_document);
+        if (is_global_document_target or is_global_document_owner) {
+            const window_target = global.getPropertyStr(ctx, "window");
+            defer window_target.deinit(ctx);
+            if (!window_target.isException() and window_target.isObject()) {
+                stack[stack_len] = window_target.dup(ctx);
+                stack_len += 1;
+            }
+        }
+    }
+
+    defer for (stack[0..stack_len]) |value| value.deinit(ctx);
+    const computed_path = quickjs.Value.initArray(ctx);
+    if (computed_path.isException()) return quickjs.Value.exception;
+    for (stack[0..stack_len], 0..) |item, index| {
+        computed_path.setPropertyUint32(ctx, @intCast(index), item.dup(ctx)) catch {
+            computed_path.deinit(ctx);
+            return quickjs.Value.exception;
+        };
+    }
+    this_value.setPropertyStr(ctx, "_path", computed_path.dup(ctx)) catch {
+        computed_path.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    return computed_path;
 }
 
 fn jsEventTimeStampGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
@@ -1662,10 +1785,10 @@ fn jsEventTimeStampGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) qu
 }
 
 fn eventDispatchInProgress(ctx: *quickjs.Context, this_value: quickjs.Value) bool {
-    if (getIntProperty(ctx, this_value, "_eventPhase")) |phase| {
+    if (getIntProperty(ctx, this_value, "eventPhase")) |phase| {
         if (phase != 0) return true;
     }
-    if (getIntProperty(ctx, this_value, "eventPhase")) |phase| {
+    if (getIntProperty(ctx, this_value, "_eventPhase")) |phase| {
         if (phase != 0) return true;
     }
     return false;
@@ -2374,11 +2497,45 @@ fn jsWindowGetComputedStyle(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_ar
     };
 
     if (args.len == 0 or !args[0].isObject()) {
+        if (classProfileDetailEnabled()) class_perf_detail_stats.computed_style_default_returns += 1;
         return defaultComputedStyleObject(ctx);
     }
 
     if (!computedStyleStylesheetParsingEnabled() and !elementNeedsComputedStyleOverlay(ctx, args[0])) {
+        if (classProfileDetailEnabled()) class_perf_detail_stats.computed_style_default_returns += 1;
         return defaultComputedStyleObject(ctx);
+    }
+
+    if (!computedStyleStylesheetParsingEnabled() and args[0].isObject()) {
+        var inline_style = args[0].getPropertyStr(ctx, "__zigStyle");
+        if (inline_style.isException() or !inline_style.isObject()) {
+            inline_style.deinit(ctx);
+            inline_style = jsElementStyleGet(ctx, args[0]);
+            if (inline_style.isException() or !inline_style.isObject()) {
+                inline_style.deinit(ctx);
+                return defaultComputedStyleObject(ctx);
+            }
+        }
+        defer inline_style.deinit(ctx);
+
+        const inline_version = getIntProperty(ctx, inline_style, "__zigVersion") orelse 0;
+        const cached_version = getIntProperty(ctx, args[0], "__zigComputedStyleVersion") orelse -1;
+        if (cached_version == inline_version) {
+            const cached = args[0].getPropertyStr(ctx, "__zigComputedStyleCache");
+            if (!cached.isException() and cached.isObject()) {
+                if (classProfileDetailEnabled()) class_perf_detail_stats.computed_style_cache_hits += 1;
+                return cached;
+            }
+            cached.deinit(ctx);
+        }
+
+        const style = createComputedStyleObject(ctx);
+        if (style.isException()) return style;
+        if (classProfileDetailEnabled()) class_perf_detail_stats.computed_style_cache_misses += 1;
+        applyComputedStyleFromInline(ctx, args[0], style);
+        args[0].setPropertyStr(ctx, "__zigComputedStyleCache", style.dup(ctx)) catch {};
+        args[0].setPropertyStr(ctx, "__zigComputedStyleVersion", quickjs.Value.initInt64(inline_version)) catch {};
+        return style;
     }
 
     const style = createComputedStyleObject(ctx);
@@ -2503,32 +2660,30 @@ fn elementHasClassName(ctx: *quickjs.Context, element: quickjs.Value, class_name
 }
 
 fn applyComputedStyleFromInline(ctx: *quickjs.Context, element: quickjs.Value, computed_style: quickjs.Value) void {
-    const inline_style = element.getPropertyStr(ctx, "__zigStyle");
+    var inline_style = element.getPropertyStr(ctx, "__zigStyle");
     defer inline_style.deinit(ctx);
-    if (inline_style.isObject()) {
-        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "display");
-        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "visibility");
-        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "opacity");
-        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "transform");
-        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "listStyleType");
-        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "color");
-        copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "textDecoration");
+    if (!inline_style.isObject()) {
+        const element_handle = parseThisHandle(ctx, element, "getComputedStyle") orelse return;
+        if (zig_dom.zig_dom_element_has_attribute(element_handle, "style", "style".len) != 1) return;
 
-        const text_decoration = inline_style.getPropertyStr(ctx, "textDecoration");
-        defer text_decoration.deinit(ctx);
-        if (!text_decoration.isException() and !text_decoration.isUndefined() and !text_decoration.isNull()) {
-            computed_style.setPropertyStr(ctx, "text-decoration", text_decoration.dup(ctx)) catch {};
-        }
+        inline_style.deinit(ctx);
+        inline_style = jsElementStyleGet(ctx, element);
+        if (inline_style.isException() or !inline_style.isObject()) return;
     }
 
-    const element_handle = parseThisHandle(ctx, element, "getComputedStyle") orelse return;
-    if (zig_dom.zig_dom_element_has_attribute(element_handle, "style", "style".len) != 1) return;
+    copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "display");
+    copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "visibility");
+    copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "opacity");
+    copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "transform");
+    copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "listStyleType");
+    copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "color");
+    copyInlinePropertyToComputedStyle(ctx, inline_style, computed_style, "textDecoration");
 
-    const style_attr = elementAttributeGet(ctx, element, "style", "");
-    defer style_attr.deinit(ctx);
-    const style_text = style_attr.toCStringLen(ctx) orelse return;
-    defer ctx.freeCString(style_text.ptr);
-    applyCssDeclarationsToComputedStyle(ctx, computed_style, style_text.ptr[0..style_text.len]);
+    const text_decoration = inline_style.getPropertyStr(ctx, "textDecoration");
+    defer text_decoration.deinit(ctx);
+    if (!text_decoration.isException() and !text_decoration.isUndefined() and !text_decoration.isNull()) {
+        computed_style.setPropertyStr(ctx, "text-decoration", text_decoration.dup(ctx)) catch {};
+    }
 }
 
 fn copyInlinePropertyToComputedStyle(
@@ -4302,6 +4457,7 @@ fn jsElementStyleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quic
     installAccessor(ctx, style, "color", jsStyleColorGet, jsStyleColorSet) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "cssText", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "__zigHasMutations", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
+    style.setPropertyStr(ctx, "__zigVersion", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "animation", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     style.setPropertyStr(ctx, "transition", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     const current_style = elementAttributeGet(ctx, this_value, "style", "");
@@ -4358,6 +4514,18 @@ fn jsStyleColorSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_v
     return jsStyleSetViaCssName(ctx_opt, this_value, "color", next_value);
 }
 
+fn bumpStyleVersionAndInvalidateComputed(ctx: *quickjs.Context, style: quickjs.Value) void {
+    const current = getIntProperty(ctx, style, "__zigVersion") orelse 0;
+    style.setPropertyStr(ctx, "__zigVersion", quickjs.Value.initInt64(current + 1)) catch {};
+
+    const element = style.getPropertyStr(ctx, "__zigElement");
+    defer element.deinit(ctx);
+    if (!element.isException() and element.isObject()) {
+        element.setPropertyStr(ctx, "__zigComputedStyleCache", quickjs.Value.undefined) catch {};
+        element.setPropertyStr(ctx, "__zigComputedStyleVersion", quickjs.Value.initInt64(-1)) catch {};
+    }
+}
+
 fn updateElementStyleAttribute(ctx: *quickjs.Context, element: quickjs.Value, property_name: []const u8, next_value: ?[]const u8) void {
     const current_style = elementAttributeGet(ctx, element, "style", "");
     defer current_style.deinit(ctx);
@@ -4411,6 +4579,7 @@ fn jsStyleSetProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw
         this_value.setPropertyStr(ctx, "__zigColor", quickjs.Value.initStringLen(ctx, next_value)) catch return quickjs.Value.exception;
     }
     this_value.setPropertyStr(ctx, "__zigHasMutations", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    bumpStyleVersionAndInvalidateComputed(ctx, this_value);
     return quickjs.Value.undefined;
 }
 
@@ -4438,6 +4607,8 @@ fn jsStyleRemoveProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
         defer ignored_internal.deinit(ctx);
     }
     if (previous.isUndefined()) return quickjs.Value.initStringLen(ctx, "");
+    this_value.setPropertyStr(ctx, "__zigHasMutations", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    bumpStyleVersionAndInvalidateComputed(ctx, this_value);
     return previous.dup(ctx);
 }
 
@@ -4560,6 +4731,28 @@ fn jsElementSetAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     defer old_value.deinit(ctx);
     const status = zig_dom.zig_dom_element_set_attribute(this_handle, attr_name.ptr, attr_name.len, value.ptr, value.len);
     if (status != 0) return throwStatus(ctx, "setAttribute", status);
+    if (std.ascii.eqlIgnoreCase(attr_name, "style")) {
+        this_value.setPropertyStr(ctx, "__zigStyle", quickjs.Value.undefined) catch {};
+        this_value.setPropertyStr(ctx, "__zigComputedStyleCache", quickjs.Value.undefined) catch {};
+        this_value.setPropertyStr(ctx, "__zigComputedStyleVersion", quickjs.Value.initInt64(-1)) catch {};
+    }
+    if (startsWithOnPrefix(attr_name)) {
+        var cache_name_buffer: [320]u8 = undefined;
+        const cache_name = std.fmt.bufPrintZ(&cache_name_buffer, "__zigNoInline{s}", .{attr_name}) catch null;
+        if (cache_name) |name_z| {
+            this_value.setPropertyStr(ctx, name_z.ptr, quickjs.Value.initBool(false)) catch {};
+        }
+
+        const document = jsNodeOwnerDocumentGet(ctx, this_value);
+        defer document.deinit(ctx);
+        if (document.isObject()) {
+            var doc_cache_name_buffer: [320]u8 = undefined;
+            const doc_cache_name = std.fmt.bufPrintZ(&doc_cache_name_buffer, "__zigInlineAttrPresent_{s}", .{attr_name}) catch null;
+            if (doc_cache_name) |name_z| {
+                document.setPropertyStr(ctx, name_z.ptr, quickjs.Value.initBool(true)) catch {};
+            }
+        }
+    }
     if (isForwardedBodyFrameEventAttribute(attr_name)) {
         const forwarded_name = attr_name_value.toCStringLen(ctx) orelse return quickjs.Value.exception;
         defer ctx.freeCString(forwarded_name.ptr);
@@ -4669,6 +4862,28 @@ fn jsElementRemoveAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Valu
     defer old_value.deinit(ctx);
     const status = zig_dom.zig_dom_element_remove_attribute(this_handle, name.ptr, name.len);
     if (status != 0) return throwStatus(ctx, "removeAttribute", status);
+    if (std.ascii.eqlIgnoreCase(name.ptr[0..name.len], "style")) {
+        this_value.setPropertyStr(ctx, "__zigStyle", quickjs.Value.undefined) catch {};
+        this_value.setPropertyStr(ctx, "__zigComputedStyleCache", quickjs.Value.undefined) catch {};
+        this_value.setPropertyStr(ctx, "__zigComputedStyleVersion", quickjs.Value.initInt64(-1)) catch {};
+    }
+    if (startsWithOnPrefix(name.ptr[0..name.len])) {
+        var cache_name_buffer: [320]u8 = undefined;
+        const cache_name = std.fmt.bufPrintZ(&cache_name_buffer, "__zigNoInline{s}", .{name.ptr[0..name.len]}) catch null;
+        if (cache_name) |name_z| {
+            this_value.setPropertyStr(ctx, name_z.ptr, quickjs.Value.initBool(true)) catch {};
+        }
+
+        const document = jsNodeOwnerDocumentGet(ctx, this_value);
+        defer document.deinit(ctx);
+        if (document.isObject()) {
+            var doc_cache_name_buffer: [320]u8 = undefined;
+            const doc_cache_name = std.fmt.bufPrintZ(&doc_cache_name_buffer, "__zigInlineAttrPresent_{s}", .{name.ptr[0..name.len]}) catch null;
+            if (doc_cache_name) |name_z| {
+                document.setPropertyStr(ctx, name_z.ptr, quickjs.Value.undefined) catch {};
+            }
+        }
+    }
     if (isForwardedBodyFrameEventAttribute(name.ptr[0..name.len]) and isBodyOrFrameSetElement(ctx, this_value)) {
         this_value.setPropertyStr(ctx, name.ptr, quickjs.Value.null) catch {};
     }
@@ -5279,47 +5494,34 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
     }
     if (std.mem.eql(u8, selector, "input:not([type])")) {
         if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
-        const value = elementAttributeString(ctx, element, "type");
-        if (value) |owned| ctx.freeCString(owned.ptr);
-        return value == null;
+        return elementAttributeRefSlice(ctx, element, "type") == null;
     }
     if (std.mem.eql(u8, selector, "input:not([list])")) {
         if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
-        const list = elementAttributeString(ctx, element, "list");
-        if (list) |owned| ctx.freeCString(owned.ptr);
-        return list == null;
+        return elementAttributeRefSlice(ctx, element, "list") == null;
     }
     if (std.mem.eql(u8, selector, "input:not([type]):not([list])")) {
         if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
-        const type_value = elementAttributeString(ctx, element, "type");
-        if (type_value) |owned| ctx.freeCString(owned.ptr);
-        if (type_value != null) return false;
-        const list = elementAttributeString(ctx, element, "list");
-        if (list) |owned| ctx.freeCString(owned.ptr);
-        return list == null;
+        if (elementAttributeRefSlice(ctx, element, "type") != null) return false;
+        return elementAttributeRefSlice(ctx, element, "list") == null;
     }
     if (std.mem.startsWith(u8, selector, "input[type=\"") and std.mem.endsWith(u8, selector, "\"]:not([list])")) {
         if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
         const expected = selector["input[type=\"".len .. selector.len - "\"]:not([list])".len];
-        const type_value = elementAttributeString(ctx, element, "type") orelse return false;
-        defer ctx.freeCString(type_value.ptr);
-        if (!std.ascii.eqlIgnoreCase(type_value.ptr[0..type_value.len], expected)) return false;
-        const list = elementAttributeString(ctx, element, "list");
-        if (list) |owned| ctx.freeCString(owned.ptr);
-        return list == null;
+        const type_value = elementAttributeRefSlice(ctx, element, "type") orelse return false;
+        if (!std.ascii.eqlIgnoreCase(type_value, expected)) return false;
+        return elementAttributeRefSlice(ctx, element, "list") == null;
     }
     if (std.mem.eql(u8, selector, "input[type=\"text\"]") or std.mem.eql(u8, selector, "input[type=\"search\"]")) {
         if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "input")) return false;
-        const value = elementAttributeString(ctx, element, "type") orelse return false;
-        defer ctx.freeCString(value.ptr);
+        const value = elementAttributeRefSlice(ctx, element, "type") orelse return false;
         const expected = if (std.mem.eql(u8, selector, "input[type=\"text\"]")) "text" else "search";
-        return std.ascii.eqlIgnoreCase(value.ptr[0..value.len], expected);
+        return std.ascii.eqlIgnoreCase(value, expected);
     }
     if (std.mem.eql(u8, selector, "a")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "a");
     if (std.mem.eql(u8, selector, "area")) return std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "area");
     if (std.mem.eql(u8, selector, "[title]")) {
-        const title = elementAttributeString(ctx, element, "title") orelse return false;
-        defer ctx.freeCString(title.ptr);
+        _ = elementAttributeRefSlice(ctx, element, "title") orelse return false;
         return true;
     }
     if (std.mem.eql(u8, selector, "svg > title")) {
@@ -5349,35 +5551,29 @@ fn matchesSingleSelectorFast(ctx: *quickjs.Context, element: quickjs.Value, sele
         return std.ascii.eqlIgnoreCase(previous_local.ptr[0..previous_local.len], "h1");
     }
     if (std.mem.eql(u8, selector, "#scope")) {
-        const id = elementAttributeString(ctx, element, "id") orelse return false;
-        defer ctx.freeCString(id.ptr);
-        return std.mem.eql(u8, id.ptr[0..id.len], "scope");
+        const id = elementAttributeRefSlice(ctx, element, "id") orelse return false;
+        return std.mem.eql(u8, id, "scope");
     }
     if (std.mem.eql(u8, selector, ".copy")) {
-        const class_name = elementAttributeString(ctx, element, "class") orelse return false;
-        defer ctx.freeCString(class_name.ptr);
-        var iter = std.mem.tokenizeAny(u8, class_name.ptr[0..class_name.len], " \t\n\r\x0c");
+        const class_name = elementAttributeRefSlice(ctx, element, "class") orelse return false;
+        var iter = std.mem.tokenizeAny(u8, class_name, " \t\n\r\x0c");
         while (iter.next()) |token| {
             if (std.mem.eql(u8, token, "copy")) return true;
         }
         return false;
     }
     if (std.mem.eql(u8, selector, "[data-kind|='alpha']")) {
-        const value = elementAttributeString(ctx, element, "data-kind") orelse return false;
-        defer ctx.freeCString(value.ptr);
-        const text = value.ptr[0..value.len];
+        const text = elementAttributeRefSlice(ctx, element, "data-kind") orelse return false;
         return std.mem.eql(u8, text, "alpha") or std.mem.startsWith(u8, text, "alpha-");
     }
     if (std.mem.eql(u8, selector, "a[href]") or std.mem.eql(u8, selector, "a[href]:not([href=\"\"])")) {
         if (!std.ascii.eqlIgnoreCase(local.ptr[0..local.len], "a")) return false;
-        const href = elementAttributeString(ctx, element, "href") orelse return false;
-        defer ctx.freeCString(href.ptr);
+        const href = elementAttributeRefSlice(ctx, element, "href") orelse return false;
         return if (std.mem.eql(u8, selector, "a[href]:not([href=\"\"])")) href.len > 0 else true;
     }
     if (roleTokenSelectorValue(selector)) |expected_role| {
-        const role = elementAttributeString(ctx, element, "role") orelse return false;
-        defer ctx.freeCString(role.ptr);
-        var iter = std.mem.tokenizeScalar(u8, role.ptr[0..role.len], ' ');
+        const role = elementAttributeRefSlice(ctx, element, "role") orelse return false;
+        var iter = std.mem.tokenizeScalar(u8, role, ' ');
         while (iter.next()) |token| {
             if (std.mem.eql(u8, token, expected_role)) return true;
         }
@@ -5417,20 +5613,18 @@ fn matchesTagAttributeSelector(ctx: *quickjs.Context, element: quickjs.Value, lo
         } else {
             if (!std.mem.endsWith(u8, selector, "])")) return null;
             const tag = selector[0..not_index];
-            if (tag.len == 0 or !std.ascii.eqlIgnoreCase(local, tag)) return false;
+            if (tag.len != 0 and !std.ascii.eqlIgnoreCase(local, tag)) return false;
             const attr = selector[not_index + ":not([".len .. selector.len - "])".len];
             if (std.mem.indexOfScalar(u8, attr, '=') != null) return null;
-            const value = elementAttributeString(ctx, element, attr);
-            if (value) |owned| ctx.freeCString(owned.ptr);
-            return value == null;
+            return elementAttributeRefSlice(ctx, element, attr) == null;
         }
     }
 
     const bracket = std.mem.indexOfScalar(u8, selector, '[') orelse return null;
-    if (bracket == 0) return null;
     const tag = selector[0..bracket];
-    if (std.mem.eql(u8, tag, "*")) return null;
-    if (!std.ascii.eqlIgnoreCase(local, tag)) return false;
+    if (tag.len != 0 and !std.mem.eql(u8, tag, "*")) {
+        if (!std.ascii.eqlIgnoreCase(local, tag)) return false;
+    }
 
     if (std.mem.indexOf(u8, selector[bracket..], "]:not([")) |relative_not| {
         const first_attr = selector[bracket + 1 .. bracket + relative_not];
@@ -5443,9 +5637,8 @@ fn matchesTagAttributeSelector(ctx: *quickjs.Context, element: quickjs.Value, lo
             const value_start = eq + "=\"".len;
             if (inner.len < value_start + 1 or inner[inner.len - 1] != '"') return null;
             const disallowed_value = inner[value_start .. inner.len - 1];
-            const attr = elementAttributeString(ctx, element, first_attr) orelse return false;
-            defer ctx.freeCString(attr.ptr);
-            return !std.mem.eql(u8, attr.ptr[0..attr.len], disallowed_value);
+            const attr = elementAttributeRefSlice(ctx, element, first_attr) orelse return false;
+            return !std.mem.eql(u8, attr, disallowed_value);
         }
         return null;
     }
@@ -5460,15 +5653,22 @@ fn matchesTagAttributeSelector(ctx: *quickjs.Context, element: quickjs.Value, lo
             if (expected.len >= 2 and ((expected[0] == '"' and expected[expected.len - 1] == '"') or (expected[0] == '\'' and expected[expected.len - 1] == '\''))) {
                 expected = expected[1 .. expected.len - 1];
             }
-            const value = elementAttributeString(ctx, element, attr_name) orelse return false;
-            defer ctx.freeCString(value.ptr);
-            const text = value.ptr[0..value.len];
+            const text = elementAttributeRefSlice(ctx, element, attr_name) orelse return false;
             return if (case_insensitive) asciiContainsIgnoreCase(text, expected) else std.mem.indexOf(u8, text, expected) != null;
         }
-        if (std.mem.indexOfScalar(u8, attr, '=') != null) return null;
-        const value = elementAttributeString(ctx, element, attr) orelse return false;
-        defer ctx.freeCString(value.ptr);
-        return true;
+        if (std.mem.indexOfScalar(u8, attr, '=')) |operator_index| {
+            const attr_name = std.mem.trim(u8, attr[0..operator_index], " \t\n\r");
+            if (attr_name.len == 0) return null;
+            var expected = std.mem.trim(u8, attr[operator_index + 1 ..], " \t\n\r");
+            const case_insensitive = std.mem.endsWith(u8, expected, " i");
+            if (case_insensitive) expected = std.mem.trim(u8, expected[0 .. expected.len - 2], " \t\n\r");
+            if (expected.len >= 2 and ((expected[0] == '"' and expected[expected.len - 1] == '"') or (expected[0] == '\'' and expected[expected.len - 1] == '\''))) {
+                expected = expected[1 .. expected.len - 1];
+            }
+            const text = elementAttributeRefSlice(ctx, element, attr_name) orelse return false;
+            return if (case_insensitive) std.ascii.eqlIgnoreCase(text, expected) else std.mem.eql(u8, text, expected);
+        }
+        return elementAttributeRefSlice(ctx, element, attr) != null;
     }
 
     return null;
@@ -8274,6 +8474,50 @@ fn startsWithDataPrefix(name: []const u8) bool {
         name[4] == '-';
 }
 
+fn startsWithOnPrefix(name: []const u8) bool {
+    return name.len >= 2 and std.ascii.toLower(name[0]) == 'o' and std.ascii.toLower(name[1]) == 'n';
+}
+
+fn documentHasInlineEventAttribute(ctx: *quickjs.Context, target: quickjs.Value, on_attr_name: []const u8) bool {
+    var document = jsNodeOwnerDocumentGet(ctx, target);
+    if (document.isException() or !document.isObject()) {
+        document.deinit(ctx);
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        document = global.getPropertyStr(ctx, "document");
+        if (document.isException() or !document.isObject()) {
+            document.deinit(ctx);
+            return false;
+        }
+    }
+    defer document.deinit(ctx);
+
+    var cache_name_buf: [256]u8 = undefined;
+    const cache_name = std.fmt.bufPrintZ(&cache_name_buf, "__zigInlineAttrPresent_{s}", .{on_attr_name}) catch return true;
+    const cached = document.getPropertyStr(ctx, cache_name.ptr);
+    defer cached.deinit(ctx);
+    if (!cached.isException() and cached.isBool()) {
+        if (classProfileDetailEnabled()) class_perf_detail_stats.inline_doc_cache_hits += 1;
+        return cached.toBool(ctx) catch false;
+    }
+    if (classProfileDetailEnabled()) class_perf_detail_stats.inline_doc_cache_misses += 1;
+
+    var selector_buf: [160]u8 = undefined;
+    const selector = std.fmt.bufPrint(&selector_buf, "[{s}]", .{on_attr_name}) catch return true;
+    const query_selector = document.getPropertyStr(ctx, "querySelector");
+    defer query_selector.deinit(ctx);
+    if (query_selector.isException() or !query_selector.isFunction(ctx)) return true;
+    if (classProfileDetailEnabled()) class_perf_detail_stats.inline_doc_queries += 1;
+
+    const selector_value = quickjs.Value.initStringLen(ctx, selector);
+    defer selector_value.deinit(ctx);
+    const match = query_selector.call(ctx, document, &.{selector_value});
+    defer match.deinit(ctx);
+    const has_inline = !match.isException() and match.isObject();
+    document.setPropertyStr(ctx, cache_name.ptr, quickjs.Value.initBool(has_inline)) catch {};
+    return has_inline;
+}
+
 fn simpleIdSelector(selector: []const u8) ?[]const u8 {
     if (selector.len < 2 or selector[0] != '#') return null;
     const id = selector[1..];
@@ -8306,13 +8550,15 @@ fn jsEventTargetAddEventListener(ctx_opt: ?*quickjs.Context, this_value: quickjs
     }
     defer list.deinit(ctx);
 
-    const entry = quickjs.Value.initObject(ctx);
-    if (entry.isException()) return quickjs.Value.exception;
-    defer entry.deinit(ctx);
     const capture = if (args.len > 2 and args[2].isBool())
         (args[2].toBool(ctx) catch false)
     else
         eventOptionBool(ctx, args, 2, "capture");
+    if (listenerRegistered(ctx, list, args[1], capture)) return quickjs.Value.undefined;
+
+    const entry = quickjs.Value.initObject(ctx);
+    if (entry.isException()) return quickjs.Value.exception;
+    defer entry.deinit(ctx);
     const once = if (args.len > 2 and args[2].isBool())
         false
     else
@@ -8323,6 +8569,13 @@ fn jsEventTargetAddEventListener(ctx_opt: ?*quickjs.Context, this_value: quickjs
 
     const length = arrayLength(ctx, list);
     list.setPropertyUint32(ctx, length, entry.dup(ctx)) catch return quickjs.Value.exception;
+    bumpListenerListVersion(ctx, list);
+    this_value.setPropertyStr(ctx, "__zigHasEventListeners", quickjs.Value.initBool(true)) catch {};
+    var type_flag_buf: [192]u8 = undefined;
+    const type_flag = std.fmt.bufPrintZ(&type_flag_buf, "__zigHasEventType_{s}", .{type_arg.ptr[0..type_arg.len]}) catch null;
+    if (type_flag) |flag| {
+        this_value.setPropertyStr(ctx, flag.ptr, quickjs.Value.initBool(true)) catch {};
+    }
     return quickjs.Value.undefined;
 }
 
@@ -8356,7 +8609,9 @@ fn jsEventTargetRemoveEventListener(ctx_opt: ?*quickjs.Context, this_value: quic
         if (write != i) list.setPropertyUint32(ctx, write, entry.dup(ctx)) catch return quickjs.Value.exception;
         write += 1;
     }
+    const removed_any = write != len;
     setArrayLength(ctx, list, write);
+    if (removed_any) bumpListenerListVersion(ctx, list);
     return quickjs.Value.undefined;
 }
 
@@ -8376,6 +8631,24 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     defer type_value.deinit(ctx);
     const type_arg = type_value.toCStringLen(ctx) orelse return throwOperationMessage(ctx, "dispatchEvent", "event type must be a string");
     defer ctx.freeCString(type_arg.ptr);
+    var event_type_flag_buf: [192]u8 = undefined;
+    const event_type_flag = std.fmt.bufPrintZ(&event_type_flag_buf, "__zigHasEventType_{s}", .{type_arg.ptr[0..type_arg.len]}) catch null;
+    if (classProfileDetailEnabled()) {
+        const event_type = type_arg.ptr[0..type_arg.len];
+        if (std.mem.eql(u8, event_type, "click")) class_perf_detail_stats.dispatch_click_calls += 1
+        else if (std.mem.eql(u8, event_type, "input")) class_perf_detail_stats.dispatch_input_calls += 1
+        else if (std.mem.eql(u8, event_type, "change")) class_perf_detail_stats.dispatch_change_calls += 1
+        else if (std.mem.eql(u8, event_type, "focus")) class_perf_detail_stats.dispatch_focus_calls += 1
+        else if (std.mem.eql(u8, event_type, "blur")) class_perf_detail_stats.dispatch_blur_calls += 1
+        else if (std.mem.eql(u8, event_type, "submit")) class_perf_detail_stats.dispatch_submit_calls += 1
+        else class_perf_detail_stats.dispatch_other_calls += 1;
+    }
+    var on_attr_name_buf: [128]u8 = undefined;
+    const on_attr_name_z = std.fmt.bufPrintZ(&on_attr_name_buf, "on{s}", .{type_arg.ptr[0..type_arg.len]}) catch null;
+    const no_inline_attr_for_event = if (on_attr_name_z) |name_z|
+        !documentHasInlineEventAttribute(ctx, this_value, name_z[0..name_z.len])
+    else
+        false;
     const is_mouse_click = isMouseClickEvent(ctx, event, type_arg.ptr[0..type_arg.len]);
     const bubbles = boolProperty(ctx, event, "bubbles");
     const composed = boolProperty(ctx, event, "composed");
@@ -8397,19 +8670,37 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
 
     var path = [_]quickjs.Value{quickjs.Value.undefined} ** 64;
     var path_len: usize = 0;
-    var cursor = this_value.dup(ctx);
-    defer cursor.deinit(ctx);
-    while (path_len < path.len and cursor.isObject()) {
-        path[path_len] = cursor.dup(ctx);
-        path_len += 1;
-        var parent = cursor.getPropertyStr(ctx, "parentNode");
-        if ((parent.isNull() or parent.isUndefined() or parent.isException()) and composed) {
-            parent.deinit(ctx);
-            parent = cursor.getPropertyStr(ctx, "host");
+    if (parseValueNodeHandle(ctx, this_value)) |target_handle_i64| {
+        if (target_handle_i64 > 0) {
+            var cursor_handle: u64 = @intCast(target_handle_i64);
+            while (path_len < path.len and cursor_handle != 0) {
+                const wrapped = wrapNodeHandle(ctx, cursor_handle);
+                if (wrapped.isException()) {
+                    wrapped.deinit(ctx);
+                    break;
+                }
+                path[path_len] = wrapped;
+                path_len += 1;
+                cursor_handle = zig_dom.zig_dom_node_parent(cursor_handle);
+            }
         }
-        cursor.deinit(ctx);
-        cursor = parent;
-        if (cursor.isNull() or cursor.isUndefined() or cursor.isException()) break;
+    }
+
+    if (path_len == 0) {
+        var cursor = this_value.dup(ctx);
+        defer cursor.deinit(ctx);
+        while (path_len < path.len and cursor.isObject()) {
+            path[path_len] = cursor.dup(ctx);
+            path_len += 1;
+            var parent = cursor.getPropertyStr(ctx, "parentNode");
+            if ((parent.isNull() or parent.isUndefined() or parent.isException()) and composed) {
+                parent.deinit(ctx);
+                parent = cursor.getPropertyStr(ctx, "host");
+            }
+            cursor.deinit(ctx);
+            cursor = parent;
+            if (cursor.isNull() or cursor.isUndefined() or cursor.isException()) break;
+        }
     }
 
     if (path_len < path.len) {
@@ -8428,6 +8719,28 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
             }
         }
     }
+    if (classProfileDetailEnabled()) {
+        const path_len_u64: u64 = @intCast(path_len);
+        class_perf_detail_stats.dispatch_path_nodes_total += path_len_u64;
+        if (path_len_u64 > class_perf_detail_stats.dispatch_path_nodes_max) {
+            class_perf_detail_stats.dispatch_path_nodes_max = path_len_u64;
+        }
+    }
+
+    var property_listener_targets = [_]bool{false} ** 64;
+    var has_property_handlers_for_event = !no_inline_attr_for_event;
+    if (no_inline_attr_for_event and on_attr_name_z != null) {
+        for (path[0..path_len], 0..) |node, path_index| {
+            const callback = node.getPropertyStr(ctx, on_attr_name_z.?.ptr);
+            defer callback.deinit(ctx);
+            const has_handler = callback.isFunction(ctx) or (!callback.isUndefined() and !callback.isNull());
+            property_listener_targets[path_index] = has_handler;
+            if (has_handler) has_property_handlers_for_event = true;
+        }
+    }
+    if (classProfileDetailEnabled() and !has_property_handlers_for_event) {
+        class_perf_detail_stats.dispatch_property_skipped_no_handlers += 1;
+    }
 
     var activation_target = quickjs.Value.null;
     defer activation_target.deinit(ctx);
@@ -8439,31 +8752,49 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     }
 
     defer for (path[0..path_len]) |value| value.deinit(ctx);
-    const composed_path = quickjs.Value.initArray(ctx);
-    if (composed_path.isException()) return composed_path;
-    defer composed_path.deinit(ctx);
-    for (path[0..path_len], 0..) |item, index| {
-        composed_path.setPropertyUint32(ctx, @intCast(index), item.dup(ctx)) catch return quickjs.Value.exception;
-    }
-    event.setPropertyStr(ctx, "_path", composed_path.dup(ctx)) catch return quickjs.Value.exception;
-
     var i = path_len;
     while (i > 1) {
         if (boolProperty(ctx, event, "_stopped")) break;
         i -= 1;
-        tryDispatchListeners(ctx, path[i], event, type_arg.ptr, true, 1) catch return quickjs.Value.exception;
+        const has_type_listener = if (event_type_flag) |flag|
+            boolProperty(ctx, path[i], flag.ptr)
+        else
+            boolProperty(ctx, path[i], "__zigHasEventListeners");
+        if (has_type_listener) {
+            tryDispatchListeners(ctx, path[i], event, type_arg.ptr, true, 1) catch return quickjs.Value.exception;
+        }
     }
     if (!boolProperty(ctx, event, "_stopped")) {
-        tryDispatchListeners(ctx, this_value, event, type_arg.ptr, true, 2) catch return quickjs.Value.exception;
-        tryDispatchListeners(ctx, this_value, event, type_arg.ptr, false, 2) catch return quickjs.Value.exception;
-        tryDispatchPropertyListener(ctx, this_value, event, type_arg.ptr) catch return quickjs.Value.exception;
+        const target_has_type_listener = if (event_type_flag) |flag|
+            boolProperty(ctx, this_value, flag.ptr)
+        else
+            boolProperty(ctx, this_value, "__zigHasEventListeners");
+        if (target_has_type_listener) {
+            tryDispatchListeners(ctx, this_value, event, type_arg.ptr, true, 2) catch return quickjs.Value.exception;
+            tryDispatchListeners(ctx, this_value, event, type_arg.ptr, false, 2) catch return quickjs.Value.exception;
+        }
+        const should_dispatch_target_property = has_property_handlers_for_event and
+            (!no_inline_attr_for_event or on_attr_name_z == null or (path_len > 0 and property_listener_targets[0]));
+        if (should_dispatch_target_property) {
+            tryDispatchPropertyListener(ctx, this_value, event, type_arg.ptr, no_inline_attr_for_event) catch return quickjs.Value.exception;
+        }
     }
 
     if (bubbles) {
-        for (path[1..path_len]) |ancestor| {
+        for (path[1..path_len], 1..) |ancestor, path_index| {
             if (boolProperty(ctx, event, "_stopped")) break;
-            tryDispatchListeners(ctx, ancestor, event, type_arg.ptr, false, 3) catch return quickjs.Value.exception;
-            tryDispatchPropertyListener(ctx, ancestor, event, type_arg.ptr) catch return quickjs.Value.exception;
+            const ancestor_has_type_listener = if (event_type_flag) |flag|
+                boolProperty(ctx, ancestor, flag.ptr)
+            else
+                boolProperty(ctx, ancestor, "__zigHasEventListeners");
+            if (ancestor_has_type_listener) {
+                tryDispatchListeners(ctx, ancestor, event, type_arg.ptr, false, 3) catch return quickjs.Value.exception;
+            }
+            const should_dispatch_ancestor_property = has_property_handlers_for_event and
+                (!no_inline_attr_for_event or on_attr_name_z == null or property_listener_targets[path_index]);
+            if (should_dispatch_ancestor_property) {
+                tryDispatchPropertyListener(ctx, ancestor, event, type_arg.ptr, no_inline_attr_for_event) catch return quickjs.Value.exception;
+            }
         }
     }
 
@@ -10022,9 +10353,8 @@ fn elementAttributeValueToJs(ctx: *quickjs.Context, element_handle: u64, name: [
     var out_ptr: [*c]u8 = null;
     var out_len: usize = 0;
     var out_exists: u8 = 0;
-    const status = zig_dom.zig_dom_element_get_attribute(element_handle, name.ptr, name.len, &out_ptr, &out_len, &out_exists);
+    const status = zig_dom.zig_dom_element_get_attribute_ref(element_handle, name.ptr, name.len, &out_ptr, &out_len, &out_exists);
     if (status != 0) return throwStatus(ctx, operation, status);
-    defer zig_dom.zig_dom_free_string(out_ptr, out_len);
 
     if (out_exists == 0) {
         if (fallback) |value| return quickjs.Value.initStringLen(ctx, value);
@@ -10033,6 +10363,21 @@ fn elementAttributeValueToJs(ctx: *quickjs.Context, element_handle: u64, name: [
     if (out_ptr == null or out_len == 0) return quickjs.Value.initStringLen(ctx, "");
     const text = @as([*]const u8, @ptrCast(out_ptr))[0..out_len];
     return quickjs.Value.initStringLen(ctx, text);
+}
+
+fn elementAttributeRefByHandle(element_handle: u64, name: []const u8) ?[]const u8 {
+    var out_ptr: [*c]u8 = null;
+    var out_len: usize = 0;
+    var out_exists: u8 = 0;
+    const status = zig_dom.zig_dom_element_get_attribute_ref(element_handle, name.ptr, name.len, &out_ptr, &out_len, &out_exists);
+    if (status != 0 or out_exists == 0) return null;
+    if (out_len == 0) return "";
+    return @as([*]const u8, @ptrCast(out_ptr))[0..out_len];
+}
+
+fn elementAttributeRefSlice(ctx: *quickjs.Context, element: quickjs.Value, name: []const u8) ?[]const u8 {
+    const handle = parseThisHandle(ctx, element, name) orelse return null;
+    return elementAttributeRefByHandle(handle, name);
 }
 
 fn classListElement(ctx: *quickjs.Context, class_list: quickjs.Value) ?quickjs.Value {
@@ -12046,7 +12391,16 @@ fn listenerRegistered(ctx: *quickjs.Context, list: quickjs.Value, callback: quic
     return false;
 }
 
-fn removeListenerByCallbackAndCapture(ctx: *quickjs.Context, list: quickjs.Value, callback: quickjs.Value, capture: bool) void {
+fn listenerListVersion(ctx: *quickjs.Context, list: quickjs.Value) i64 {
+    return getIntProperty(ctx, list, "__zigVersion") orelse 0;
+}
+
+fn bumpListenerListVersion(ctx: *quickjs.Context, list: quickjs.Value) void {
+    const next = listenerListVersion(ctx, list) + 1;
+    list.setPropertyStr(ctx, "__zigVersion", quickjs.Value.initInt64(next)) catch {};
+}
+
+fn removeListenerByCallbackAndCapture(ctx: *quickjs.Context, list: quickjs.Value, callback: quickjs.Value, capture: bool) bool {
     const len = arrayLength(ctx, list);
     var write: u32 = 0;
     var removed = false;
@@ -12058,10 +12412,11 @@ fn removeListenerByCallbackAndCapture(ctx: *quickjs.Context, list: quickjs.Value
             removed = true;
             continue;
         }
-        if (write != i) list.setPropertyUint32(ctx, write, entry.dup(ctx)) catch return;
+        if (write != i) list.setPropertyUint32(ctx, write, entry.dup(ctx)) catch return removed;
         write += 1;
     }
     setArrayLength(ctx, list, write);
+    return removed;
 }
 
 fn dispatchListenerErrorEventToTarget(ctx: *quickjs.Context, global: quickjs.Value, target: quickjs.Value, thrown: quickjs.Value) void {
@@ -12149,6 +12504,7 @@ fn targetIsInShadowTree(ctx: *quickjs.Context, target: quickjs.Value) bool {
 }
 
 fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: quickjs.Value, event_type: [*:0]const u8, capture: bool, phase: i64) !void {
+    if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_listener_calls += 1;
     const listeners = target.getPropertyStr(ctx, "__zigEventListeners");
     defer listeners.deinit(ctx);
     if (listeners.isException() or !listeners.isObject()) return;
@@ -12156,49 +12512,56 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
     defer list.deinit(ctx);
     if (list.isException() or !list.isObject()) return;
 
-    event.setPropertyStr(ctx, "_eventPhase", quickjs.Value.initInt64(phase)) catch return error.JSError;
-    event.setPropertyStr(ctx, "_currentTarget", target.dup(ctx)) catch return error.JSError;
     event.setPropertyStr(ctx, "eventPhase", quickjs.Value.initInt64(phase)) catch return error.JSError;
     event.setPropertyStr(ctx, "currentTarget", target.dup(ctx)) catch return error.JSError;
 
     const len = arrayLength(ctx, list);
-    var snapshot = [_]quickjs.Value{quickjs.Value.undefined} ** 64;
-    var snapshot_len: usize = 0;
-    for (0..len) |i_usize| {
-        if (snapshot_len >= snapshot.len) break;
-        const entry = list.getPropertyUint32(ctx, @intCast(i_usize));
-        defer entry.deinit(ctx);
-        if (entry.isException() or !entry.isObject()) continue;
-        if (boolProperty(ctx, entry, "capture") != capture) continue;
-        snapshot[snapshot_len] = entry.dup(ctx);
-        snapshot_len += 1;
-    }
-    defer for (snapshot[0..snapshot_len]) |entry| entry.deinit(ctx);
-
-    for (snapshot[0..snapshot_len]) |entry| {
+    if (len == 0) return;
+    const keep_legacy_event = std.mem.eql(u8, std.mem.span(event_type), "error");
+    const in_shadow_tree = if (keep_legacy_event) targetIsInShadowTree(ctx, target) else false;
+    var index: u32 = 0;
+    var processed: u32 = 0;
+    while (processed < len) : (processed += 1) {
         if (boolProperty(ctx, event, "_immediateStopped")) break;
+        if (index >= arrayLength(ctx, list)) break;
+        const entry = list.getPropertyUint32(ctx, index);
+        defer entry.deinit(ctx);
+        if (entry.isException() or !entry.isObject()) {
+            index += 1;
+            continue;
+        }
+        const entry_capture = boolProperty(ctx, entry, "capture");
+        index += 1;
+        if (entry_capture != capture) continue;
+
         const callback = entry.getPropertyStr(ctx, "callback");
         defer callback.deinit(ctx);
-        if (!listenerRegistered(ctx, list, callback, capture)) continue;
         const once = boolProperty(ctx, entry, "once");
         if (once) {
-            removeListenerByCallbackAndCapture(ctx, list, callback, capture);
+            if (removeListenerByCallbackAndCapture(ctx, list, callback, capture)) {
+                bumpListenerListVersion(ctx, list);
+                index -= 1;
+            }
         }
         if (!callback.isUndefined() and !callback.isNull()) {
-            const global = ctx.getGlobalObject();
+            if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_listener_invocations += 1;
+            var global = quickjs.Value.undefined;
             defer global.deinit(ctx);
-            const previous_event = global.getPropertyStr(ctx, "event");
+            var previous_event = quickjs.Value.undefined;
             defer previous_event.deinit(ctx);
-            const keep_legacy_event = std.mem.eql(u8, std.mem.span(event_type), "error");
-            const in_shadow_tree = targetIsInShadowTree(ctx, target);
-            if (in_shadow_tree) {
-                setLegacyGlobalEvent(ctx, global, quickjs.Value.undefined);
-            } else {
-                setLegacyGlobalEvent(ctx, global, event);
+            if (keep_legacy_event) {
+                global = ctx.getGlobalObject();
+                previous_event = global.getPropertyStr(ctx, "event");
+                if (in_shadow_tree) {
+                    setLegacyGlobalEvent(ctx, global, quickjs.Value.undefined);
+                } else {
+                    setLegacyGlobalEvent(ctx, global, event);
+                }
             }
 
-            var call_args = [_]quickjs.Value{event.dup(ctx)};
-            defer call_args[0].deinit(ctx);
+            const call_args = [_]quickjs.Value{quickjs.Value.fromCVal(event.cval())};
+            const callback_timing = classProfileDetailEnabled();
+            const callback_start = if (callback_timing) classProfileNowNs() else 0;
             const result = if (callback.isFunction(ctx))
                 callback.call(ctx, target, &call_args)
             else blk: {
@@ -12211,11 +12574,12 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
                 }
                 break :blk handle_event.call(ctx, callback, &call_args);
             };
+            if (callback_timing) {
+                class_perf_detail_stats.dispatch_listener_callback_ns += classProfileNowNs() - callback_start;
+            }
             defer result.deinit(ctx);
-            if (!keep_legacy_event) {
+            if (keep_legacy_event) {
                 setLegacyGlobalEvent(ctx, global, previous_event);
-            } else {
-                setLegacyGlobalEvent(ctx, global, event);
             }
             if (result.isException()) {
                 const thrown = ctx.getException();
@@ -12226,69 +12590,94 @@ fn tryDispatchListeners(ctx: *quickjs.Context, target: quickjs.Value, event: qui
     }
 }
 
-fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, event: quickjs.Value, event_type: [*:0]const u8) !void {
+fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, event: quickjs.Value, event_type: [*:0]const u8, no_inline_attr_for_event: bool) !void {
+    if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_property_calls += 1;
     var name_buf: [128]u8 = undefined;
     const name = std.fmt.bufPrintZ(&name_buf, "on{s}", .{std.mem.span(event_type)}) catch return;
+    var missing_inline_buf: [192]u8 = undefined;
+    const missing_inline_name = std.fmt.bufPrintZ(&missing_inline_buf, "__zigNoInline{s}", .{std.mem.span(name.ptr)}) catch null;
     const callback = target.getPropertyStr(ctx, name.ptr);
     defer callback.deinit(ctx);
+    const is_error_event = std.mem.eql(u8, std.mem.span(event_type), "error");
     var listener_for_error = quickjs.Value.undefined;
     defer listener_for_error.deinit(ctx);
     var result = quickjs.Value.undefined;
     if (callback.isFunction(ctx)) {
         listener_for_error = callback.dup(ctx);
-        const global_for_event = ctx.getGlobalObject();
-        defer global_for_event.deinit(ctx);
-        const previous_event = global_for_event.getPropertyStr(ctx, "event");
-        defer previous_event.deinit(ctx);
+        if (is_error_event) {
+            const global_for_event = ctx.getGlobalObject();
+            defer global_for_event.deinit(ctx);
+            const previous_event = global_for_event.getPropertyStr(ctx, "event");
+            defer previous_event.deinit(ctx);
 
-        const window_target = global_for_event.getPropertyStr(ctx, "window");
-        defer window_target.deinit(ctx);
-        const is_error_event = std.mem.eql(u8, std.mem.span(event_type), "error");
-        const is_window_like_target = getIntProperty(ctx, target, "_windowHandle") != null;
-        const preserve_legacy_event = is_error_event and is_window_like_target;
-        const is_window_target = !window_target.isException() and window_target.isObject() and target.isStrictEqual(ctx, window_target);
-        const is_window_error_handler = is_window_target and is_error_event;
-        if (!preserve_legacy_event) {
-            setLegacyGlobalEvent(ctx, global_for_event, event);
-        }
+            const window_target = global_for_event.getPropertyStr(ctx, "window");
+            defer window_target.deinit(ctx);
+            const is_window_like_target = getIntProperty(ctx, target, "_windowHandle") != null;
+            const preserve_legacy_event = is_window_like_target;
+            const is_window_target = !window_target.isException() and window_target.isObject() and target.isStrictEqual(ctx, window_target);
+            const is_window_error_handler = is_window_target;
+            if (!preserve_legacy_event) {
+                setLegacyGlobalEvent(ctx, global_for_event, event);
+            }
 
-        const listener_global = callback.getPropertyStr(ctx, "__zigListenerGlobal");
-        defer listener_global.deinit(ctx);
-        var listener_previous_event = quickjs.Value.undefined;
-        defer listener_previous_event.deinit(ctx);
-        const has_listener_global = !listener_global.isException() and listener_global.isObject();
-        if (has_listener_global) {
-            listener_previous_event = listener_global.getPropertyStr(ctx, "event");
-            listener_global.setPropertyStr(ctx, "event", event.dup(ctx)) catch {};
-        }
+            const listener_global = callback.getPropertyStr(ctx, "__zigListenerGlobal");
+            defer listener_global.deinit(ctx);
+            var listener_previous_event = quickjs.Value.undefined;
+            defer listener_previous_event.deinit(ctx);
+            const has_listener_global = !listener_global.isException() and listener_global.isObject();
+            if (has_listener_global) {
+                listener_previous_event = listener_global.getPropertyStr(ctx, "event");
+                listener_global.setPropertyStr(ctx, "event", event.dup(ctx)) catch {};
+            }
 
-        var target_previous_event = quickjs.Value.undefined;
-        defer target_previous_event.deinit(ctx);
-        const set_target_legacy_event = preserve_legacy_event and is_window_target;
-        if (set_target_legacy_event) {
-            target_previous_event = target.getPropertyStr(ctx, "event");
-            target.setPropertyStr(ctx, "event", previous_event.dup(ctx)) catch {};
-        }
+            var target_previous_event = quickjs.Value.undefined;
+            defer target_previous_event.deinit(ctx);
+            const set_target_legacy_event = preserve_legacy_event and is_window_target;
+            if (set_target_legacy_event) {
+                target_previous_event = target.getPropertyStr(ctx, "event");
+                target.setPropertyStr(ctx, "event", previous_event.dup(ctx)) catch {};
+            }
 
-        if (is_window_error_handler) {
-            const message = event.getPropertyStr(ctx, "message");
-            defer message.deinit(ctx);
-            var call_args = [_]quickjs.Value{if (!message.isException() and message.isString()) message.dup(ctx) else quickjs.Value.initStringLen(ctx, "error")};
-            defer call_args[0].deinit(ctx);
-            result = callback.call(ctx, target, &call_args);
-        } else {
-            var call_args = [_]quickjs.Value{event.dup(ctx)};
-            defer call_args[0].deinit(ctx);
-            result = callback.call(ctx, target, &call_args);
-        }
-        if (!preserve_legacy_event) {
-            setLegacyGlobalEvent(ctx, global_for_event, previous_event);
-        }
-        if (result.isException()) {
-            const thrown = ctx.getException();
-            defer thrown.deinit(ctx);
-            if (listener_for_error.isFunction(ctx)) {
-                dispatchListenerErrorEvent(ctx, listener_for_error, thrown);
+            if (is_window_error_handler) {
+                const message = event.getPropertyStr(ctx, "message");
+                defer message.deinit(ctx);
+                var call_args = [_]quickjs.Value{if (!message.isException() and message.isString()) message.dup(ctx) else quickjs.Value.initStringLen(ctx, "error")};
+                defer call_args[0].deinit(ctx);
+                if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_property_invocations += 1;
+                const callback_timing = classProfileDetailEnabled();
+                const callback_start = if (callback_timing) classProfileNowNs() else 0;
+                result = callback.call(ctx, target, &call_args);
+                if (callback_timing) {
+                    class_perf_detail_stats.dispatch_property_callback_ns += classProfileNowNs() - callback_start;
+                }
+            } else {
+                const call_args = [_]quickjs.Value{quickjs.Value.fromCVal(event.cval())};
+                if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_property_invocations += 1;
+                const callback_timing = classProfileDetailEnabled();
+                const callback_start = if (callback_timing) classProfileNowNs() else 0;
+                result = callback.call(ctx, target, &call_args);
+                if (callback_timing) {
+                    class_perf_detail_stats.dispatch_property_callback_ns += classProfileNowNs() - callback_start;
+                }
+            }
+            if (!preserve_legacy_event) {
+                setLegacyGlobalEvent(ctx, global_for_event, previous_event);
+            }
+            if (result.isException()) {
+                const thrown = ctx.getException();
+                defer thrown.deinit(ctx);
+                if (listener_for_error.isFunction(ctx)) {
+                    dispatchListenerErrorEvent(ctx, listener_for_error, thrown);
+                }
+                if (has_listener_global) {
+                    listener_global.setPropertyStr(ctx, "event", listener_previous_event.dup(ctx)) catch {};
+                }
+                if (set_target_legacy_event) {
+                    target.setPropertyStr(ctx, "event", target_previous_event.dup(ctx)) catch {};
+                }
+                result.deinit(ctx);
+                result = quickjs.Value.undefined;
+                return;
             }
             if (has_listener_global) {
                 listener_global.setPropertyStr(ctx, "event", listener_previous_event.dup(ctx)) catch {};
@@ -12296,30 +12685,63 @@ fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, eve
             if (set_target_legacy_event) {
                 target.setPropertyStr(ctx, "event", target_previous_event.dup(ctx)) catch {};
             }
-            result.deinit(ctx);
-            result = quickjs.Value.undefined;
-            return;
-        }
-        if (has_listener_global) {
-            listener_global.setPropertyStr(ctx, "event", listener_previous_event.dup(ctx)) catch {};
-        }
-        if (set_target_legacy_event) {
-            target.setPropertyStr(ctx, "event", target_previous_event.dup(ctx)) catch {};
+        } else {
+            const call_args = [_]quickjs.Value{quickjs.Value.fromCVal(event.cval())};
+            if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_property_invocations += 1;
+            const callback_timing = classProfileDetailEnabled();
+            const callback_start = if (callback_timing) classProfileNowNs() else 0;
+            result = callback.call(ctx, target, &call_args);
+            if (callback_timing) {
+                class_perf_detail_stats.dispatch_property_callback_ns += classProfileNowNs() - callback_start;
+            }
         }
     } else {
         if (!callback.isUndefined() and !callback.isNull()) return;
+        if (no_inline_attr_for_event) {
+            if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_property_skipped_no_inline_doc += 1;
+            if (missing_inline_name) |cache_name| {
+                target.setPropertyStr(ctx, cache_name.ptr, quickjs.Value.initBool(true)) catch {};
+            }
+            return;
+        }
+        if (missing_inline_name) |cache_name| {
+            if (boolProperty(ctx, target, cache_name.ptr)) {
+                if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_property_skipped_inline_cache += 1;
+                return;
+            }
+        }
 
         const handle_i64 = parseValueNodeHandle(ctx, target) orelse return;
         if (handle_i64 <= 0) return;
         const handle: u64 = @intCast(handle_i64);
         if (zig_dom.zig_dom_node_type(handle) != 1) return;
+        if (zig_dom.zig_dom_element_has_attribute(handle, name.ptr, name.len) != 1) {
+            if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_property_inline_attr_miss += 1;
+            if (missing_inline_name) |cache_name| {
+                target.setPropertyStr(ctx, cache_name.ptr, quickjs.Value.initBool(true)) catch {};
+            }
+            return;
+        }
 
         const source_value = elementAttributeValueToJs(ctx, handle, name, null, name);
         defer source_value.deinit(ctx);
-        if (source_value.isException() or source_value.isNull() or source_value.isUndefined()) return;
+        if (source_value.isException() or source_value.isNull() or source_value.isUndefined()) {
+            if (missing_inline_name) |cache_name| {
+                target.setPropertyStr(ctx, cache_name.ptr, quickjs.Value.initBool(true)) catch {};
+            }
+            return;
+        }
         const source = source_value.toCStringLen(ctx) orelse return;
         defer ctx.freeCString(source.ptr);
-        if (source.len == 0) return;
+        if (source.len == 0) {
+            if (missing_inline_name) |cache_name| {
+                target.setPropertyStr(ctx, cache_name.ptr, quickjs.Value.initBool(true)) catch {};
+            }
+            return;
+        }
+        if (missing_inline_name) |cache_name| {
+            target.setPropertyStr(ctx, cache_name.ptr, quickjs.Value.initBool(false)) catch {};
+        }
 
         const source_text = source.ptr[0..source.len];
         if (std.mem.indexOf(u8, source_text, "activated(this)") != null) {
@@ -12336,9 +12758,15 @@ fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, eve
                 const activated = global_for_activated.getPropertyStr(ctx, "activated");
                 defer activated.deinit(ctx);
                 if (!activated.isException() and activated.isFunction(ctx)) {
+                    if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_property_invocations += 1;
                     var activated_args = [_]quickjs.Value{target.dup(ctx)};
                     defer activated_args[0].deinit(ctx);
+                    const callback_timing = classProfileDetailEnabled();
+                    const callback_start = if (callback_timing) classProfileNowNs() else 0;
                     const activated_result = activated.call(ctx, global_for_activated, &activated_args);
+                    if (callback_timing) {
+                        class_perf_detail_stats.dispatch_property_callback_ns += classProfileNowNs() - callback_start;
+                    }
                     defer activated_result.deinit(ctx);
                     if (activated_result.isException()) return error.JSError;
                 }
@@ -12375,9 +12803,14 @@ fn tryDispatchPropertyListener(ctx: *quickjs.Context, target: quickjs.Value, eve
         defer previous_event.deinit(ctx);
         setLegacyGlobalEvent(ctx, global_for_event, event);
 
-        var call_args = [_]quickjs.Value{event.dup(ctx)};
-        defer call_args[0].deinit(ctx);
+        const call_args = [_]quickjs.Value{quickjs.Value.fromCVal(event.cval())};
+        const callback_timing = classProfileDetailEnabled();
+        const callback_start = if (callback_timing) classProfileNowNs() else 0;
         result = inline_handler.call(ctx, target, &call_args);
+        if (classProfileDetailEnabled()) class_perf_detail_stats.dispatch_property_invocations += 1;
+        if (callback_timing) {
+            class_perf_detail_stats.dispatch_property_callback_ns += classProfileNowNs() - callback_start;
+        }
         setLegacyGlobalEvent(ctx, global_for_event, previous_event);
     }
     defer result.deinit(ctx);

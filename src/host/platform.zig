@@ -29,7 +29,6 @@ const NativeTimer = struct {
 var native_timer_ctx: ?*quickjs.Context = null;
 var native_timers: std.ArrayListUnmanaged(NativeTimer) = .empty;
 var native_next_timer_id: i32 = 1;
-var native_timer_debug_fires: u64 = 0;
 var crypto_uuid_counter: u64 = 0;
 var crypto_uuid_state: u64 = 0xA409_3822_299F_31D0;
 var object_url_counter: u64 = 0;
@@ -761,8 +760,8 @@ fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
 fn delayToTimerTurns(delay_ms: f64) u32 {
     // Timers are driven through microtasks, so run multiple turns to
     // approximate browser macrotask ordering for setTimeout(..., 0).
-    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 40;
-    const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 5.0)));
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 4;
+    const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 25.0)));
     return @intCast(@max(1, @min(turns, 10_000)));
 }
 
@@ -811,20 +810,6 @@ fn invokeNativeTimer(ctx: *quickjs.Context, id: i32) quickjs.Value {
 
     const callback = timer.callback.dup(ctx);
     defer callback.deinit(ctx);
-
-    if (std.c.getenv("ZIG_DOM_DEBUG_TIMERS")) |raw| {
-        if (!std.mem.eql(u8, std.mem.span(raw), "0")) {
-            native_timer_debug_fires += 1;
-            if (native_timer_debug_fires <= 40) {
-                std.debug.print(
-                    "[zig-dom timer] fire id={d} kind={s} total={d}\n",
-                    .{ id, if (timer.kind == .interval) "interval" else "timeout", native_timer_debug_fires },
-                );
-            } else if (native_timer_debug_fires == 41) {
-                std.debug.print("[zig-dom timer] ...suppressed...\n", .{});
-            }
-        }
-    }
 
     var call_args = std.ArrayListUnmanaged(quickjs.Value).empty;
     defer {
