@@ -5,10 +5,10 @@ A Zig-backed native DOM implementation with a built-in test runner.
 ## Development
 
 ```sh
-bun run test
-bun run test tests/runner/basic.test.ts
 bun run test basic.test
-bun run test:perf
+bun run test tests/runner/basic.test.ts
+bun run test --root ../youneedawiki src/components/Tree/Tree.test.tsx
+bun run test:perf --root ../youneedawiki src/components/Tree/Tree.test.tsx
 ```
 
 Sample a command on macOS:
@@ -21,7 +21,6 @@ The `test` command runs JavaScript, TypeScript, JSX, and TSX tests through the e
 
 ```sh
 bun run test tests/runner --dom
-bun run test tests/runner
 bun run test tests/runner --dom=.vue,.jsx,.tsx
 ```
 
