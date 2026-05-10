@@ -107,6 +107,7 @@ pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
     try linkWindowProperty(ctx, global, window, "clearInterval");
     try linkWindowProperty(ctx, global, window, "setImmediate");
     try linkWindowProperty(ctx, global, window, "clearImmediate");
+    try linkWindowProperty(ctx, global, window, "MessageChannel");
     try linkWindowProperty(ctx, global, window, "scrollTo");
     try linkWindowProperty(ctx, global, window, "scrollBy");
     try linkWindowProperty(ctx, global, window, "innerWidth");
@@ -394,6 +395,17 @@ fn installTimers(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!voi
     try setFunction(ctx, global, "clearInterval", jsClearInterval, 1);
     try setFunction(ctx, global, "setImmediate", jsSetImmediate, 1);
     try setFunction(ctx, global, "clearImmediate", jsClearImmediate, 1);
+    try installMessageChannel(ctx, global);
+}
+
+fn installMessageChannel(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
+    const current = global.getPropertyStr(ctx, "MessageChannel");
+    defer current.deinit(ctx);
+    if (!current.isUndefined() and !current.isNull()) return;
+
+    const ctor = quickjs.Value.initCFunction2(ctx, jsMessageChannelCtor, "MessageChannel", 0, .constructor_or_func, 0);
+    if (ctor.isException()) return error.JSError;
+    global.setPropertyStr(ctx, "MessageChannel", ctor) catch return error.JSError;
 }
 
 fn setFunctionIfMissing(ctx: *quickjs.Context, object: quickjs.Value, comptime name: [:0]const u8, comptime func: quickjs.cfunc.Func, arg_count: i32) PlatformError!void {
@@ -931,6 +943,78 @@ fn jsSetImmediate(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const 
 
 fn jsClearImmediate(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     return jsClearTimeout(maybe_ctx, quickjs.Value.undefined, args);
+}
+
+fn jsMessagePortPostMessage(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    const peer = this_value.getPropertyStr(ctx, "__zigPeer");
+    defer peer.deinit(ctx);
+    if (peer.isException() or !peer.isObject()) return quickjs.Value.undefined;
+
+    const message = if (args.len > 0) args[0].dup(ctx) else quickjs.Value.undefined;
+    var data = [_]quickjs.Value{ peer.dup(ctx), message };
+    defer {
+        data[0].deinit(ctx);
+        data[1].deinit(ctx);
+    }
+    const deliver = quickjs.Value.initCFunctionData2(ctx, jsMessagePortDeliver, "__zigMessagePortDeliver", 0, 0, &data);
+    if (deliver.isException()) return quickjs.Value.exception;
+    defer deliver.deinit(ctx);
+    if (!enqueueMicrotaskCallback(ctx, deliver)) return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsMessagePortDeliver(
+    maybe_ctx: ?*quickjs.Context,
+    _: quickjs.Value,
+    _: []const quickjs.c.JSValue,
+    _: i32,
+    raw_data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const port = quickjs.Value.fromCVal(raw_data[0]);
+    const message = quickjs.Value.fromCVal(raw_data[1]);
+    const onmessage = port.getPropertyStr(ctx, "onmessage");
+    defer onmessage.deinit(ctx);
+    if (!onmessage.isFunction(ctx)) return quickjs.Value.undefined;
+
+    const event = quickjs.Value.initObject(ctx);
+    if (event.isException()) return event;
+    defer event.deinit(ctx);
+    event.setPropertyStr(ctx, "data", message.dup(ctx)) catch return quickjs.Value.exception;
+    const result = onmessage.call(ctx, port, &.{event});
+    defer result.deinit(ctx);
+    if (result.isException()) return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn createMessagePort(ctx: *quickjs.Context) PlatformError!quickjs.Value {
+    const port = quickjs.Value.initObject(ctx);
+    if (port.isException()) return error.JSError;
+    errdefer port.deinit(ctx);
+    port.setPropertyStr(ctx, "onmessage", quickjs.Value.null) catch return error.JSError;
+    try setFunction(ctx, port, "postMessage", jsMessagePortPostMessage, 1);
+    try setFunction(ctx, port, "start", jsNoop, 0);
+    try setFunction(ctx, port, "close", jsNoop, 0);
+    return port;
+}
+
+fn jsMessageChannelCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const channel = quickjs.Value.initObject(ctx);
+    if (channel.isException()) return channel;
+
+    const port1 = createMessagePort(ctx) catch return quickjs.Value.exception;
+    defer port1.deinit(ctx);
+    const port2 = createMessagePort(ctx) catch return quickjs.Value.exception;
+    defer port2.deinit(ctx);
+
+    port1.setPropertyStr(ctx, "__zigPeer", port2.dup(ctx)) catch return quickjs.Value.exception;
+    port2.setPropertyStr(ctx, "__zigPeer", port1.dup(ctx)) catch return quickjs.Value.exception;
+    channel.setPropertyStr(ctx, "port1", port1.dup(ctx)) catch return quickjs.Value.exception;
+    channel.setPropertyStr(ctx, "port2", port2.dup(ctx)) catch return quickjs.Value.exception;
+    return channel;
 }
 
 pub fn hasPendingNativeTimers() bool {
