@@ -760,7 +760,7 @@ fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
 fn delayToTimerTurns(delay_ms: f64) u32 {
     // Timers are driven through microtasks, so run multiple turns to
     // approximate browser macrotask ordering for setTimeout(..., 0).
-    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 4;
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 15;
     const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 25.0)));
     return @intCast(@max(1, @min(turns, 10_000)));
 }

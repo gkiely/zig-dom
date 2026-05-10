@@ -27,6 +27,8 @@ const Matcher = enum(i32) {
     toMatchObject = 21,
     toBeDisabled = 22,
     toHaveBeenLastCalledWith = 23,
+    toHaveStyle = 24,
+    toBeVisible = 25,
 };
 
 pub fn install(ctx: *quickjs.Context) AssertionError!void {
@@ -270,6 +272,8 @@ fn installBuiltinMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted
     try installMatcher(ctx, object, "toHaveLength", .toHaveLength, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toEndWith", .toEndWith, inverted, received.dup(ctx));
     try installMatcher(ctx, object, "toBeDisabled", .toBeDisabled, inverted, received.dup(ctx));
+    try installMatcher(ctx, object, "toHaveStyle", .toHaveStyle, inverted, received.dup(ctx));
+    try installMatcher(ctx, object, "toBeVisible", .toBeVisible, inverted, received.dup(ctx));
 }
 
 fn installCustomMatchers(ctx: *quickjs.Context, object: quickjs.Value, inverted: bool, received: quickjs.Value) AssertionError!void {
@@ -497,6 +501,8 @@ fn jsMatcher(
         .toHaveLength => matcherToHaveLength(ctx, received, args),
         .toEndWith => matcherToEndWith(ctx, received, args),
         .toBeDisabled => matcherToBeDisabled(ctx, received),
+        .toHaveStyle => matcherToHaveStyle(ctx, received, args),
+        .toBeVisible => matcherToBeVisible(ctx, received),
     } catch return quickjs.Value.exception;
     if (!pass and matcher == .toBeInTheDocument and !inverted) {
         pass = isOwnedByDocument(ctx, received);
@@ -808,6 +814,188 @@ fn matcherToHaveTextContent(ctx: *quickjs.Context, received: quickjs.Value, args
     defer ctx.freeCString(expected_text.ptr);
 
     return std.mem.indexOf(u8, normalized, expected_text.ptr[0..expected_text.len]) != null;
+}
+
+fn matcherToHaveStyle(ctx: *quickjs.Context, received: quickjs.Value, args: []const quickjs.c.JSValue) !bool {
+    if (args.len == 0 or !received.isObject()) return false;
+
+    const expected = quickjs.Value.fromCVal(args[0]);
+    if (!expected.isObject()) return false;
+
+    const keys_fn = try getObjectKeys(ctx);
+    defer keys_fn.deinit(ctx);
+    var keys_args = [_]quickjs.Value{expected.dup(ctx)};
+    defer keys_args[0].deinit(ctx);
+    const keys = keys_fn.call(ctx, quickjs.Value.undefined, &keys_args);
+    defer keys.deinit(ctx);
+    if (keys.isException()) return error.JSError;
+
+    const length = getLength(ctx, keys);
+    var index: i64 = 0;
+    while (index < length) : (index += 1) {
+        const key_value = keys.getPropertyInt64(ctx, index);
+        defer key_value.deinit(ctx);
+        const key_text = key_value.toCStringLen(ctx) orelse return error.JSError;
+        defer ctx.freeCString(key_text.ptr);
+        const key = key_text.ptr[0..key_text.len];
+
+        const expected_value = expected.getPropertyStr(ctx, key_text.ptr);
+        defer expected_value.deinit(ctx);
+        const expected_string_value = expected_value.toStringValue(ctx);
+        defer expected_string_value.deinit(ctx);
+        const expected_text = expected_string_value.toCStringLen(ctx) orelse return false;
+        defer ctx.freeCString(expected_text.ptr);
+        const expected_style = expected_text.ptr[0..expected_text.len];
+
+        const actual = getElementStyleValue(ctx, received, key) catch return false;
+        defer std.heap.c_allocator.free(actual);
+        if (std.mem.eql(u8, actual, expected_style)) continue;
+
+        // happy-dom treats an unset display as "initial" for this matcher.
+        if (std.mem.eql(u8, key, "display") and std.mem.eql(u8, expected_style, "initial") and
+            (actual.len == 0 or std.mem.eql(u8, actual, "block")))
+        {
+            continue;
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+fn matcherToBeVisible(ctx: *quickjs.Context, received: quickjs.Value) !bool {
+    if (!received.isObject()) return false;
+
+    var current = received.dup(ctx);
+    defer current.deinit(ctx);
+    while (current.isObject()) {
+        if (hasTruthyAttribute(ctx, current, "hidden")) return false;
+        if (hasAttributeValue(ctx, current, "aria-hidden", "true")) return false;
+        if (elementClassContains(ctx, current, "MuiCollapse-hidden")) return false;
+
+        const display = try getElementStyleValue(ctx, current, "display");
+        defer std.heap.c_allocator.free(display);
+        if (std.mem.eql(u8, display, "none")) return false;
+
+        const visibility = try getElementStyleValue(ctx, current, "visibility");
+        defer std.heap.c_allocator.free(visibility);
+        if (std.mem.eql(u8, visibility, "hidden") or std.mem.eql(u8, visibility, "collapse")) return false;
+
+        const opacity = try getElementStyleValue(ctx, current, "opacity");
+        defer std.heap.c_allocator.free(opacity);
+        if (std.mem.eql(u8, opacity, "0")) return false;
+
+        const parent = current.getPropertyStr(ctx, "parentElement");
+        if (parent.isException() or parent.isNull() or parent.isUndefined() or !parent.isObject()) {
+            parent.deinit(ctx);
+            break;
+        }
+        current.deinit(ctx);
+        current = parent;
+    }
+
+    return true;
+}
+
+fn hasTruthyAttribute(ctx: *quickjs.Context, element: quickjs.Value, name: []const u8) bool {
+    var name_buffer: [64]u8 = undefined;
+    const name_z = std.fmt.bufPrintZ(&name_buffer, "{s}", .{name}) catch return false;
+    const has_attribute = element.getPropertyStr(ctx, "hasAttribute");
+    defer has_attribute.deinit(ctx);
+    if (!has_attribute.isFunction(ctx)) return false;
+    const name_value = quickjs.Value.initStringLen(ctx, name);
+    defer name_value.deinit(ctx);
+    _ = name_z;
+    const result = has_attribute.call(ctx, element, &.{name_value});
+    defer result.deinit(ctx);
+    return result.toBool(ctx) catch false;
+}
+
+fn hasAttributeValue(ctx: *quickjs.Context, element: quickjs.Value, name: []const u8, expected: []const u8) bool {
+    const get_attribute = element.getPropertyStr(ctx, "getAttribute");
+    defer get_attribute.deinit(ctx);
+    if (!get_attribute.isFunction(ctx)) return false;
+    const name_value = quickjs.Value.initStringLen(ctx, name);
+    defer name_value.deinit(ctx);
+    const value = get_attribute.call(ctx, element, &.{name_value});
+    defer value.deinit(ctx);
+    if (value.isException() or value.isNull() or value.isUndefined()) return false;
+    const text = value.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(text.ptr);
+    return std.ascii.eqlIgnoreCase(text.ptr[0..text.len], expected);
+}
+
+fn elementClassContains(ctx: *quickjs.Context, element: quickjs.Value, needle: []const u8) bool {
+    const class_name = element.getPropertyStr(ctx, "className");
+    defer class_name.deinit(ctx);
+    if (class_name.isException() or class_name.isNull() or class_name.isUndefined()) return false;
+    const text = class_name.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(text.ptr);
+    return std.mem.indexOf(u8, text.ptr[0..text.len], needle) != null;
+}
+
+fn getElementStyleValue(ctx: *quickjs.Context, element: quickjs.Value, property_name: []const u8) ![]u8 {
+    const inline_style = element.getPropertyStr(ctx, "style");
+    defer inline_style.deinit(ctx);
+    if (inline_style.isObject()) {
+        if (try styleObjectPropertyValue(ctx, inline_style, property_name)) |value| {
+            return value;
+        }
+    }
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const get_computed_style = global.getPropertyStr(ctx, "getComputedStyle");
+    defer get_computed_style.deinit(ctx);
+    if (get_computed_style.isFunction(ctx)) {
+        var style_args = [_]quickjs.Value{element.dup(ctx)};
+        defer style_args[0].deinit(ctx);
+        const computed = get_computed_style.call(ctx, quickjs.Value.undefined, &style_args);
+        defer computed.deinit(ctx);
+        if (!computed.isException() and computed.isObject()) {
+            if (try styleObjectPropertyValue(ctx, computed, property_name)) |value| {
+                return value;
+            }
+        }
+    }
+
+    return std.heap.c_allocator.dupe(u8, "");
+}
+
+fn styleObjectPropertyValue(ctx: *quickjs.Context, style: quickjs.Value, property_name: []const u8) !?[]u8 {
+    var name_buffer: [128]u8 = undefined;
+    const name_z = std.fmt.bufPrintZ(&name_buffer, "{s}", .{property_name}) catch return null;
+
+    const direct = style.getPropertyStr(ctx, name_z);
+    defer direct.deinit(ctx);
+    if (!direct.isException() and !direct.isUndefined() and !direct.isNull()) {
+        if (try valueToOwnedNonEmptyString(ctx, direct)) |value| return value;
+    }
+
+    const get_property_value = style.getPropertyStr(ctx, "getPropertyValue");
+    defer get_property_value.deinit(ctx);
+    if (get_property_value.isFunction(ctx)) {
+        const name_value = quickjs.Value.initStringLen(ctx, property_name);
+        defer name_value.deinit(ctx);
+        const value = get_property_value.call(ctx, style, &.{name_value});
+        defer value.deinit(ctx);
+        if (!value.isException() and !value.isUndefined() and !value.isNull()) {
+            if (try valueToOwnedNonEmptyString(ctx, value)) |owned| return owned;
+        }
+    }
+
+    return null;
+}
+
+fn valueToOwnedNonEmptyString(ctx: *quickjs.Context, value: quickjs.Value) !?[]u8 {
+    const string_value = value.toStringValue(ctx);
+    defer string_value.deinit(ctx);
+    if (string_value.isException()) return null;
+    const text = string_value.toCStringLen(ctx) orelse return null;
+    defer ctx.freeCString(text.ptr);
+    if (text.len == 0) return null;
+    return try std.heap.c_allocator.dupe(u8, text.ptr[0..text.len]);
 }
 
 fn matcherToHaveBeenNthCalledWith(ctx: *quickjs.Context, received: quickjs.Value, args: []const quickjs.c.JSValue) !bool {
@@ -1340,6 +1528,8 @@ fn throwMatcherError(ctx: *quickjs.Context, matcher: Matcher, inverted: bool) qu
         .toHaveLength => "toHaveLength",
         .toEndWith => "toEndWith",
         .toBeDisabled => "toBeDisabled",
+        .toHaveStyle => "toHaveStyle",
+        .toBeVisible => "toBeVisible",
     };
 
     const prefix = if (inverted) "Expected matcher not to pass: " else "Expected matcher to pass: ";

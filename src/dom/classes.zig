@@ -2766,6 +2766,7 @@ fn jsStyleGetPropertyValue(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value
         const internal = this_value.getPropertyStr(ctx, "__zigColor");
         if (!internal.isException() and !internal.isUndefined() and !internal.isNull()) return internal;
         internal.deinit(ctx);
+        return quickjs.Value.initStringLen(ctx, "");
     }
     const direct = this_value.getPropertyStr(ctx, name.ptr);
     if (!direct.isException() and !direct.isUndefined() and !direct.isNull()) return direct;
