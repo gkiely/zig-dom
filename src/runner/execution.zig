@@ -1772,7 +1772,6 @@ const ModuleLoaderState = struct {
         if (visited.contains(module_id)) return;
         if (self.profile_enabled) self.profile_import_graph_modules += 1;
         const visited_key = try self.allocator.dupe(u8, module_id);
-        errdefer self.allocator.free(visited_key);
         try visited.put(visited_key, {});
 
         if (builtInModuleSource(module_id) != null or isMockModuleId(module_id)) return;
@@ -4849,23 +4848,76 @@ fn jsNodeFsReadFileSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []co
     return read_fn.call(ctx, quickjs.Value.undefined, &.{ path_value, encoding_value });
 }
 
-fn jsNodeFsWriteFileSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsNodeFsWriteFileSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
-    return throwUnsupportedNodeApi("fs", "writeFileSync", ctx);
+    const allocator = std.heap.c_allocator;
+    const path_arg = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const data_arg = if (args.len > 1) quickjs.Value.fromCVal(args[1]) else quickjs.Value.undefined;
+    const raw_path = valueToOwnedString(allocator, ctx, path_arg, false) catch return quickjs.Value.exception;
+    defer allocator.free(raw_path);
+    const data = valueToOwnedString(allocator, ctx, data_arg, true) catch return quickjs.Value.exception;
+    defer allocator.free(data);
+    const resolved = resolveNodeFsPathAlloc(allocator, ctx, raw_path) catch return quickjs.Value.exception;
+    defer allocator.free(resolved);
+    const path_z = allocator.dupeZ(u8, resolved) catch return quickjs.Value.exception;
+    defer allocator.free(path_z);
+    const file = std.c.fopen(path_z.ptr, "wb") orelse return quickjs.Value.exception;
+    defer _ = std.c.fclose(file);
+    if (data.len > 0 and std.c.fwrite(data.ptr, 1, data.len, file) != data.len) return quickjs.Value.exception;
+    return quickjs.Value.undefined;
 }
 
-fn jsNodeFsMkdirSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsNodeFsMkdirSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
-    return throwUnsupportedNodeApi("fs", "mkdirSync", ctx);
+    const allocator = std.heap.c_allocator;
+    const path_arg = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const raw_path = valueToOwnedString(allocator, ctx, path_arg, false) catch return quickjs.Value.exception;
+    defer allocator.free(raw_path);
+    const resolved = resolveNodeFsPathAlloc(allocator, ctx, raw_path) catch return quickjs.Value.exception;
+    defer allocator.free(resolved);
+    const path_z = allocator.dupeZ(u8, resolved) catch return quickjs.Value.exception;
+    defer allocator.free(path_z);
+    _ = std.c.mkdir(path_z.ptr, 0o755);
+    return quickjs.Value.undefined;
 }
 
-fn jsNodeFsReaddirSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsNodeFsReaddirSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
-    return throwUnsupportedNodeApi("fs", "readdirSync", ctx);
+    const allocator = std.heap.c_allocator;
+    const path_arg = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const raw_path = valueToOwnedString(allocator, ctx, path_arg, false) catch return quickjs.Value.exception;
+    defer allocator.free(raw_path);
+    const resolved = resolveNodeFsPathAlloc(allocator, ctx, raw_path) catch return quickjs.Value.exception;
+    defer allocator.free(resolved);
+    const path_z = allocator.dupeZ(u8, resolved) catch return quickjs.Value.exception;
+    defer allocator.free(path_z);
+
+    const dir = std.c.opendir(path_z.ptr) orelse return quickjs.Value.exception;
+    defer _ = std.c.closedir(dir);
+
+    const out = quickjs.Value.initArray(ctx);
+    if (out.isException()) return out;
+    var index: u32 = 0;
+    while (std.c.readdir(dir)) |entry| {
+        const name = std.mem.sliceTo(&entry.name, 0);
+        if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
+        out.setPropertyUint32(ctx, index, quickjs.Value.initStringLen(ctx, name)) catch return quickjs.Value.exception;
+        index += 1;
+    }
+    return out;
 }
 
-fn jsNodeFsExistsSync(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
-    return quickjs.Value.initBool(false);
+fn jsNodeFsExistsSync(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const allocator = std.heap.c_allocator;
+    const path_arg = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    const raw_path = valueToOwnedString(allocator, ctx, path_arg, false) catch return quickjs.Value.exception;
+    defer allocator.free(raw_path);
+    const resolved = resolveNodeFsPathAlloc(allocator, ctx, raw_path) catch return quickjs.Value.exception;
+    defer allocator.free(resolved);
+    const path_z = allocator.dupeZ(u8, resolved) catch return quickjs.Value.exception;
+    defer allocator.free(path_z);
+    return quickjs.Value.initBool(std.c.access(path_z.ptr, 0) == 0);
 }
 
 fn nodePathJoinLike(ctx: *quickjs.Context, args: []const quickjs.c.JSValue) quickjs.Value {
