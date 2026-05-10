@@ -78,8 +78,8 @@ pub fn library(
     var flags: std.ArrayList([]const u8) = .empty;
     try flags.appendSlice(b.allocator, &.{
         "-D_GNU_SOURCE",
+        "-DNDEBUG",
         "-funsigned-char",
-        "-fno-omit-frame-pointer",
         "-fno-sanitize=undefined",
         "-fno-sanitize-trap=undefined",
         "-fvisibility=hidden",

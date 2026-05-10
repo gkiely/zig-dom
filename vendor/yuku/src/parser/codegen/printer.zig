@@ -31,7 +31,7 @@ pub const Options = struct {
     jsx_runtime: JSXRuntime = .preserve,
 };
 
-pub const JSXRuntime = enum { preserve, classic };
+pub const JSXRuntime = enum { preserve, classic, automatic };
 
 /// A codegen-detected problem in the input tree.
 pub const Diagnostic = struct {
@@ -1939,6 +1939,7 @@ fn Printer(comptime cfg: Config) type {
 
     fn emit_jsx_element(self: *Self, e: ast.JSXElement) Error!void {
         if (self.options.jsx_runtime == .classic) return self.emitJsxElementClassic(e);
+        if (self.options.jsx_runtime == .automatic) return self.emitJsxElementAutomatic(e);
 
         try self.emit(e.opening_element);
         for (self.tree.extra(e.children)) |c| try self.emit(c);
@@ -1969,6 +1970,7 @@ fn Printer(comptime cfg: Config) type {
 
     fn emit_jsx_fragment(self: *Self, f: ast.JSXFragment) Error!void {
         if (self.options.jsx_runtime == .classic) return self.emitJsxFragmentClassic(f);
+        if (self.options.jsx_runtime == .automatic) return self.emitJsxFragmentAutomatic(f);
 
         try self.emit(f.opening_fragment);
         for (self.tree.extra(f.children)) |c| try self.emit(c);
@@ -2046,6 +2048,21 @@ fn Printer(comptime cfg: Config) type {
     fn emitJsxFragmentClassic(self: *Self, f: ast.JSXFragment) Error!void {
         try self.writeStr("React.createElement(React.Fragment, null");
         try self.emitJsxChildrenClassic(f.children);
+        try self.writeByte(')');
+    }
+
+    fn emitJsxElementAutomatic(self: *Self, e: ast.JSXElement) Error!void {
+        const opening = self.tree.data(e.opening_element).jsx_opening_element;
+        try self.writeStr("__zigJsx(");
+        try self.emitJsxTagClassic(opening.name);
+        try self.writeStr(", ");
+        try self.emitJsxPropsAutomatic(opening.attributes, e.children);
+        try self.writeByte(')');
+    }
+
+    fn emitJsxFragmentAutomatic(self: *Self, f: ast.JSXFragment) Error!void {
+        try self.writeStr("__zigJsx(__zigFragment, ");
+        try self.emitJsxPropsAutomatic(.empty, f.children);
         try self.writeByte(')');
     }
 
@@ -2139,6 +2156,76 @@ fn Printer(comptime cfg: Config) type {
         try self.writeByte('}');
     }
 
+    fn emitJsxPropsAutomatic(self: *Self, attrs: IndexRange, children: IndexRange) Error!void {
+        const list = self.tree.extra(attrs);
+        const child_count = self.countJsxChildren(children);
+        var has_spread = false;
+        for (list) |idx| {
+            if (self.tree.data(idx) == .jsx_spread_attribute) {
+                has_spread = true;
+                break;
+            }
+        }
+
+        if (!has_spread) {
+            try self.writeByte('{');
+            var first = true;
+            for (list) |idx| {
+                if (self.tree.data(idx) != .jsx_attribute) continue;
+                if (!first) try self.writeStr(", ");
+                try self.emitJsxPropClassic(idx);
+                first = false;
+            }
+            if (child_count > 0) {
+                if (!first) try self.writeStr(", ");
+                try self.writeStr("children: ");
+                try self.emitJsxChildrenValueAutomatic(children, child_count);
+            }
+            try self.writeByte('}');
+            return;
+        }
+
+        try self.writeStr("Object.assign({}, ");
+        var first = true;
+        var object_open = false;
+        for (list) |idx| {
+            switch (self.tree.data(idx)) {
+                .jsx_spread_attribute => |a| {
+                    if (object_open) {
+                        try self.writeByte('}');
+                        object_open = false;
+                        first = false;
+                    }
+                    if (!first) try self.writeStr(", ");
+                    try self.emit(a.argument);
+                    first = false;
+                },
+                .jsx_attribute => {
+                    if (!object_open) {
+                        if (!first) try self.writeStr(", ");
+                        try self.writeByte('{');
+                        object_open = true;
+                    } else {
+                        try self.writeStr(", ");
+                    }
+                    try self.emitJsxPropClassic(idx);
+                },
+                else => {},
+            }
+        }
+        if (object_open) {
+            try self.writeByte('}');
+            first = false;
+        }
+        if (child_count > 0) {
+            if (!first) try self.writeStr(", ");
+            try self.writeStr("{children: ");
+            try self.emitJsxChildrenValueAutomatic(children, child_count);
+            try self.writeByte('}');
+        }
+        try self.writeByte(')');
+    }
+
     fn emitJsxPropClassic(self: *Self, idx: NodeIndex) Error!void {
         const attr = self.tree.data(idx).jsx_attribute;
         try self.emitJsxPropNameClassic(attr.name);
@@ -2200,6 +2287,52 @@ fn Printer(comptime cfg: Config) type {
                 else => {},
             }
         }
+    }
+
+    fn countJsxChildren(self: *Self, children: IndexRange) usize {
+        var count: usize = 0;
+        for (self.tree.extra(children)) |idx| {
+            switch (self.tree.data(idx)) {
+                .jsx_text => |text| {
+                    if (!isAllAsciiWhitespace(self.tree.string(text.value))) count += 1;
+                },
+                .jsx_expression_container => |c| {
+                    if (self.tree.data(c.expression) != .jsx_empty_expression) count += 1;
+                },
+                .jsx_element, .jsx_fragment, .jsx_spread_child => count += 1,
+                else => {},
+            }
+        }
+        return count;
+    }
+
+    fn emitJsxChildrenValueAutomatic(self: *Self, children: IndexRange, child_count: usize) Error!void {
+        if (child_count != 1) try self.writeByte('[');
+        var emitted: usize = 0;
+        for (self.tree.extra(children)) |idx| {
+            if (emitted > 0) try self.writeStr(", ");
+            switch (self.tree.data(idx)) {
+                .jsx_text => |text| {
+                    const raw_text = self.tree.string(text.value);
+                    if (isAllAsciiWhitespace(raw_text)) continue;
+                    const decoded = try decodeJsxTextEntities(self.arena.allocator(), raw_text);
+                    try self.emitStringSliceLit(decoded);
+                },
+                .jsx_expression_container => |c| {
+                    if (self.tree.data(c.expression) == .jsx_empty_expression) continue;
+                    try self.emit(c.expression);
+                },
+                .jsx_element => |e| try self.emitJsxElementAutomatic(e),
+                .jsx_fragment => |f| try self.emitJsxFragmentAutomatic(f),
+                .jsx_spread_child => |c| {
+                    try self.writeStr("...");
+                    try self.emit(c.expression);
+                },
+                else => continue,
+            }
+            emitted += 1;
+        }
+        if (child_count != 1) try self.writeByte(']');
     }
     };
 }

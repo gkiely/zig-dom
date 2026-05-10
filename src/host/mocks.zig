@@ -71,6 +71,7 @@ pub const HostMocks = struct {
     mock_class_id: quickjs.ClassId = .invalid,
     on_load_hooks: std.ArrayList(OnLoadHook) = .empty,
     mock_states: std.ArrayList(*MockState) = .empty,
+    retired_mock_states: std.ArrayList(*MockState) = .empty,
     mock_module_sources: std.StringHashMap([]u8),
 
     pub fn init(allocator: Allocator, rt: *quickjs.Runtime, ctx: *quickjs.Context) HostMocksError!*HostMocks {
@@ -97,7 +98,12 @@ pub const HostMocks = struct {
             state.deinit(self.rt);
             self.allocator.destroy(state);
         }
+        for (self.retired_mock_states.items) |state| {
+            state.deinit(self.rt);
+            self.allocator.destroy(state);
+        }
         self.mock_states.deinit(self.allocator);
+        self.retired_mock_states.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -164,6 +170,7 @@ pub const HostMocks = struct {
                 result.deinit(ctx);
                 result = awaited;
             }
+            if (result.isUndefined() or result.isNull()) continue;
 
             const contents_value = result.getPropertyStr(ctx, "contents");
             defer contents_value.deinit(ctx);
@@ -198,7 +205,9 @@ pub const HostMocks = struct {
         self.on_load_hooks.deinit(self.allocator);
         self.mock_module_sources.deinit();
         for (self.mock_states.items) |state| self.allocator.destroy(state);
+        for (self.retired_mock_states.items) |state| self.allocator.destroy(state);
         self.mock_states.deinit(self.allocator);
+        self.retired_mock_states.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -209,6 +218,18 @@ pub const HostMocks = struct {
 
     pub fn clearMockStates(self: *HostMocks) void {
         for (self.mock_states.items) |state| state.deinit(self.rt);
+        for (self.retired_mock_states.items) |state| state.deinit(self.rt);
+    }
+
+    fn retireMockStatesFrom(self: *HostMocks, start_index: usize) void {
+        if (start_index >= self.mock_states.items.len) return;
+
+        const to_retire = self.mock_states.items[start_index..];
+        self.retired_mock_states.ensureUnusedCapacity(self.allocator, to_retire.len) catch return;
+        for (to_retire) |state| {
+            self.retired_mock_states.appendAssumeCapacity(state);
+        }
+        self.mock_states.shrinkRetainingCapacity(start_index);
     }
 
     pub fn clearMockModuleSources(self: *HostMocks) void {
@@ -764,6 +785,7 @@ fn jsRestoreSpiesSince(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []c
         if (!state.mock_function.isObject()) continue;
         restoreMockState(ctx, state, state.mock_function) catch return quickjs.Value.exception;
     }
+    mocks.retireMockStatesFrom(start_index);
 
     return quickjs.Value.undefined;
 }
@@ -962,6 +984,7 @@ fn jsApplyOnLoad(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const q
         if (result.isPromise()) {
             result = awaitPromise(ctx, mocks.rt, result) catch return quickjs.Value.exception;
         }
+        if (result.isUndefined() or result.isNull()) continue;
         const contents = result.getPropertyStr(ctx, "contents");
         defer contents.deinit(ctx);
         if (!contents.isUndefined() and !contents.isNull()) return result.dup(ctx);

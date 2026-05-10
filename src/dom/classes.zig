@@ -28,6 +28,18 @@ const ClassPerfStats = struct {
     bounding_rect_ns: i128 = 0,
     focus_calls: u64 = 0,
     focus_ns: i128 = 0,
+    parse_handle_calls: u64 = 0,
+    parse_handle_ns: i128 = 0,
+    wrap_node_calls: u64 = 0,
+    wrap_node_ns: i128 = 0,
+    style_get_calls: u64 = 0,
+    style_get_ns: i128 = 0,
+    style_set_calls: u64 = 0,
+    style_set_ns: i128 = 0,
+    add_event_listener_calls: u64 = 0,
+    add_event_listener_ns: i128 = 0,
+    remove_event_listener_calls: u64 = 0,
+    remove_event_listener_ns: i128 = 0,
 };
 
 const ClassPerfDetailStats = struct {
@@ -60,15 +72,23 @@ const ClassPerfDetailStats = struct {
 
 var class_perf_stats = ClassPerfStats{};
 var class_perf_detail_stats = ClassPerfDetailStats{};
+var class_profile_enabled: ?bool = null;
+var class_profile_detail_enabled: ?bool = null;
 
 fn classProfileEnabled() bool {
-    const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM") orelse return false;
-    return !std.mem.eql(u8, std.mem.span(raw), "0");
+    if (class_profile_enabled) |enabled| return enabled;
+    const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM");
+    const enabled = if (raw) |value| !std.mem.eql(u8, std.mem.span(value), "0") else false;
+    class_profile_enabled = enabled;
+    return enabled;
 }
 
 fn classProfileDetailEnabled() bool {
-    const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM_DETAIL") orelse return false;
-    return !std.mem.eql(u8, std.mem.span(raw), "0");
+    if (class_profile_detail_enabled) |enabled| return enabled;
+    const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM_DETAIL");
+    const enabled = if (raw) |value| !std.mem.eql(u8, std.mem.span(value), "0") else false;
+    class_profile_detail_enabled = enabled;
+    return enabled;
 }
 
 fn classProfileNowNs() i128 {
@@ -94,6 +114,32 @@ fn printClassPerfStats() void {
             @as(f64, @floatFromInt(class_perf_stats.focus_ns)) / 1_000_000.0,
         },
     );
+    if (classProfileDetailEnabled()) {
+        std.debug.print(
+            "[zig-dom class profile wrappers] parse_handle={d}/{d:.3}ms wrap_node={d}/{d:.3}ms style_get={d}/{d:.3}ms style_set={d}/{d:.3}ms\n",
+            .{
+                class_perf_stats.parse_handle_calls,
+                @as(f64, @floatFromInt(class_perf_stats.parse_handle_ns)) / 1_000_000.0,
+                class_perf_stats.wrap_node_calls,
+                @as(f64, @floatFromInt(class_perf_stats.wrap_node_ns)) / 1_000_000.0,
+                class_perf_stats.style_get_calls,
+                @as(f64, @floatFromInt(class_perf_stats.style_get_ns)) / 1_000_000.0,
+                class_perf_stats.style_set_calls,
+                @as(f64, @floatFromInt(class_perf_stats.style_set_ns)) / 1_000_000.0,
+            },
+        );
+        if (classProfileDetailEnabled()) {
+            std.debug.print(
+                "[zig-dom class profile listeners] add={d}/{d:.3}ms remove={d}/{d:.3}ms\n",
+                .{
+                    class_perf_stats.add_event_listener_calls,
+                    @as(f64, @floatFromInt(class_perf_stats.add_event_listener_ns)) / 1_000_000.0,
+                    class_perf_stats.remove_event_listener_calls,
+                    @as(f64, @floatFromInt(class_perf_stats.remove_event_listener_ns)) / 1_000_000.0,
+                },
+            );
+        }
+    }
     if (classProfileDetailEnabled()) {
         std.debug.print(
             "[zig-dom class profile detail] events(click={d} input={d} change={d} focus={d} blur={d} submit={d} other={d}) path(avg={d:.2} max={d}) listeners(calls={d} invokes={d} cb_ms={d:.3}) property(calls={d} invokes={d} cb_ms={d:.3} skip_no_handlers={d} skip_no_inline_doc={d} skip_inline_cache={d} attr_miss={d}) inline_doc(cache_hit={d} cache_miss={d} queries={d}) computed_style(default={d} cache_hit={d} cache_miss={d})\n",
@@ -269,6 +315,7 @@ const DocumentCallbacks = struct {
     pub const defaultViewGet = jsDocumentDefaultViewGet;
     pub const implementationGet = jsDocumentImplementationGet;
     pub const contentTypeGet = jsDocumentContentTypeGet;
+    pub const styleSheetsGet = jsDocumentStyleSheetsGet;
     pub const createElement = jsDocumentCreateElement;
     pub const createElementNS = jsDocumentCreateElementNS;
     pub const createAttribute = jsDocumentCreateAttribute;
@@ -691,8 +738,14 @@ fn installNativeConstructors(ctx: *quickjs.Context, global: quickjs.Value) DomCl
     xhr_proto.setPrototype(ctx, event_target_proto) catch return error.PropertyAccessFailed;
     const input_event_proto = try installConstructor(ctx, global, "InputEvent", jsConstructInputEvent);
     input_event_proto.setPrototype(ctx, ui_event_proto) catch return error.PropertyAccessFailed;
+    const text_event_proto = try installConstructor(ctx, global, "TextEvent", jsConstructTextEvent);
+    text_event_proto.setPrototype(ctx, ui_event_proto) catch return error.PropertyAccessFailed;
     const composition_event_proto = try installConstructor(ctx, global, "CompositionEvent", jsConstructCompositionEvent);
     composition_event_proto.setPrototype(ctx, ui_event_proto) catch return error.PropertyAccessFailed;
+    const animation_event_proto = try installConstructor(ctx, global, "AnimationEvent", jsConstructAnimationEvent);
+    animation_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
+    const transition_event_proto = try installConstructor(ctx, global, "TransitionEvent", jsConstructTransitionEvent);
+    transition_event_proto.setPrototype(ctx, event_proto) catch return error.PropertyAccessFailed;
     const custom_elements_proto = try installConstructor(ctx, global, "CustomElementRegistry", jsConstructPlain);
     defer custom_elements_proto.deinit(ctx);
     const dom_rect_proto = try installConstructor(ctx, global, "DOMRect", jsConstructDOMRect);
@@ -1002,6 +1055,7 @@ fn installElementSlice(ctx: *quickjs.Context, global: quickjs.Value) DomClassesE
     try installGetter(ctx, element_proto, "relList", jsElementRelListGet);
     try installGetter(ctx, element_proto, "sandbox", jsElementSandboxTokenListGet);
     try installGetter(ctx, element_proto, "sizes", jsElementSizesTokenListGet);
+    try installGetter(ctx, element_proto, "sheet", jsElementSheetGet);
     try installElementUnscopables(ctx, global, element_proto);
     try installDocumentSlice(ctx, global);
 }
@@ -1674,10 +1728,28 @@ fn jsConstructInputEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     return createEventObject(ctx, this_value, args, .input);
 }
 
+fn jsConstructTextEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return createEventObject(ctx, this_value, args, .text);
+}
+
 fn jsConstructCompositionEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     const args: []const quickjs.Value = @ptrCast(raw_args);
     return createEventObject(ctx, this_value, args, .composition);
+}
+
+fn jsConstructAnimationEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return createEventObject(ctx, this_value, args, .animation);
+}
+
+fn jsConstructTransitionEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    return createEventObject(ctx, this_value, args, .transition);
 }
 
 fn jsEventPreventDefault(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []const c.JSValue) quickjs.Value {
@@ -1970,7 +2042,7 @@ fn jsKeyboardEventInitKeyboardEvent(ctx_opt: ?*quickjs.Context, this_value: quic
     return quickjs.Value.undefined;
 }
 
-const EventKind = enum { event, custom, submit_event, ui, focus, mouse, wheel, keyboard, error_event, input, composition };
+const EventKind = enum { event, custom, submit_event, ui, focus, mouse, wheel, keyboard, error_event, input, text, composition, animation, transition };
 
 fn eventTimeStampNowMs(ctx: *quickjs.Context) f64 {
     const global = ctx.getGlobalObject();
@@ -2025,7 +2097,7 @@ fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []
     obj.setPropertyStr(ctx, "eventPhase", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "isTrusted", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
     obj.setPropertyStr(ctx, "defaultPrevented", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
-    if (kind == .ui or kind == .focus or kind == .mouse or kind == .wheel or kind == .keyboard or kind == .input or kind == .composition) {
+    if (kind == .ui or kind == .focus or kind == .mouse or kind == .wheel or kind == .keyboard or kind == .input or kind == .text or kind == .composition) {
         const view = optionValueOrNull(ctx, args, "view");
         if (!view.isNull() and !view.isObject()) {
             view.deinit(ctx);
@@ -2085,8 +2157,21 @@ fn createEventObject(ctx: *quickjs.Context, constructor: quickjs.Value, args: []
         obj.setPropertyStr(ctx, "data", optionValueOrNull(ctx, args, "data")) catch return quickjs.Value.exception;
         obj.setPropertyStr(ctx, "inputType", optionString(ctx, args, "inputType", "")) catch return quickjs.Value.exception;
     }
+    if (kind == .text) {
+        obj.setPropertyStr(ctx, "data", optionString(ctx, args, "data", "")) catch return quickjs.Value.exception;
+    }
     if (kind == .composition) {
         obj.setPropertyStr(ctx, "data", optionString(ctx, args, "data", "")) catch return quickjs.Value.exception;
+    }
+    if (kind == .animation) {
+        obj.setPropertyStr(ctx, "animationName", optionString(ctx, args, "animationName", "")) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "elapsedTime", quickjs.Value.initFloat64(optionNumber(ctx, args, "elapsedTime"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "pseudoElement", optionString(ctx, args, "pseudoElement", "")) catch return quickjs.Value.exception;
+    }
+    if (kind == .transition) {
+        obj.setPropertyStr(ctx, "propertyName", optionString(ctx, args, "propertyName", "")) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "elapsedTime", quickjs.Value.initFloat64(optionNumber(ctx, args, "elapsedTime"))) catch return quickjs.Value.exception;
+        obj.setPropertyStr(ctx, "pseudoElement", optionString(ctx, args, "pseudoElement", "")) catch return quickjs.Value.exception;
     }
     return obj;
 }
@@ -2132,24 +2217,42 @@ fn ensureArrayProperty(ctx: *quickjs.Context, object: quickjs.Value, name: [*:0]
     return value;
 }
 
+fn sharedEmptyArray(ctx: *quickjs.Context, name: [*:0]const u8) ?quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    return ensureArrayProperty(ctx, global, name);
+}
+
 fn mutationObserverRegistry(ctx: *quickjs.Context) ?quickjs.Value {
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     return ensureArrayProperty(ctx, global, "__zigMutationObservers");
 }
 
+fn existingMutationObserverRegistry(ctx: *quickjs.Context) ?quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const registry = global.getPropertyStr(ctx, "__zigMutationObservers");
+    if (registry.isException() or !registry.isObject()) {
+        registry.deinit(ctx);
+        return null;
+    }
+    return registry;
+}
+
+fn hasExistingMutationObservers(ctx: *quickjs.Context) bool {
+    const registry = existingMutationObserverRegistry(ctx) orelse return false;
+    defer registry.deinit(ctx);
+    return arrayLength(ctx, registry) > 0;
+}
+
 fn observationMatchesTarget(ctx: *quickjs.Context, observation_target: quickjs.Value, mutation_target: quickjs.Value, subtree: bool) bool {
     if (observation_target.isStrictEqual(ctx, mutation_target)) return true;
     if (!subtree) return false;
-    const contains = observation_target.getPropertyStr(ctx, "contains");
-    defer contains.deinit(ctx);
-    if (!contains.isFunction(ctx)) return false;
-    var args = [_]quickjs.Value{mutation_target.dup(ctx)};
-    defer args[0].deinit(ctx);
-    const result = contains.call(ctx, observation_target, &args);
-    defer result.deinit(ctx);
-    if (result.isException()) return false;
-    return result.toBool(ctx) catch false;
+    const observation_handle_i64 = parseValueNodeHandle(ctx, observation_target) orelse return false;
+    const mutation_handle_i64 = parseValueNodeHandle(ctx, mutation_target) orelse return false;
+    if (observation_handle_i64 <= 0 or mutation_handle_i64 <= 0) return false;
+    return zig_dom.zig_dom_node_contains(@intCast(observation_handle_i64), @intCast(mutation_handle_i64)) == 1;
 }
 
 fn mutationObserverTakeRecordsInternal(ctx: *quickjs.Context, observer: quickjs.Value) quickjs.Value {
@@ -2171,15 +2274,9 @@ fn mutationObserverTakeRecordsInternal(ctx: *quickjs.Context, observer: quickjs.
     return records;
 }
 
-fn jsMutationObserverFlush(
-    maybe_ctx: ?*quickjs.Context,
-    _: quickjs.Value,
-    _: []const c.JSValue,
-    _: i32,
-    data: [*c]c.JSValue,
-) quickjs.Value {
-    const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const observer = quickjs.Value.fromCVal(data[0]);
+fn runMutationObserverFlushJob(ctx: *quickjs.Context, args: []const quickjs.Value) quickjs.Value {
+    if (args.len == 0) return quickjs.Value.undefined;
+    const observer = args[0];
     observer.setPropertyStr(ctx, "__zigObserverScheduled", quickjs.Value.initBool(false)) catch return quickjs.Value.exception;
 
     const callback = observer.getPropertyStr(ctx, "__zigObserverCallback");
@@ -2209,29 +2306,11 @@ fn scheduleMutationObserverFlush(ctx: *quickjs.Context, observer: quickjs.Value)
 
     observer.setPropertyStr(ctx, "__zigObserverScheduled", quickjs.Value.initBool(true)) catch return;
 
-    const global = ctx.getGlobalObject();
-    defer global.deinit(ctx);
-    const queue_microtask = global.getPropertyStr(ctx, "queueMicrotask");
-    defer queue_microtask.deinit(ctx);
-    if (!queue_microtask.isFunction(ctx)) {
+    var args = [_]quickjs.Value{observer.dup(ctx)};
+    defer args[0].deinit(ctx);
+    ctx.enqueueJob(runMutationObserverFlushJob, &args) catch {
         observer.setPropertyStr(ctx, "__zigObserverScheduled", quickjs.Value.initBool(false)) catch {};
-        return;
-    }
-
-    var data = [_]quickjs.Value{observer.dup(ctx)};
-    defer data[0].deinit(ctx);
-    const flush = quickjs.Value.initCFunctionData2(ctx, jsMutationObserverFlush, "__zigMutationObserverFlush", 0, 0, &data);
-    if (flush.isException()) {
-        observer.setPropertyStr(ctx, "__zigObserverScheduled", quickjs.Value.initBool(false)) catch {};
-        return;
-    }
-    defer flush.deinit(ctx);
-
-    const result = queue_microtask.call(ctx, global, &.{flush});
-    defer result.deinit(ctx);
-    if (result.isException()) {
-        observer.setPropertyStr(ctx, "__zigObserverScheduled", quickjs.Value.initBool(false)) catch {};
-    }
+    };
 }
 
 fn queueMutationRecord(
@@ -2245,7 +2324,7 @@ fn queueMutationRecord(
         if (!std.mem.eql(u8, std.mem.span(raw), "0")) return;
     }
 
-    const registry = mutationObserverRegistry(ctx) orelse return;
+    const registry = existingMutationObserverRegistry(ctx) orelse return;
     defer registry.deinit(ctx);
 
     const observer_count = arrayLength(ctx, registry);
@@ -2307,6 +2386,14 @@ fn queueMutationRecord(
         };
         record.setPropertyStr(ctx, "type", quickjs.Value.initStringLen(ctx, type_text)) catch continue;
         record.setPropertyStr(ctx, "target", mutation_target.dup(ctx)) catch continue;
+
+        const added_nodes = sharedEmptyArray(ctx, "__zigEmptyAddedNodes") orelse continue;
+        defer added_nodes.deinit(ctx);
+        record.setPropertyStr(ctx, "addedNodes", added_nodes.dup(ctx)) catch continue;
+
+        const removed_nodes = sharedEmptyArray(ctx, "__zigEmptyRemovedNodes") orelse continue;
+        defer removed_nodes.deinit(ctx);
+        record.setPropertyStr(ctx, "removedNodes", removed_nodes.dup(ctx)) catch continue;
 
         if (kind == .attributes) {
             const attr = attribute_name orelse "";
@@ -4292,6 +4379,114 @@ fn jsElementClassListGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) 
     return createDOMTokenList(ctx, this_value, "class", "__zigClassList");
 }
 
+fn jsDocumentStyleSheetsGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const selector = quickjs.Value.initStringLen(ctx, "style");
+    defer selector.deinit(ctx);
+    const styles = jsDocumentQuerySelectorAll(ctx, this_value, @ptrCast(&[_]quickjs.Value{selector}));
+    defer styles.deinit(ctx);
+    if (styles.isException()) return quickjs.Value.exception;
+
+    const out = quickjs.Value.initArray(ctx);
+    if (out.isException()) return out;
+
+    const length = styles.getLength(ctx) catch 0;
+    var index: u32 = 0;
+    while (index < length) : (index += 1) {
+        const style = styles.getPropertyUint32(ctx, index);
+        defer style.deinit(ctx);
+        if (!style.isObject()) continue;
+        const sheet = jsElementSheetGet(ctx, style);
+        defer sheet.deinit(ctx);
+        if (sheet.isException() or !sheet.isObject()) continue;
+        out.setPropertyUint32(ctx, index, sheet.dup(ctx)) catch {
+            out.deinit(ctx);
+            return quickjs.Value.exception;
+        };
+    }
+
+    return out;
+}
+
+fn jsElementSheetGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const local_name = jsElementLocalNameGet(ctx, this_value);
+    defer local_name.deinit(ctx);
+    if (local_name.isException()) return quickjs.Value.exception;
+    const local_text = local_name.toCStringLen(ctx) orelse return quickjs.Value.null;
+    defer ctx.freeCString(local_text.ptr);
+    if (!std.mem.eql(u8, local_text.ptr[0..local_text.len], "style")) return quickjs.Value.null;
+
+    var existing = this_value.getPropertyStr(ctx, "__zigStyleSheet");
+    if (!existing.isException() and existing.isObject()) return existing;
+    existing.deinit(ctx);
+
+    const sheet = quickjs.Value.initObject(ctx);
+    if (sheet.isException()) return sheet;
+    const rules = quickjs.Value.initArray(ctx);
+    if (rules.isException()) {
+        sheet.deinit(ctx);
+        return quickjs.Value.exception;
+    }
+    sheet.setPropertyStr(ctx, "ownerNode", this_value.dup(ctx)) catch {
+        rules.deinit(ctx);
+        sheet.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    sheet.setPropertyStr(ctx, "cssRules", rules) catch {
+        sheet.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    installMethod(ctx, sheet, "insertRule", jsStyleSheetInsertRule, 2) catch {
+        sheet.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    installMethod(ctx, sheet, "deleteRule", jsStyleSheetDeleteRule, 1) catch {
+        sheet.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    this_value.setPropertyStr(ctx, "__zigStyleSheet", sheet.dup(ctx)) catch {
+        sheet.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    return sheet;
+}
+
+fn jsStyleSheetInsertRule(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const rule_text = if (raw_args.len >= 1) quickjs.Value.fromCVal(raw_args[0]).toStringValue(ctx) else quickjs.Value.initStringLen(ctx, "");
+    defer rule_text.deinit(ctx);
+    if (rule_text.isException()) return quickjs.Value.exception;
+
+    const rules = this_value.getPropertyStr(ctx, "cssRules");
+    defer rules.deinit(ctx);
+    if (rules.isException() or !rules.isObject()) return quickjs.Value.exception;
+    const length: u32 = @intCast(rules.getLength(ctx) catch 0);
+    const index: u32 = if (raw_args.len >= 2 and !quickjs.Value.fromCVal(raw_args[1]).isUndefined()) @min(@as(u32, @intCast(quickjs.Value.fromCVal(raw_args[1]).toInt32(ctx) catch @as(i32, @intCast(length)))), length) else length;
+
+    const rule = quickjs.Value.initObject(ctx);
+    if (rule.isException()) return rule;
+    rule.setPropertyStr(ctx, "cssText", rule_text.dup(ctx)) catch {
+        rule.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    rules.setPropertyUint32(ctx, index, rule) catch return quickjs.Value.exception;
+    return quickjs.Value.initInt32(@intCast(index));
+}
+
+fn jsStyleSheetDeleteRule(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const index: u32 = if (raw_args.len >= 1) @intCast(@max(quickjs.Value.fromCVal(raw_args[0]).toInt32(ctx) catch 0, 0)) else 0;
+    const rules = this_value.getPropertyStr(ctx, "cssRules");
+    defer rules.deinit(ctx);
+    if (!rules.isException() and rules.isObject()) {
+        const atom = quickjs.Atom.initUint32(ctx, index);
+        defer atom.deinit(ctx);
+        _ = c.JS_DeleteProperty(ctx.cval(), rules.cval(), @intFromEnum(atom), 0);
+    }
+    return quickjs.Value.undefined;
+}
+
 fn createDOMTokenList(ctx: *quickjs.Context, element: quickjs.Value, attr_name: []const u8, cache_name: [*:0]const u8) quickjs.Value {
     var existing = element.getPropertyStr(ctx, cache_name);
     if (!existing.isException() and existing.isObject()) {
@@ -4449,6 +4644,12 @@ fn jsElementOuterHtmlGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) 
 
 fn jsElementStyleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const profile = classProfileDetailEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.style_get_calls += 1;
+        class_perf_stats.style_get_ns += classProfileNowNs() - start;
+    };
     _ = parseThisHandle(ctx, this_value, "style") orelse return quickjs.Value.exception;
 
     const existing = this_value.getPropertyStr(ctx, "__zigStyle");
@@ -4577,6 +4778,12 @@ fn updateElementStyleAttribute(ctx: *quickjs.Context, element: quickjs.Value, pr
 
 fn jsStyleSetProperty(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const profile = classProfileDetailEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.style_set_calls += 1;
+        class_perf_stats.style_set_ns += classProfileNowNs() - start;
+    };
     const args: []const quickjs.Value = @ptrCast(raw_args);
     const name = parseStringArg(ctx, args, 0, "style.setProperty") orelse return quickjs.Value.exception;
     defer ctx.freeCString(name.ptr);
@@ -4762,7 +4969,13 @@ fn jsElementSetAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     defer ctx.freeCString(value.ptr);
     const attr_name_value = quickjs.Value.initStringLen(ctx, attr_name);
     defer attr_name_value.deinit(ctx);
-    const old_value = jsElementGetAttribute(ctx, this_value, @ptrCast(&[_]quickjs.Value{attr_name_value}));
+    const attr_changed = this_value.getPropertyStr(ctx, "attributeChangedCallback");
+    defer attr_changed.deinit(ctx);
+    const needs_old_value = attr_changed.isFunction(ctx) or hasExistingMutationObservers(ctx);
+    const old_value = if (needs_old_value)
+        jsElementGetAttribute(ctx, this_value, @ptrCast(&[_]quickjs.Value{attr_name_value}))
+    else
+        quickjs.Value.null;
     defer old_value.deinit(ctx);
     const status = zig_dom.zig_dom_element_set_attribute(this_handle, attr_name.ptr, attr_name.len, value.ptr, value.len);
     if (status != 0) return throwStatus(ctx, "setAttribute", status);
@@ -4799,8 +5012,6 @@ fn jsElementSetAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
         if (document.isObject()) syncNamedWindowPropertiesForDocument(ctx, document);
     }
     queueMutationRecord(ctx, this_value, .attributes, attr_name, old_value);
-    const attr_changed = this_value.getPropertyStr(ctx, "attributeChangedCallback");
-    defer attr_changed.deinit(ctx);
     if (attr_changed.isFunction(ctx)) {
         const name_value = quickjs.Value.initStringLen(ctx, attr_name);
         defer name_value.deinit(ctx);
@@ -8566,6 +8777,12 @@ fn simpleIdSelector(selector: []const u8) ?[]const u8 {
 
 fn jsEventTargetAddEventListener(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const profile = classProfileDetailEnabled();
+    const profile_start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.add_event_listener_calls += 1;
+        class_perf_stats.add_event_listener_ns += classProfileNowNs() - profile_start;
+    };
     const args: []const quickjs.Value = @ptrCast(raw_args);
     if (args.len < 2 or args[1].isUndefined() or args[1].isNull()) return quickjs.Value.undefined;
     const type_arg = parseStringArg(ctx, args, 0, "addEventListener") orelse return quickjs.Value.exception;
@@ -8616,6 +8833,12 @@ fn jsEventTargetAddEventListener(ctx_opt: ?*quickjs.Context, this_value: quickjs
 
 fn jsEventTargetRemoveEventListener(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
     const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const profile = classProfileDetailEnabled();
+    const profile_start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.remove_event_listener_calls += 1;
+        class_perf_stats.remove_event_listener_ns += classProfileNowNs() - profile_start;
+    };
     const args: []const quickjs.Value = @ptrCast(raw_args);
     if (args.len < 2) return quickjs.Value.undefined;
     const type_arg = parseStringArg(ctx, args, 0, "removeEventListener") orelse return quickjs.Value.exception;
@@ -8670,13 +8893,7 @@ fn jsEventTargetDispatchEvent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     const event_type_flag = std.fmt.bufPrintZ(&event_type_flag_buf, "__zigHasEventType_{s}", .{type_arg.ptr[0..type_arg.len]}) catch null;
     if (classProfileDetailEnabled()) {
         const event_type = type_arg.ptr[0..type_arg.len];
-        if (std.mem.eql(u8, event_type, "click")) class_perf_detail_stats.dispatch_click_calls += 1
-        else if (std.mem.eql(u8, event_type, "input")) class_perf_detail_stats.dispatch_input_calls += 1
-        else if (std.mem.eql(u8, event_type, "change")) class_perf_detail_stats.dispatch_change_calls += 1
-        else if (std.mem.eql(u8, event_type, "focus")) class_perf_detail_stats.dispatch_focus_calls += 1
-        else if (std.mem.eql(u8, event_type, "blur")) class_perf_detail_stats.dispatch_blur_calls += 1
-        else if (std.mem.eql(u8, event_type, "submit")) class_perf_detail_stats.dispatch_submit_calls += 1
-        else class_perf_detail_stats.dispatch_other_calls += 1;
+        if (std.mem.eql(u8, event_type, "click")) class_perf_detail_stats.dispatch_click_calls += 1 else if (std.mem.eql(u8, event_type, "input")) class_perf_detail_stats.dispatch_input_calls += 1 else if (std.mem.eql(u8, event_type, "change")) class_perf_detail_stats.dispatch_change_calls += 1 else if (std.mem.eql(u8, event_type, "focus")) class_perf_detail_stats.dispatch_focus_calls += 1 else if (std.mem.eql(u8, event_type, "blur")) class_perf_detail_stats.dispatch_blur_calls += 1 else if (std.mem.eql(u8, event_type, "submit")) class_perf_detail_stats.dispatch_submit_calls += 1 else class_perf_detail_stats.dispatch_other_calls += 1;
     }
     var on_attr_name_buf: [128]u8 = undefined;
     const on_attr_name_z = std.fmt.bufPrintZ(&on_attr_name_buf, "on{s}", .{type_arg.ptr[0..type_arg.len]}) catch null;
@@ -10257,6 +10474,13 @@ fn parseOptionalNodeArgHandle(ctx: *quickjs.Context, args: []const quickjs.Value
 }
 
 fn parseValueNodeHandle(ctx: *quickjs.Context, value: quickjs.Value) ?i64 {
+    const profile = classProfileDetailEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.parse_handle_calls += 1;
+        class_perf_stats.parse_handle_ns += classProfileNowNs() - start;
+    };
+
     const handle_value = value.getPropertyStr(ctx, "__zigDomNativeHandle");
     defer handle_value.deinit(ctx);
 
@@ -10643,21 +10867,18 @@ fn parseNullableNodeArgHandle(ctx: *quickjs.Context, args: []const quickjs.Value
 }
 
 fn wrapNodeHandle(ctx: *quickjs.Context, handle: u64) quickjs.Value {
+    const profile = classProfileDetailEnabled();
+    const start = if (profile) classProfileNowNs() else 0;
+    defer if (profile) {
+        class_perf_stats.wrap_node_calls += 1;
+        class_perf_stats.wrap_node_ns += classProfileNowNs() - start;
+    };
+
     if (handle == 0) {
         return quickjs.Value.null;
     }
 
-    const global = ctx.getGlobalObject();
-    defer global.deinit(ctx);
-
-    const wrap = global.getPropertyStr(ctx, "__zigDomWrapNode");
-    defer wrap.deinit(ctx);
-    if (wrap.isException() or !wrap.isObject()) {
-        return throwMessage(ctx, "__zigDomWrapNode is not installed");
-    }
-
-    const arg = quickjs.Value.initInt64(@intCast(handle));
-    return wrap.call(ctx, quickjs.Value.undefined, &.{arg});
+    return wrapNativeNode(ctx, handle);
 }
 
 fn jsWrapNode(ctx_opt: ?*quickjs.Context, _: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
@@ -10835,6 +11056,9 @@ fn createWindowObject(ctx: *quickjs.Context, window_handle: u64, document: quick
         "WheelEvent",
         "KeyboardEvent",
         "CompositionEvent",
+        "TextEvent",
+        "AnimationEvent",
+        "TransitionEvent",
         "ErrorEvent",
         "XMLHttpRequest",
     }) |name| {

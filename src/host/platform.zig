@@ -778,7 +778,7 @@ fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
 }
 
 fn delayToTimerTurns(delay_ms: f64) u32 {
-    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 2;
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 1;
     const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 25.0)));
     return @intCast(@max(1, @min(turns, 10_000)));
 }
@@ -855,7 +855,6 @@ fn installNativeTimer(
     if (!callback.isFunction(ctx)) return ctx.throwInternalError("Timer callback must be a function");
 
     const timer_turns = explicit_delay_turns orelse timerDelayFromArgs(ctx, args);
-
     var timer = NativeTimer{
         .id = native_next_timer_id,
         .kind = kind,
@@ -908,8 +907,8 @@ fn jsClearTimeout(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const 
 fn jsSetInterval(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const base_turns = timerDelayFromArgs(ctx, args);
-    const scaled_turns = @as(u64, base_turns) * 250;
-    const interval_turns: u32 = @intCast(@max(@as(u64, 200), @min(scaled_turns, 1_000_000)));
+    const scaled_turns = @as(u64, base_turns) * 50;
+    const interval_turns: u32 = @intCast(@max(@as(u64, 40), @min(scaled_turns, 200_000)));
     return installNativeTimer(ctx, args, .interval, interval_turns);
 }
 

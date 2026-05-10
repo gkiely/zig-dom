@@ -11,6 +11,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installGetter(ctx, proto, "defaultView", callbacks.defaultViewGet);
     try bindings.installGetter(ctx, proto, "implementation", callbacks.implementationGet);
     try bindings.installGetter(ctx, proto, "contentType", callbacks.contentTypeGet);
+    try bindings.installGetter(ctx, proto, "styleSheets", callbacks.styleSheetsGet);
     try bindings.installMethod(ctx, proto, "createElement", callbacks.createElement, 1);
     try bindings.installMethod(ctx, proto, "createElementNS", callbacks.createElementNS, 2);
     try bindings.installMethod(ctx, proto, "createAttribute", callbacks.createAttribute, 1);

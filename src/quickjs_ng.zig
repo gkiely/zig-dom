@@ -35,6 +35,66 @@ pub const Exception = struct {
     }
 };
 
+const fast_malloc_functions = quickjs.c.JSMallocFunctions{
+    .js_calloc = fastJsCalloc,
+    .js_malloc = fastJsMalloc,
+    .js_free = fastJsFree,
+    .js_realloc = fastJsRealloc,
+    .js_malloc_usable_size = fastJsMallocUsableSize,
+};
+
+fn fastJsMalloc(_: ?*anyopaque, size: usize) callconv(.c) ?*anyopaque {
+    return fastAlloc(size, false);
+}
+
+fn fastJsCalloc(_: ?*anyopaque, count: usize, size: usize) callconv(.c) ?*anyopaque {
+    if (size > 0 and count != (count * size) / size) return null;
+    return fastAlloc(count * size, true);
+}
+
+fn fastJsFree(_: ?*anyopaque, ptr: ?*anyopaque) callconv(.c) void {
+    const base = fastBasePtr(ptr orelse return);
+    std.c.free(base);
+}
+
+fn fastJsRealloc(_: ?*anyopaque, ptr: ?*anyopaque, size: usize) callconv(.c) ?*anyopaque {
+    if (ptr == null) return fastAlloc(size, false);
+    if (size == 0) {
+        fastJsFree(null, ptr);
+        return null;
+    }
+    const total = size + fast_alloc_header_size;
+    if (total < size) return null;
+    const new_base = std.c.realloc(fastBasePtr(ptr.?), total) orelse return null;
+    const bytes: [*]u8 = @ptrCast(new_base);
+    @as(*usize, @ptrCast(@alignCast(bytes))).* = size;
+    return bytes + fast_alloc_header_size;
+}
+
+fn fastJsMallocUsableSize(ptr: ?*const anyopaque) callconv(.c) usize {
+    const raw = ptr orelse return 0;
+    const bytes: [*]const u8 = @ptrCast(raw);
+    return @as(*const usize, @ptrCast(@alignCast(bytes - fast_alloc_header_size))).*;
+}
+
+const fast_alloc_header_size = 16;
+
+fn fastAlloc(size: usize, zero: bool) ?*anyopaque {
+    const total = size + fast_alloc_header_size;
+    if (total < size) return null;
+    const base = std.c.malloc(total) orelse return null;
+    const bytes: [*]u8 = @ptrCast(base);
+    @as(*usize, @ptrCast(@alignCast(bytes))).* = size;
+    const user = bytes + fast_alloc_header_size;
+    if (zero) @memset(user[0..size], 0);
+    return user;
+}
+
+fn fastBasePtr(ptr: *anyopaque) *anyopaque {
+    const bytes: [*]u8 = @ptrCast(ptr);
+    return bytes - fast_alloc_header_size;
+}
+
 pub const Runtime = struct {
     allocator: Allocator,
     io: std.Io,
@@ -52,8 +112,15 @@ pub const Runtime = struct {
     pub fn initWithDom(allocator: Allocator, io: std.Io, install_dom: bool) RuntimeError!Runtime {
         host_io = io;
 
-        const rt = quickjs.Runtime.init() catch return error.OutOfMemory;
+        const rt = if (std.c.getenv("ZIG_DOM_FAST_ALLOC") != null) blk: {
+            const raw = quickjs.c.JS_NewRuntime2(&fast_malloc_functions, null) orelse return error.OutOfMemory;
+            break :blk @as(*quickjs.Runtime, @ptrCast(raw));
+        } else quickjs.Runtime.init() catch return error.OutOfMemory;
         errdefer rt.deinit();
+        if (std.c.getenv("ZIG_DOM_GC_THRESHOLD")) |raw| {
+            const threshold = std.fmt.parseInt(usize, std.mem.span(raw), 10) catch 0;
+            if (threshold > 0) rt.setGCThreshold(threshold);
+        }
         if (builtin.mode == .Debug) {
             // React/MUI commit traversals can be deeply recursive in development mode.
             // Raise the JS stack cap to avoid premature QuickJS stack overflows.

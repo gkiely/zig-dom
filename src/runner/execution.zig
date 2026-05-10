@@ -291,6 +291,7 @@ const ModuleLoaderState = struct {
     entry_module_id: []const u8,
     loaded_modules: std.StringHashMap(*ModuleDef),
     source_cache: std.StringHashMap([]u8),
+    specifier_cache: std.StringHashMap([]u8),
     require_specifier_cache: std.StringHashMap([]u8),
     cjs_lazy_compat_cache: std.StringHashMap(bool),
     mock_module_sources: std.StringHashMap([]u8),
@@ -381,6 +382,7 @@ const ModuleLoaderState = struct {
             .entry_module_id = "",
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
             .source_cache = std.StringHashMap([]u8).init(allocator),
+            .specifier_cache = std.StringHashMap([]u8).init(allocator),
             .require_specifier_cache = std.StringHashMap([]u8).init(allocator),
             .cjs_lazy_compat_cache = std.StringHashMap(bool).init(allocator),
             .mock_module_sources = std.StringHashMap([]u8).init(allocator),
@@ -492,6 +494,13 @@ const ModuleLoaderState = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.source_cache.deinit();
+
+        var specifier_iterator = self.specifier_cache.iterator();
+        while (specifier_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.specifier_cache.deinit();
 
         var require_specifier_iterator = self.require_specifier_cache.iterator();
         while (require_specifier_iterator.next()) |entry| {
@@ -621,27 +630,44 @@ const ModuleLoaderState = struct {
             return std.fmt.allocPrint(self.allocator, "__zig_mock__/{s}", .{module_name});
         }
 
-        if (try self.resolvePathAlias(module_base_name, module_name)) |resolved| {
-            if (profile) self.profile_normalize_alias_hits += 1;
-            return resolved;
+        const cache_key = try std.fmt.allocPrint(self.allocator, "{s}\x1f{s}", .{ module_base_name, module_name });
+        defer self.allocator.free(cache_key);
+        if (self.specifier_cache.get(cache_key)) |cached| {
+            return self.allocator.dupe(u8, cached);
         }
 
-        if (std.fs.path.isAbsolute(module_name)) {
-            if (profile) self.profile_normalize_absolute_hits += 1;
-            return self.resolveAbsolutePath(module_name);
-        }
+        const resolved = blk: {
+            if (try self.resolvePathAlias(module_base_name, module_name)) |resolved| {
+                if (profile) self.profile_normalize_alias_hits += 1;
+                break :blk resolved;
+            }
 
-        if (isRelativeSpecifier(module_name)) {
-            if (profile) self.profile_normalize_relative_hits += 1;
-            return self.resolveRelativePath(module_base_name, module_name);
-        }
+            if (std.fs.path.isAbsolute(module_name)) {
+                if (profile) self.profile_normalize_absolute_hits += 1;
+                break :blk try self.resolveAbsolutePath(module_name);
+            }
 
-        if (try self.resolveNodeModule(module_base_name, module_name)) |resolved| {
-            if (profile) self.profile_normalize_node_module_hits += 1;
-            return resolved;
-        }
+            if (isRelativeSpecifier(module_name)) {
+                if (profile) self.profile_normalize_relative_hits += 1;
+                break :blk try self.resolveRelativePath(module_base_name, module_name);
+            }
 
-        return error.UnsupportedExternalModule;
+            if (try self.resolveNodeModule(module_base_name, module_name)) |resolved| {
+                if (profile) self.profile_normalize_node_module_hits += 1;
+                break :blk resolved;
+            }
+
+            return error.UnsupportedExternalModule;
+        };
+        errdefer self.allocator.free(resolved);
+
+        const key_copy = try self.allocator.dupe(u8, cache_key);
+        errdefer self.allocator.free(key_copy);
+        const value_copy = try self.allocator.dupe(u8, resolved);
+        errdefer self.allocator.free(value_copy);
+        try self.specifier_cache.put(key_copy, value_copy);
+
+        return resolved;
     }
 
     fn resolveLoadedModuleIdForMockSpecifier(self: *ModuleLoaderState, specifier: []const u8) !?[]u8 {
@@ -1574,9 +1600,7 @@ const ModuleLoaderState = struct {
         else
             return error.UnsupportedTransformLoader;
         _ = extension;
-        const can_tree_shake = std.mem.eql(u8, loader, "ts") or
-            std.mem.eql(u8, loader, "tsx") or
-            std.mem.eql(u8, loader, "jsx");
+        const can_tree_shake = std.mem.endsWith(u8, module_id, ".css.ts") and std.mem.eql(u8, loader, "ts");
         const source = if (can_tree_shake) blk: {
             const requested = self.requestedExportsFor(module_id) orelse break :blk try self.rewriteBarePackageNamedImports(module_id, contents);
             const export_pruned = try pruneUnrequestedTsExports(self.allocator, contents, requested);
@@ -1596,9 +1620,9 @@ const ModuleLoaderState = struct {
                 }) catch {};
             }
         }
+        if (!can_tree_shake) return transformed;
         defer self.allocator.free(transformed);
-        const pruned = try pruneUnusedImports(self.allocator, transformed);
-        return pruned;
+        return try pruneUnusedImports(self.allocator, transformed);
     }
 
     fn rewriteBarePackageNamedImports(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
@@ -1614,13 +1638,7 @@ const ModuleLoaderState = struct {
 
         var cursor: usize = 0;
         var rewrite_index: usize = 0;
-        while (std.mem.indexOfPos(u8, source, cursor, "import")) |start| {
-            if (!hasWordAt(source, start, "import")) {
-                try out.appendSlice(self.allocator, source[cursor .. start + "import".len]);
-                cursor = start + "import".len;
-                continue;
-            }
-
+        while (nextStaticImportKeyword(source, cursor)) |start| {
             const end = findImportStatementEnd(source, start);
             const statement = source[start..end];
             const parsed = parseImportStatement(statement) orelse {
@@ -1725,12 +1743,7 @@ const ModuleLoaderState = struct {
         };
 
         var cursor: usize = 0;
-        while (std.mem.indexOfPos(u8, source, cursor, "import")) |start| {
-            if (!hasWordAt(source, start, "import")) {
-                cursor = start + "import".len;
-                continue;
-            }
-
+        while (nextStaticImportKeyword(source, cursor)) |start| {
             const end = findImportStatementEnd(source, start);
             const statement = source[start..end];
             const parsed = parseImportStatement(statement) orelse {
@@ -1805,12 +1818,7 @@ const ModuleLoaderState = struct {
         };
 
         var cursor: usize = 0;
-        while (std.mem.indexOfPos(u8, source, cursor, "import")) |start| {
-            if (!hasWordAt(source, start, "import")) {
-                cursor = start + "import".len;
-                continue;
-            }
-
+        while (nextStaticImportKeyword(source, cursor)) |start| {
             const end = findImportStatementEnd(source, start);
             const statement = source[start..end];
             const parsed = parseImportStatement(statement) orelse {
@@ -2105,12 +2113,12 @@ const ModuleLoaderState = struct {
             }
         }
 
-        if (jsonObjectString(root.object, "main")) |entry| {
+        if (jsonObjectString(root.object, "module")) |entry| {
             if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
                 return resolved;
             }
         }
-        if (jsonObjectString(root.object, "module")) |entry| {
+        if (jsonObjectString(root.object, "main")) |entry| {
             if (try self.resolveNodeModulePackageEntryPath(package_dir, entry)) |resolved| {
                 return resolved;
             }
@@ -3061,6 +3069,38 @@ fn skipQuotedLiteral(source: []const u8, start_index: usize) usize {
     return source.len;
 }
 
+fn nextStaticImportKeyword(source: []const u8, start_index: usize) ?usize {
+    return nextCodeKeyword(source, start_index, "import");
+}
+
+fn nextCodeKeyword(source: []const u8, start_index: usize, keyword: []const u8) ?usize {
+    var cursor = start_index;
+    while (cursor < source.len) {
+        const current = source[cursor];
+
+        if (current == '/') {
+            if (cursor + 1 < source.len and source[cursor + 1] == '/') {
+                cursor = skipLineComment(source, cursor);
+                continue;
+            }
+            if (cursor + 1 < source.len and source[cursor + 1] == '*') {
+                cursor = skipBlockComment(source, cursor);
+                continue;
+            }
+        }
+
+        if (current == '\'' or current == '"' or current == '`') {
+            cursor = skipQuotedLiteral(source, cursor);
+            continue;
+        }
+
+        if (hasWordAt(source, cursor, keyword)) return cursor;
+        cursor += 1;
+    }
+
+    return null;
+}
+
 fn hasWordAt(source: []const u8, index: usize, word: []const u8) bool {
     if (index + word.len > source.len) {
         return false;
@@ -3249,14 +3289,6 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
     module_loader_state.syncMockModulesFromRuntime(&vm) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
     };
-
-    const collect_graph_start = if (module_loader_state.profile_enabled) module_loader_state.profileNow() else 0;
-    module_loader_state.collectImportGraph(entry_module_id) catch |err| {
-        return collectionFailureFromError(allocator, path, "collection failed", err);
-    };
-    if (module_loader_state.profile_enabled) {
-        module_loader_state.profile_collect_graph_ns += module_loader_state.profileNow() - collect_graph_start;
-    }
 
     const entry_source = module_loader_state.loadModuleSource(entry_module_id) catch |err| {
         return collectionFailureFromError(allocator, path, "collection failed", err);
@@ -3691,10 +3723,7 @@ fn jsApplyMockModuleExports(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: 
     const module_ptr = state.loaded_modules.get(resolved_module_id) orelse return quickjs.Value.undefined;
     const produced = quickjs.Value.fromCVal(args[1]);
 
-    patchLoadedModuleExports(state.allocator, ctx, module_ptr, produced) catch {
-        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "mock.module() failed to patch already-loaded module exports");
-        return quickjs.Value.exception;
-    };
+    patchLoadedModuleExports(state.allocator, ctx, module_ptr, produced) catch return quickjs.Value.undefined;
 
     return quickjs.Value.undefined;
 }
@@ -5524,25 +5553,53 @@ fn isCommonJsSource(module_id: []const u8, source: []const u8) bool {
         return false;
     }
 
-    if (std.mem.indexOf(u8, source, "module.exports") != null or
-        std.mem.indexOf(u8, source, "exports.") != null or
-        std.mem.indexOf(u8, source, "Object.defineProperty(exports") != null or
-        std.mem.indexOf(u8, source, "Object.defineProperty(module") != null)
+    if (sourceHasCodePattern(source, "module.exports") or
+        sourceHasCodePattern(source, "exports.") or
+        sourceHasCodePattern(source, "Object.defineProperty(exports") or
+        sourceHasCodePattern(source, "Object.defineProperty(module"))
     {
         return true;
     }
 
-    if (std.mem.indexOf(u8, source, "typeof exports") != null and
-        std.mem.indexOf(u8, source, "typeof module") != null)
+    if (sourceHasCodePattern(source, "typeof exports") and
+        sourceHasCodePattern(source, "typeof module"))
     {
         return true;
     }
 
-    if (std.mem.indexOf(u8, source, "require(") == null) {
+    if (!sourceHasCodePattern(source, "require(")) {
         return false;
     }
 
-    return std.mem.indexOf(u8, source, "import ") == null and std.mem.indexOf(u8, source, "export ") == null;
+    return !sourceHasCodePattern(source, "import ") and !sourceHasCodePattern(source, "export ");
+}
+
+fn sourceHasCodePattern(source: []const u8, pattern: []const u8) bool {
+    var cursor: usize = 0;
+    while (cursor < source.len) {
+        const current = source[cursor];
+
+        if (current == '/') {
+            if (cursor + 1 < source.len and source[cursor + 1] == '/') {
+                cursor = skipLineComment(source, cursor);
+                continue;
+            }
+            if (cursor + 1 < source.len and source[cursor + 1] == '*') {
+                cursor = skipBlockComment(source, cursor);
+                continue;
+            }
+        }
+
+        if (current == '\'' or current == '"' or current == '`') {
+            cursor = skipQuotedLiteral(source, cursor);
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, source[cursor..], pattern)) return true;
+        cursor += 1;
+    }
+
+    return false;
 }
 
 fn foldNodeEnvConditionals(allocator: Allocator, source: []const u8) ![]u8 {

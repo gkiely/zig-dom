@@ -33,7 +33,7 @@ pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u
     }
 
     const jsx_runtime: parser.codegen.JSXRuntime = if (std.mem.eql(u8, loader, "jsx") or std.mem.eql(u8, loader, "tsx"))
-        .classic
+        .automatic
     else
         .preserve;
 
@@ -54,15 +54,56 @@ pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u
     const normalized_using = try replaceAll(allocator, normalized_require, "using ", "const ");
     defer allocator.free(normalized_using);
 
-    if (jsx_runtime == .classic and
-        std.mem.indexOf(u8, normalized_using, "React.createElement") != null and
-        !hasClassicReactImport(source))
-    {
-        return std.mem.concat(allocator, u8, &.{ "import React from \"react\";\n", normalized_using });
+    if (jsx_runtime == .automatic and std.mem.indexOf(u8, normalized_using, "__zigJsx(") != null) {
+        return insertAfterImportBlock(allocator, normalized_using, "import {jsx as __zigJsx, Fragment as __zigFragment} from \"react/jsx-runtime\";\n");
+    }
+
+    if (jsx_runtime == .classic and std.mem.indexOf(u8, normalized_using, "React.createElement") != null) {
+        const aliased = try replaceAll(allocator, normalized_using, "React.createElement", "__zigReactCreateElement");
+        defer allocator.free(aliased);
+
+        if (!hasClassicReactImport(source)) {
+            return std.mem.concat(allocator, u8, &.{ "import React from \"react\";\nconst __zigReactCreateElement = React.createElement;\n", aliased });
+        }
+
+        return insertAfterImportBlock(allocator, aliased, "const __zigReactCreateElement = React.createElement;\n");
     }
 
     _ = path;
     return allocator.dupe(u8, normalized_using);
+}
+
+fn insertAfterImportBlock(allocator: Allocator, source: []const u8, insertion: []const u8) ![]u8 {
+    var cursor: usize = 0;
+    var insert_at: usize = 0;
+    while (nextImportStatement(source, cursor)) |range| {
+        insert_at = range.end;
+        cursor = range.end;
+    }
+
+    return std.mem.concat(allocator, u8, &.{ source[0..insert_at], insertion, source[insert_at..] });
+}
+
+const ImportRange = struct {
+    start: usize,
+    end: usize,
+};
+
+fn nextImportStatement(source: []const u8, start: usize) ?ImportRange {
+    var cursor = start;
+    while (cursor < source.len) {
+        while (cursor < source.len and (source[cursor] == ' ' or source[cursor] == '\t' or source[cursor] == '\r' or source[cursor] == '\n')) cursor += 1;
+        if (!std.mem.startsWith(u8, source[cursor..], "import")) return null;
+        const after = cursor + "import".len;
+        if (after < source.len and (std.ascii.isAlphanumeric(source[after]) or source[after] == '_' or source[after] == '$')) return null;
+
+        var end = after;
+        while (end < source.len and source[end] != '\n' and source[end] != ';') end += 1;
+        if (end < source.len and source[end] == ';') end += 1;
+        if (end < source.len and source[end] == '\n') end += 1;
+        return .{ .start = cursor, .end = end };
+    }
+    return null;
 }
 
 fn langForLoader(loader: []const u8) ?parser.ast.Lang {

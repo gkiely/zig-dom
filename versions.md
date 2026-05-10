@@ -7,6 +7,9 @@ V2 []
 - Yuku
 - Native DOM and test selector
 - Parallel test workers
+- Multi-threading: 
+https://github.com/bellard/quickjs/issues/362
+https://github.com/quickjs-ng/quickjs/commit/5ce2957e
 
 V3 []
 - Use crate: https://github.com/zig-whatwg/crane

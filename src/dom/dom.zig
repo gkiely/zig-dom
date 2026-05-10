@@ -76,13 +76,23 @@ const DomPerfStats = struct {
     role_selector_fast_ns: i128 = 0,
     text_content_calls: u64 = 0,
     text_content_ns: i128 = 0,
+    create_node_calls: u64 = 0,
+    create_node_ns: i128 = 0,
+    append_child_calls: u64 = 0,
+    append_child_ns: i128 = 0,
+    set_attribute_calls: u64 = 0,
+    set_attribute_ns: i128 = 0,
 };
 
 var dom_perf_stats = DomPerfStats{};
+var dom_profile_enabled: ?bool = null;
 
 fn domProfileEnabled() bool {
-    const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM") orelse return false;
-    return !std.mem.eql(u8, std.mem.span(raw), "0");
+    if (dom_profile_enabled) |enabled| return enabled;
+    const raw = std.c.getenv("ZIG_DOM_PROFILE_DOM");
+    const enabled = if (raw) |value| !std.mem.eql(u8, std.mem.span(value), "0") else false;
+    dom_profile_enabled = enabled;
+    return enabled;
 }
 
 fn profileNowNs() i128 {
@@ -94,7 +104,7 @@ fn profileNowNs() i128 {
 fn printDomPerfStats() void {
     if (!domProfileEnabled()) return;
     std.debug.print(
-        "[zig-dom dom profile] qsa_calls={d} qsa_ms={d:.3} role_fast_calls={d} role_fast_ms={d:.3} text_content_calls={d} text_content_ms={d:.3}\n",
+        "[zig-dom dom profile] qsa_calls={d} qsa_ms={d:.3} role_fast_calls={d} role_fast_ms={d:.3} text_content_calls={d} text_content_ms={d:.3} create_node={d}/{d:.3}ms append_child={d}/{d:.3}ms set_attr={d}/{d:.3}ms\n",
         .{
             dom_perf_stats.query_selector_all_calls,
             @as(f64, @floatFromInt(dom_perf_stats.query_selector_all_ns)) / 1_000_000.0,
@@ -102,6 +112,12 @@ fn printDomPerfStats() void {
             @as(f64, @floatFromInt(dom_perf_stats.role_selector_fast_ns)) / 1_000_000.0,
             dom_perf_stats.text_content_calls,
             @as(f64, @floatFromInt(dom_perf_stats.text_content_ns)) / 1_000_000.0,
+            dom_perf_stats.create_node_calls,
+            @as(f64, @floatFromInt(dom_perf_stats.create_node_ns)) / 1_000_000.0,
+            dom_perf_stats.append_child_calls,
+            @as(f64, @floatFromInt(dom_perf_stats.append_child_ns)) / 1_000_000.0,
+            dom_perf_stats.set_attribute_calls,
+            @as(f64, @floatFromInt(dom_perf_stats.set_attribute_ns)) / 1_000_000.0,
         },
     );
     dom_perf_stats = .{};
@@ -2157,6 +2173,13 @@ pub export fn zig_dom_node_name(node: u64, out_ptr: *[*c]u8, out_len: *usize) u3
 }
 
 pub export fn zig_dom_node_append_child(parent: u64, child: u64) u32 {
+    const profile = domProfileEnabled();
+    const start = if (profile) profileNowNs() else 0;
+    defer if (profile) {
+        dom_perf_stats.append_child_calls += 1;
+        dom_perf_stats.append_child_ns += profileNowNs() - start;
+    };
+
     const window_handle = decodeNodeWindowHandle(parent);
     if (window_handle == 0) return STATUS_INVALID_HANDLE;
     if (decodeNodeWindowHandle(child) != window_handle) return STATUS_HIERARCHY;
@@ -2228,6 +2251,13 @@ pub export fn zig_dom_node_replace_child(parent: u64, new_child: u64, old_child:
 }
 
 pub export fn zig_dom_document_create_element(document: u64, name_ptr: [*]const u8, name_len: usize, out_handle: *u64) u32 {
+    const profile = domProfileEnabled();
+    const start = if (profile) profileNowNs() else 0;
+    defer if (profile) {
+        dom_perf_stats.create_node_calls += 1;
+        dom_perf_stats.create_node_ns += profileNowNs() - start;
+    };
+
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
 
     out_handle.* = createNode(window, .element, name_ptr[0..name_len], "", document, false) catch return STATUS_OOM;
@@ -2250,6 +2280,13 @@ pub export fn zig_dom_document_create_div_element(document: u64) u64 {
 }
 
 pub export fn zig_dom_document_create_text_node(document: u64, data_ptr: [*]const u8, data_len: usize, out_handle: *u64) u32 {
+    const profile = domProfileEnabled();
+    const start = if (profile) profileNowNs() else 0;
+    defer if (profile) {
+        dom_perf_stats.create_node_calls += 1;
+        dom_perf_stats.create_node_ns += profileNowNs() - start;
+    };
+
     const window = resolveNodeWindow(document) orelse return STATUS_INVALID_HANDLE;
     const record = resolveNode(window, document) orelse return STATUS_INVALID_HANDLE;
     if (record.kind != .document) return STATUS_INVALID_ARGUMENT;
@@ -2328,6 +2365,13 @@ pub export fn zig_dom_element_get_attribute_ref(element: u64, name_ptr: [*]const
 }
 
 pub export fn zig_dom_element_set_attribute(element: u64, name_ptr: [*]const u8, name_len: usize, value_ptr: [*]const u8, value_len: usize) u32 {
+    const profile = domProfileEnabled();
+    const start = if (profile) profileNowNs() else 0;
+    defer if (profile) {
+        dom_perf_stats.set_attribute_calls += 1;
+        dom_perf_stats.set_attribute_ns += profileNowNs() - start;
+    };
+
     const window = resolveNodeWindow(element) orelse return STATUS_INVALID_HANDLE;
     const node = resolveNode(window, element) orelse return STATUS_INVALID_HANDLE;
     if (node.kind != .element) return STATUS_INVALID_ARGUMENT;

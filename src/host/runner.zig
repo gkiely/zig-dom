@@ -13,6 +13,44 @@ var active_runner: ?*HostRunner = null;
 
 const HookKind = enum { beforeAll, beforeEach, afterEach, afterAll };
 
+const RunnerPerfStats = struct {
+    tests: u64 = 0,
+    before_each_ns: i128 = 0,
+    body_ns: i128 = 0,
+    after_each_ns: i128 = 0,
+    restore_spies_ns: i128 = 0,
+    pending_jobs_ns: i128 = 0,
+    timer_turns_ns: i128 = 0,
+    promise_iterations: u64 = 0,
+    pending_jobs: u64 = 0,
+    timer_turns: u64 = 0,
+    due_timer_turns: u64 = 0,
+};
+
+var runner_perf_stats = RunnerPerfStats{};
+var runner_profile_enabled: ?bool = null;
+var runner_profile_tests_enabled: ?bool = null;
+
+fn runnerProfileEnabled() bool {
+    if (runner_profile_enabled) |enabled| return enabled;
+    const raw = std.c.getenv("ZIG_DOM_PROFILE_RUNNER");
+    const enabled = if (raw) |value| !std.mem.eql(u8, std.mem.span(value), "0") else false;
+    runner_profile_enabled = enabled;
+    return enabled;
+}
+
+fn runnerProfileTestsEnabled() bool {
+    if (runner_profile_tests_enabled) |enabled| return enabled;
+    const raw = std.c.getenv("ZIG_DOM_PROFILE_TESTS");
+    const enabled = if (raw) |value| !std.mem.eql(u8, std.mem.span(value), "0") else false;
+    runner_profile_tests_enabled = enabled;
+    return enabled;
+}
+
+fn runnerProfileActive() bool {
+    return runnerProfileEnabled() or runnerProfileTestsEnabled();
+}
+
 const Hook = struct {
     callback: quickjs.Value,
     timeout_ms: i64,
@@ -122,6 +160,7 @@ pub const HostRunner = struct {
     active_scope: *Scope,
     collection_errors: std.ArrayList([]u8) = .empty,
     registered_test_count: i32 = 0,
+    runnable_test_index: usize = 0,
 
     pub fn init(allocator: Allocator, io: std.Io, rt: *quickjs.Runtime, ctx: *quickjs.Context) HostRunnerError!*HostRunner {
         const runner = allocator.create(HostRunner) catch return error.OutOfMemory;
@@ -361,6 +400,25 @@ pub const HostRunner = struct {
     fn run(self: *HostRunner) !void {
         var result = RunResult{};
         defer result.deinit(self.allocator);
+        if (runnerProfileActive()) runner_perf_stats = .{};
+        defer if (runnerProfileActive()) {
+            std.debug.print(
+                "[zig-dom runner profile] tests={d} before_each_ms={d:.3} body_ms={d:.3} after_each_ms={d:.3} restore_spies_ms={d:.3} pending_jobs_ms={d:.3} timer_turns_ms={d:.3} promise_iterations={d} pending_jobs={d} timer_turns={d} due_timer_turns={d}\n",
+                .{
+                    runner_perf_stats.tests,
+                    @as(f64, @floatFromInt(runner_perf_stats.before_each_ns)) / 1_000_000.0,
+                    @as(f64, @floatFromInt(runner_perf_stats.body_ns)) / 1_000_000.0,
+                    @as(f64, @floatFromInt(runner_perf_stats.after_each_ns)) / 1_000_000.0,
+                    @as(f64, @floatFromInt(runner_perf_stats.restore_spies_ns)) / 1_000_000.0,
+                    @as(f64, @floatFromInt(runner_perf_stats.pending_jobs_ns)) / 1_000_000.0,
+                    @as(f64, @floatFromInt(runner_perf_stats.timer_turns_ns)) / 1_000_000.0,
+                    runner_perf_stats.promise_iterations,
+                    runner_perf_stats.pending_jobs,
+                    runner_perf_stats.timer_turns,
+                    runner_perf_stats.due_timer_turns,
+                },
+            );
+        };
 
         const only_mode = self.hasOnly(self.root_scope);
         const has_runnable = self.hasRunnableTest(self.root_scope, only_mode);
@@ -418,7 +476,11 @@ pub const HostRunner = struct {
 
     fn runTestEntry(self: *HostRunner, test_entry: *TestEntry, result: *RunResult, only_mode: bool) !void {
         const spy_checkpoint = self.captureSpyCheckpoint();
-        defer self.restoreSpiesSince(spy_checkpoint);
+        defer {
+            const restore_start = if (runnerProfileActive()) profileNowNs() else 0;
+            self.restoreSpiesSince(spy_checkpoint);
+            if (runnerProfileActive()) runner_perf_stats.restore_spies_ns += profileNowNs() - restore_start;
+        }
 
         const full_name = try self.testPath(test_entry);
         defer self.allocator.free(full_name);
@@ -434,7 +496,10 @@ pub const HostRunner = struct {
         try self.collectBeforeEach(test_entry.scope, &before_each);
         try self.collectAfterEach(test_entry.scope, &after_each);
 
+        const test_stats_start = runner_perf_stats;
+        const before_start = if (runnerProfileActive()) profileNowNs() else 0;
         const before_outcome = try self.runHookList(before_each.items, test_entry.timeout_ms);
+        if (runnerProfileActive()) runner_perf_stats.before_each_ns += profileNowNs() - before_start;
         defer if (before_outcome.error_text) |text| self.allocator.free(text);
         if (!before_outcome.ok) {
             const name = try std.fmt.allocPrint(self.allocator, "{s} (beforeEach)", .{full_name});
@@ -446,9 +511,13 @@ pub const HostRunner = struct {
 
         const profile_start = profileNowNs();
         const test_outcome = try self.invokeCallback(test_entry.callback, test_entry.timeout_ms);
-        const elapsed_ms = @as(f64, @floatFromInt(profileNowNs() - profile_start)) / 1_000_000.0;
+        const body_elapsed_ns = profileNowNs() - profile_start;
+        const elapsed_ms = @as(f64, @floatFromInt(body_elapsed_ns)) / 1_000_000.0;
+        if (runnerProfileActive()) runner_perf_stats.body_ns += body_elapsed_ns;
         defer if (test_outcome.error_text) |text| self.allocator.free(text);
+        const after_start = if (runnerProfileActive()) profileNowNs() else 0;
         const after_outcome = try self.runHookList(after_each.items, test_entry.timeout_ms);
+        if (runnerProfileActive()) runner_perf_stats.after_each_ns += profileNowNs() - after_start;
         defer if (after_outcome.error_text) |text| self.allocator.free(text);
 
         if (!test_outcome.ok) {
@@ -467,6 +536,24 @@ pub const HostRunner = struct {
             return;
         }
         result.passed += 1;
+        if (runnerProfileActive()) runner_perf_stats.tests += 1;
+        if (runnerProfileTestsEnabled()) {
+            std.debug.print(
+                "[zig-dom test profile] {s} body_ms={d:.3} before_ms={d:.3} after_ms={d:.3} pending_jobs_ms={d:.3} timer_ms={d:.3} jobs={d} timer_turns={d} due_timer_turns={d} promise_iterations={d}\n",
+                .{
+                    full_name,
+                    @as(f64, @floatFromInt(body_elapsed_ns)) / 1_000_000.0,
+                    @as(f64, @floatFromInt(runner_perf_stats.before_each_ns - test_stats_start.before_each_ns)) / 1_000_000.0,
+                    @as(f64, @floatFromInt(runner_perf_stats.after_each_ns - test_stats_start.after_each_ns)) / 1_000_000.0,
+                    @as(f64, @floatFromInt(runner_perf_stats.pending_jobs_ns - test_stats_start.pending_jobs_ns)) / 1_000_000.0,
+                    @as(f64, @floatFromInt(runner_perf_stats.timer_turns_ns - test_stats_start.timer_turns_ns)) / 1_000_000.0,
+                    runner_perf_stats.pending_jobs - test_stats_start.pending_jobs,
+                    runner_perf_stats.timer_turns - test_stats_start.timer_turns,
+                    runner_perf_stats.due_timer_turns - test_stats_start.due_timer_turns,
+                    runner_perf_stats.promise_iterations - test_stats_start.promise_iterations,
+                },
+            );
+        }
         try reporter.printPassedLineStdout(self.allocator, self.io, full_name, elapsed_ms);
     }
 
@@ -558,14 +645,26 @@ pub const HostRunner = struct {
         if (result.isPromise()) {
             var iterations: usize = 0;
             while (result.promiseState(self.ctx) == .pending) : (iterations += 1) {
+                if (runnerProfileActive()) runner_perf_stats.promise_iterations += 1;
                 if (self.rt.isJobPending()) {
-                    _ = self.rt.executePendingJob() catch return .{ .ok = false, .error_text = self.takeExceptionText() };
+                    while (self.rt.isJobPending()) {
+                        if (runnerProfileActive()) runner_perf_stats.pending_jobs += 1;
+                        const job_start = if (runnerProfileActive()) profileNowNs() else 0;
+                        _ = self.rt.executePendingJob() catch return .{ .ok = false, .error_text = self.takeExceptionText() };
+                        if (runnerProfileActive()) runner_perf_stats.pending_jobs_ns += profileNowNs() - job_start;
+                    }
                 } else if (platform.hasPendingNativeTimers()) {
+                    if (runnerProfileActive()) runner_perf_stats.timer_turns += 1;
+                    const timer_start = if (runnerProfileActive()) profileNowNs() else 0;
                     const timer_result = platform.runNativeTimerTurn(self.ctx);
+                    if (runnerProfileActive()) runner_perf_stats.timer_turns_ns += profileNowNs() - timer_start;
                     defer timer_result.deinit(self.ctx);
                     if (timer_result.isException()) return .{ .ok = false, .error_text = self.takeExceptionText() };
                     while (platform.hasDueNativeTimers()) {
+                        if (runnerProfileActive()) runner_perf_stats.due_timer_turns += 1;
+                        const due_timer_start = if (runnerProfileActive()) profileNowNs() else 0;
                         const due_timer_result = platform.runNativeTimerTurn(self.ctx);
+                        if (runnerProfileActive()) runner_perf_stats.timer_turns_ns += profileNowNs() - due_timer_start;
                         defer due_timer_result.deinit(self.ctx);
                         if (due_timer_result.isException()) return .{ .ok = false, .error_text = self.takeExceptionText() };
                     }
