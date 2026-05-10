@@ -564,6 +564,11 @@ pub const HostRunner = struct {
                     const timer_result = platform.runNativeTimerTurn(self.ctx);
                     defer timer_result.deinit(self.ctx);
                     if (timer_result.isException()) return .{ .ok = false, .error_text = self.takeExceptionText() };
+                    while (platform.hasDueNativeTimers()) {
+                        const due_timer_result = platform.runNativeTimerTurn(self.ctx);
+                        defer due_timer_result.deinit(self.ctx);
+                        if (due_timer_result.isException()) return .{ .ok = false, .error_text = self.takeExceptionText() };
+                    }
                 } else {
                     break;
                 }

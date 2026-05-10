@@ -9,6 +9,7 @@ pub const PlatformError = error{
 const NativeTimerKind = enum {
     timeout,
     interval,
+    immediate,
 };
 
 const NativeTimer = struct {
@@ -38,6 +39,9 @@ pub fn reset(ctx: *quickjs.Context) void {
     clearNativeTimers(ctx);
     native_timer_ctx = null;
     native_next_timer_id = 1;
+    crypto_uuid_counter = 0;
+    crypto_uuid_state = 0xA409_3822_299F_31D0;
+    object_url_counter = 0;
 }
 
 pub fn install(ctx: *quickjs.Context) PlatformError!void {
@@ -370,12 +374,15 @@ fn installGlobals(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
 }
 
 fn installTimers(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
-    if (native_timer_ctx != null and native_timer_ctx != ctx) {
-        // Existing timer state is context-specific. Reset on context switch.
-        native_timers = .empty;
-        native_next_timer_id = 1;
-    }
+    // Platform state is process-global but timer callbacks are context-specific.
+    // Start each runtime with an empty native event queue, even if allocator
+    // reuse gives the new QuickJS context the same pointer as the previous one.
+    native_timers = .empty;
     native_timer_ctx = ctx;
+    native_next_timer_id = 1;
+    crypto_uuid_counter = 0;
+    crypto_uuid_state = 0xA409_3822_299F_31D0;
+    object_url_counter = 0;
 
     try setFunction(ctx, global, "queueMicrotask", jsQueueMicrotask, 1);
     try setFunction(ctx, global, "setTimeout", jsSetTimeout, 2);
@@ -758,7 +765,7 @@ fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
 }
 
 fn delayToTimerTurns(delay_ms: f64) u32 {
-    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 1;
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 2;
     const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 25.0)));
     return @intCast(@max(1, @min(turns, 10_000)));
 }
@@ -814,6 +821,7 @@ fn invokeNativeTimerAt(ctx: *quickjs.Context, initial_index: usize) quickjs.Valu
     const current = &native_timers.items[current_index];
     switch (current.kind) {
         .timeout => removeNativeTimerAt(ctx, current_index),
+        .immediate => removeNativeTimerAt(ctx, current_index),
         .interval => {
             current.remaining_turns = current.interval_turns;
         },
@@ -917,7 +925,7 @@ fn jsClearInterval(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const
 
 fn jsSetImmediate(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    return installNativeTimer(ctx, args, .timeout, 1);
+    return installNativeTimer(ctx, args, .immediate, 1);
 }
 
 fn jsClearImmediate(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
