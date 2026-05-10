@@ -254,6 +254,7 @@ fn installProcess(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
     }
     try setString(ctx, env, "ZIG_DOM_SKIP_TESTING_LIBRARY", "1");
     try setString(ctx, env, "ZIG_DOM", "1");
+    try setString(ctx, env, "NODE_ENV", "test");
 
     const argv = quickjs.Value.initArray(ctx);
     if (argv.isException()) return error.JSError;
