@@ -70,6 +70,14 @@ pub const Runtime = struct {
         return self.adapter.executePendingJob();
     }
 
+    pub fn hasPendingNativeTimers(self: *Runtime) bool {
+        return self.adapter.hasPendingNativeTimers();
+    }
+
+    pub fn executePendingJobOrNativeTimer(self: *Runtime) RuntimeError!bool {
+        return self.adapter.executePendingJobOrNativeTimer();
+    }
+
     pub fn loadFromOnLoad(self: *Runtime, path: []const u8) RuntimeError!?OnLoadResult {
         return self.adapter.loadFromOnLoad(path);
     }

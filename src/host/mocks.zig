@@ -671,6 +671,7 @@ fn jsSpyOn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
         defer atom.deinit(ctx);
         const setter = quickjs.Value.undefined;
         _ = quickjs.c.JS_DefinePropertyGetSet(ctx.cval(), target.cval(), @intFromEnum(atom), wrapped_getter.dup(ctx).cval(), setter.cval(), quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_ENUMERABLE);
+        mirrorGlobalWindowGetterProperty(ctx, target, property_key, wrapped_getter);
         return wrapped_getter;
     }
 
@@ -875,6 +876,28 @@ fn mirrorGlobalWindowProperty(ctx: *quickjs.Context, target: quickjs.Value, prop
         @intFromEnum(atom),
         replacement.dup(ctx).cval(),
         quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_WRITABLE | quickjs.c.JS_PROP_ENUMERABLE,
+    );
+}
+
+fn mirrorGlobalWindowGetterProperty(ctx: *quickjs.Context, target: quickjs.Value, property_key: quickjs.Value, getter: quickjs.Value) void {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const window = global.getPropertyStr(ctx, "window");
+    defer window.deinit(ctx);
+    if (!window.isObject()) return;
+    if (!target.isSameValue(ctx, window)) return;
+
+    const atom = quickjs.Atom.fromValue(ctx, property_key);
+    defer atom.deinit(ctx);
+    const setter = quickjs.Value.undefined;
+    _ = quickjs.c.JS_DefinePropertyGetSet(
+        ctx.cval(),
+        global.cval(),
+        @intFromEnum(atom),
+        getter.dup(ctx).cval(),
+        setter.cval(),
+        quickjs.c.JS_PROP_CONFIGURABLE | quickjs.c.JS_PROP_ENUMERABLE,
     );
 }
 

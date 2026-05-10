@@ -928,6 +928,13 @@ pub fn hasPendingNativeTimers() bool {
     return native_timers.items.len > 0;
 }
 
+pub fn hasDueNativeTimers() bool {
+    for (native_timers.items) |timer| {
+        if (timer.remaining_turns <= 1) return true;
+    }
+    return false;
+}
+
 pub fn runNativeTimerTurn(ctx: *quickjs.Context) quickjs.Value {
     if (native_timers.items.len == 0) return quickjs.Value.undefined;
 

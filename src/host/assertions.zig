@@ -1,5 +1,6 @@
 const std = @import("std");
 const quickjs = @import("quickjs");
+const platform = @import("platform.zig");
 
 pub const AssertionError = error{JSError};
 
@@ -180,6 +181,21 @@ fn drainPendingJobs(ctx: *quickjs.Context) !void {
     var iterations: usize = 0;
     while (rt.isJobPending()) : (iterations += 1) {
         _ = rt.executePendingJob() catch return error.JSError;
+        if (iterations > 100_000) return error.JSError;
+    }
+}
+
+fn drainPendingJobsAndTimers(ctx: *quickjs.Context) !void {
+    const rt = ctx.getRuntime();
+    var iterations: usize = 0;
+    while (rt.isJobPending() or platform.hasDueNativeTimers()) : (iterations += 1) {
+        if (rt.isJobPending()) {
+            _ = rt.executePendingJob() catch return error.JSError;
+        } else {
+            const result = platform.runNativeTimerTurn(ctx);
+            defer result.deinit(ctx);
+            if (result.isException()) return error.JSError;
+        }
         if (iterations > 100_000) return error.JSError;
     }
 }
@@ -473,7 +489,7 @@ fn jsMatcher(
     const matcher: Matcher = @enumFromInt(if (inverted) magic - 1000 else magic);
     const received = quickjs.Value.fromCVal(data[0]);
     if (matcher == .toBeInTheDocument and inverted and received.isObject()) {
-        drainPendingJobs(ctx) catch {
+        drainPendingJobsAndTimers(ctx) catch {
             if (ctx.hasException()) return quickjs.Value.exception;
         };
     }
@@ -508,7 +524,14 @@ fn jsMatcher(
         pass = isOwnedByDocument(ctx, received);
     }
 
-    if (pass != inverted) return quickjs.Value.undefined;
+    if (pass != inverted) {
+        if (matcher == .toHaveBeenCalledTimes) {
+            drainPendingJobsAndTimers(ctx) catch {
+                if (ctx.hasException()) return quickjs.Value.exception;
+            };
+        }
+        return quickjs.Value.undefined;
+    }
     return throwMatcherError(ctx, matcher, inverted);
 }
 

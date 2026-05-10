@@ -1065,7 +1065,8 @@ const ModuleLoaderState = struct {
             var iterations: usize = 0;
             while (result.promiseState(ctx) == .pending) : (iterations += 1) {
                 if (iterations > 100_000) return error.EvaluationFailed;
-                _ = runtime.executePendingJob() catch return error.EvaluationFailed;
+                if (!runtime.isJobPending() and !runtime.hasPendingNativeTimers()) return error.EvaluationFailed;
+                _ = runtime.executePendingJobOrNativeTimer() catch return error.EvaluationFailed;
             }
             if (result.promiseState(ctx) == .rejected) return error.EvaluationFailed;
         }
@@ -3344,8 +3345,8 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
             };
         }
 
-        if (vm.isJobPending()) {
-            _ = vm.executePendingJob() catch |err| {
+        if (vm.isJobPending() or vm.hasPendingNativeTimers()) {
+            _ = vm.executePendingJobOrNativeTimer() catch |err| {
                 return failureFromRuntimeException(allocator, path, "job execution failed", err, &vm);
             };
             continue;

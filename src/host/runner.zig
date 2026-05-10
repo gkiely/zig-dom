@@ -2,6 +2,7 @@ const std = @import("std");
 const quickjs = @import("quickjs");
 const reporter = @import("../runner/reporter.zig");
 const zig_dom = @import("../dom/dom.zig");
+const platform = @import("platform.zig");
 
 const Allocator = std.mem.Allocator;
 const DEFAULT_TIMEOUT_MS: i64 = 5000;
@@ -557,8 +558,15 @@ pub const HostRunner = struct {
         if (result.isPromise()) {
             var iterations: usize = 0;
             while (result.promiseState(self.ctx) == .pending) : (iterations += 1) {
-                if (!self.rt.isJobPending()) break;
-                _ = self.rt.executePendingJob() catch return .{ .ok = false, .error_text = self.takeExceptionText() };
+                if (self.rt.isJobPending()) {
+                    _ = self.rt.executePendingJob() catch return .{ .ok = false, .error_text = self.takeExceptionText() };
+                } else if (platform.hasPendingNativeTimers()) {
+                    const timer_result = platform.runNativeTimerTurn(self.ctx);
+                    defer timer_result.deinit(self.ctx);
+                    if (timer_result.isException()) return .{ .ok = false, .error_text = self.takeExceptionText() };
+                } else {
+                    break;
+                }
                 if (iterations > 100_000) break;
             }
             switch (result.promiseState(self.ctx)) {

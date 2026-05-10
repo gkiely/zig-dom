@@ -215,7 +215,7 @@ pub const Runtime = struct {
                         return error.EvaluationFailed;
                     },
                     .pending => {
-                        if (!self.isJobPending()) {
+                        if (!self.isJobPending() and !self.hasPendingNativeTimers()) {
                             const message_buf = std.fmt.allocPrint(
                                 self.allocator,
                                 "module evaluation pending with no jobs: {s}",
@@ -228,7 +228,7 @@ pub const Runtime = struct {
                             return error.EvaluationFailed;
                         }
 
-                        _ = self.executePendingJob() catch return error.EvaluationFailed;
+                        _ = self.executePendingJobOrNativeTimer() catch return error.EvaluationFailed;
 
                         if (pump_iterations > 100_000) {
                             const message_buf = std.fmt.allocPrint(
@@ -274,6 +274,24 @@ pub const Runtime = struct {
     pub fn executePendingJob(self: *Runtime) RuntimeError!bool {
         const maybe_ctx = self.rt.executePendingJob() catch return error.JobExecutionFailed;
         return maybe_ctx != null;
+    }
+
+    pub fn hasPendingNativeTimers(self: *Runtime) bool {
+        _ = self;
+        return platform.hasPendingNativeTimers();
+    }
+
+    pub fn executeNativeTimerTurn(self: *Runtime) RuntimeError!bool {
+        const result = platform.runNativeTimerTurn(self.ctx);
+        defer result.deinit(self.ctx);
+        if (result.isException()) return error.JobExecutionFailed;
+        return true;
+    }
+
+    pub fn executePendingJobOrNativeTimer(self: *Runtime) RuntimeError!bool {
+        if (self.isJobPending()) return self.executePendingJob();
+        if (self.hasPendingNativeTimers()) return self.executeNativeTimerTurn();
+        return false;
     }
 
     pub fn loadFromOnLoad(self: *Runtime, path: []const u8) RuntimeError!?OnLoadResult {

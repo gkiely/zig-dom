@@ -12,6 +12,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installAccessor(ctx, proto, "className", callbacks.classNameGet, callbacks.classNameSet);
     try bindings.installAccessor(ctx, proto, "title", callbacks.titleGet, callbacks.titleSet);
     try bindings.installAccessor(ctx, proto, "htmlFor", callbacks.htmlForGet, callbacks.htmlForSet);
+    try bindings.installAccessor(ctx, proto, "role", callbacks.roleGet, callbacks.roleSet);
     try bindings.installGetter(ctx, proto, "control", callbacks.controlGet);
     try bindings.installGetter(ctx, proto, "labels", callbacks.labelsGet);
     try bindings.installAccessor(ctx, proto, "innerHTML", callbacks.innerHtmlGet, callbacks.innerHtmlSet);

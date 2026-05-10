@@ -6,6 +6,6 @@ Prefer native Zig implementations exposed through QuickJS bindings. DOM behavior
 
 Do not add library specific code to fix issues, update our implementation.
 
-Use `-Doptimize=Debug` when fixing broken individual tests, it rebuilds faster. Use` -Doptimize=ReleaseFast` for perf testing or running multiple tests.
+Use `-Doptimize=Debug` when fixing broken individual tests, it rebuilds faster. Use` -Doptimize=ReleaseFast` for perf testing or when you need to run multiple tests, it runs tests faster.
 
 Use `gtimeout` for timeout handling in scripts.

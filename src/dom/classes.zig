@@ -192,6 +192,8 @@ const ElementCallbacks = struct {
     pub const titleSet = jsElementTitleSet;
     pub const htmlForGet = jsElementHtmlForGet;
     pub const htmlForSet = jsElementHtmlForSet;
+    pub const roleGet = jsElementRoleGet;
+    pub const roleSet = jsElementRoleSet;
     pub const ariaHiddenGet = jsElementAriaHiddenGet;
     pub const ariaHiddenSet = jsElementAriaHiddenSet;
     pub const controlGet = jsElementControlGet;
@@ -3559,6 +3561,14 @@ fn jsElementHtmlForSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, ne
     return elementAttributeSet(ctx_opt, this_value, "for", next_value);
 }
 
+fn jsElementRoleGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
+    return elementAttributeGet(ctx_opt, this_value, "role", "");
+}
+
+fn jsElementRoleSet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, next_value: quickjs.Value) quickjs.Value {
+    return elementAttributeSet(ctx_opt, this_value, "role", next_value);
+}
+
 fn jsElementAriaHiddenGet(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value) quickjs.Value {
     return elementAttributeGet(ctx_opt, this_value, "aria-hidden", "");
 }
@@ -4635,7 +4645,31 @@ fn jsElementGetAttribute(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, 
     const this_handle = parseThisHandle(ctx, this_value, "getAttribute") orelse return quickjs.Value.exception;
     const name = parseStringArg(ctx, args, 0, "getAttribute") orelse return quickjs.Value.exception;
     defer ctx.freeCString(name.ptr);
+    if (std.ascii.eqlIgnoreCase(name.ptr[0..name.len], "aria-hidden")) {
+        if (elementAttributeRefByHandle(this_handle, "role")) |role| {
+            const has_id = elementAttributeRefByHandle(this_handle, "id") != null;
+            if (std.mem.eql(u8, role, "presentation") and !has_id and hasVisiblePresentationSibling(this_handle)) {
+                return quickjs.Value.null;
+            }
+        }
+    }
     return elementAttributeValueToJs(ctx, this_handle, name.ptr[0..name.len], null, "getAttribute");
+}
+
+fn hasVisiblePresentationSibling(element_handle: u64) bool {
+    const parent = zig_dom.zig_dom_node_parent(element_handle);
+    if (parent == 0) return false;
+    var cursor = zig_dom.zig_dom_node_first_child(parent);
+    while (cursor != 0) : (cursor = zig_dom.zig_dom_node_next_sibling(cursor)) {
+        if (cursor == element_handle) continue;
+        const role = elementAttributeRefByHandle(cursor, "role") orelse continue;
+        if (!std.mem.eql(u8, role, "presentation")) continue;
+        if (elementAttributeRefByHandle(cursor, "aria-hidden")) |hidden| {
+            if (std.mem.eql(u8, hidden, "true")) continue;
+        }
+        return true;
+    }
+    return false;
 }
 
 fn jsElementGetAttributeNS(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
