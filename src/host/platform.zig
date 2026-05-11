@@ -33,6 +33,7 @@ var native_next_timer_id: i32 = 1;
 var crypto_uuid_counter: u64 = 0;
 var crypto_uuid_state: u64 = 0xA409_3822_299F_31D0;
 var object_url_counter: u64 = 0;
+var auto_height_duration_cache: [4097]u16 = [_]u16{0} ** 4097;
 
 pub fn reset(ctx: *quickjs.Context) void {
     if (native_timer_ctx != ctx) return;
@@ -988,9 +989,26 @@ fn jsObjectGetAutoHeightDuration(maybe_ctx: ?*quickjs.Context, _: quickjs.Value,
     const height = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toFloat64(ctx) catch 0.0 else 0.0;
     if (!(height > 0.0)) return quickjs.Value.initInt32(0);
 
+    if (height <= 4096.0 and height == @floor(height)) {
+        const index: usize = @intFromFloat(height);
+        const cached = auto_height_duration_cache[index];
+        if (cached != 0) {
+            return quickjs.Value.initFloat64(@floatFromInt(cached));
+        }
+
+        const computed = computeAutoHeightDuration(height);
+        const rounded: u16 = @intFromFloat(@max(1.0, @min(computed, 3000.0)));
+        auto_height_duration_cache[index] = rounded;
+        return quickjs.Value.initFloat64(@floatFromInt(rounded));
+    }
+
+    return quickjs.Value.initFloat64(computeAutoHeightDuration(height));
+}
+
+fn computeAutoHeightDuration(height: f64) f64 {
     const constant = height / 36.0;
-    const duration = @min(@round((4.0 + 15.0 * std.math.pow(f64, constant, 0.25) + constant / 5.0) * 10.0), 3000.0);
-    return quickjs.Value.initFloat64(duration);
+    const quarter_root = @sqrt(@sqrt(constant));
+    return @min(@round((4.0 + 15.0 * quarter_root + constant / 5.0) * 10.0), 3000.0);
 }
 
 fn clearNativeTimers(ctx: *quickjs.Context) void {
