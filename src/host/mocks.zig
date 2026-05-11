@@ -1066,7 +1066,7 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
             state.calls.setLength(ctx, 0) catch return quickjs.Value.exception;
             state.once_implementations.setLength(ctx, 0) catch return quickjs.Value.exception;
             setMockLastCall(ctx, this_value, quickjs.Value.undefined) catch return quickjs.Value.exception;
-            replaceValue(ctx, &state.implementation, state.original_implementation);
+            replaceValue(ctx, &state.implementation, quickjs.Value.undefined);
             clearModes(ctx, state, true);
         },
         .restore => {
