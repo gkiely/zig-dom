@@ -10,6 +10,7 @@
     "build": "bun run build:packages",
     "build:watch": "zig build -Doptimize=ReleaseFast --summary none --watch -fincremental",
     "test": "zig build run -Doptimize=Debug --summary none -- test --root ../youneedawiki",
+    "test:commit:gate": "bun run test:perf ../youneedawiki/src/elements ../youneedawiki/src/components",
     "test:wpt": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests",
     "test:wpt:slow": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --only-slow --timeout-ms 180000",
     "test:wpt:all": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --include-slow --timeout-ms 180000",
