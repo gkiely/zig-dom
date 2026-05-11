@@ -52,9 +52,7 @@ pub fn install(ctx: *quickjs.Context) PlatformError!void {
     try installLocation(ctx, global);
     try installNavigator(ctx, global);
     try installProcess(ctx, global);
-    // Avoid mutating Object.prototype globally; this helper is legacy and
-    // measurably slows object-heavy React render paths.
-    // try installObjectPrototypeHelpers(ctx, global);
+    try installObjectPrototypeHelpers(ctx, global);
     try installImportMetaEnv(ctx, global);
     try installGlobals(ctx, global);
     try installErrorDefaults(ctx, global);
