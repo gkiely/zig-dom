@@ -662,6 +662,8 @@ fn jsConsoleError(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const 
 
 fn jsConsoleTrace(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    // Avoid emitting stackless noise from bare console.trace() calls.
+    if (args.len == 0) return quickjs.Value.undefined;
     emitConsoleLine(ctx, "Trace", args, .trace);
     return quickjs.Value.undefined;
 }
@@ -746,9 +748,50 @@ fn appendConsoleArg(ctx: *quickjs.Context, out: *std.ArrayList(u8), value: quick
         return;
     }
 
+    if (value.isError()) {
+        if (appendConsoleErrorStack(ctx, out, value)) return;
+    }
+
+    if (value.isObject() and !value.isFunction(ctx)) {
+        if (appendConsoleJsonValue(ctx, out, value)) return;
+    }
+
+    appendConsoleStringValue(ctx, out, value);
+}
+
+fn appendConsoleErrorStack(ctx: *quickjs.Context, out: *std.ArrayList(u8), value: quickjs.Value) bool {
+    const stack = value.getPropertyStr(ctx, "stack");
+    defer stack.deinit(ctx);
+    if (stack.isException() or stack.isUndefined() or stack.isNull()) return false;
+
+    const text = stack.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(text.ptr);
+    out.appendSlice(c_allocator, text.ptr[0..text.len]) catch {};
+    return true;
+}
+
+fn appendConsoleJsonValue(ctx: *quickjs.Context, out: *std.ArrayList(u8), value: quickjs.Value) bool {
+    const json = value.jsonStringify(ctx, quickjs.Value.undefined, quickjs.Value.undefined);
+    defer json.deinit(ctx);
+    if (json.isException()) {
+        const exception = ctx.getException();
+        exception.deinit(ctx);
+        return false;
+    }
+    if (json.isUndefined() or json.isNull()) return false;
+
+    const text = json.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(text.ptr);
+    out.appendSlice(c_allocator, text.ptr[0..text.len]) catch {};
+    return true;
+}
+
+fn appendConsoleStringValue(ctx: *quickjs.Context, out: *std.ArrayList(u8), value: quickjs.Value) void {
     const rendered = value.toStringValue(ctx);
     defer rendered.deinit(ctx);
     if (rendered.isException()) {
+        const exception = ctx.getException();
+        exception.deinit(ctx);
         out.appendSlice(c_allocator, "[console-arg-error]") catch {};
         return;
     }
