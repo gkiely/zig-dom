@@ -491,13 +491,15 @@ pub const HostRunner = struct {
     fn runTestEntry(self: *HostRunner, test_entry: *TestEntry, result: *RunResult, only_mode: bool) !void {
         const auto_restore_spies = autoRestoreSpiesEnabled();
         const spy_checkpoint = if (auto_restore_spies) self.captureSpyCheckpoint() else 0;
-        defer {
-            if (auto_restore_spies) {
+
+        const restoreSpiesBeforeAfterEach = struct {
+            fn run(self2: *HostRunner, enabled: bool, checkpoint: i32) void {
+                if (!enabled) return;
                 const restore_start = if (runnerProfileActive()) profileNowNs() else 0;
-                self.restoreSpiesSince(spy_checkpoint);
+                self2.restoreSpiesSince(checkpoint);
                 if (runnerProfileActive()) runner_perf_stats.restore_spies_ns += profileNowNs() - restore_start;
             }
-        }
+        }.run;
 
         const full_name = try self.testPath(test_entry);
         defer self.allocator.free(full_name);
@@ -522,6 +524,7 @@ pub const HostRunner = struct {
             const name = try std.fmt.allocPrint(self.allocator, "{s} (beforeEach)", .{full_name});
             defer self.allocator.free(name);
             try self.addFailure(result, name, before_outcome.error_text orelse "beforeEach failed", before_outcome.timeout);
+            restoreSpiesBeforeAfterEach(self, auto_restore_spies, spy_checkpoint);
             _ = try self.runHookList(after_each.items, test_entry.timeout_ms);
             return;
         }
@@ -532,6 +535,12 @@ pub const HostRunner = struct {
         const elapsed_ms = @as(f64, @floatFromInt(body_elapsed_ns)) / 1_000_000.0;
         if (runnerProfileActive()) runner_perf_stats.body_ns += body_elapsed_ns;
         defer if (test_outcome.error_text) |text| self.allocator.free(text);
+
+        // Restore spies created during beforeEach/test before running afterEach.
+        // This preserves Bun-like patterns where afterEach installs/reset mocks
+        // for the next test without being immediately reverted.
+        restoreSpiesBeforeAfterEach(self, auto_restore_spies, spy_checkpoint);
+
         const after_start = if (runnerProfileActive()) profileNowNs() else 0;
         const after_outcome = try self.runHookList(after_each.items, test_entry.timeout_ms);
         if (runnerProfileActive()) runner_perf_stats.after_each_ns += profileNowNs() - after_start;
