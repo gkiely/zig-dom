@@ -2053,7 +2053,8 @@ fn Printer(comptime cfg: Config) type {
 
     fn emitJsxElementAutomatic(self: *Self, e: ast.JSXElement) Error!void {
         const opening = self.tree.data(e.opening_element).jsx_opening_element;
-        try self.writeStr("__zigJsx(");
+        const child_count = self.countJsxChildren(e.children);
+        try self.writeStr(if (child_count > 1) "__zigJsxs(" else "__zigJsx(");
         try self.emitJsxTagClassic(opening.name);
         try self.writeStr(", ");
         try self.emitJsxPropsAutomatic(opening.attributes, e.children);
@@ -2061,7 +2062,8 @@ fn Printer(comptime cfg: Config) type {
     }
 
     fn emitJsxFragmentAutomatic(self: *Self, f: ast.JSXFragment) Error!void {
-        try self.writeStr("__zigJsx(__zigFragment, ");
+        const child_count = self.countJsxChildren(f.children);
+        try self.writeStr(if (child_count > 1) "__zigJsxs(__zigFragment, " else "__zigJsx(__zigFragment, ");
         try self.emitJsxPropsAutomatic(.empty, f.children);
         try self.writeByte(')');
     }
@@ -2159,71 +2161,30 @@ fn Printer(comptime cfg: Config) type {
     fn emitJsxPropsAutomatic(self: *Self, attrs: IndexRange, children: IndexRange) Error!void {
         const list = self.tree.extra(attrs);
         const child_count = self.countJsxChildren(children);
-        var has_spread = false;
-        for (list) |idx| {
-            if (self.tree.data(idx) == .jsx_spread_attribute) {
-                has_spread = true;
-                break;
-            }
-        }
-
-        if (!has_spread) {
-            try self.writeByte('{');
-            var first = true;
-            for (list) |idx| {
-                if (self.tree.data(idx) != .jsx_attribute) continue;
-                if (!first) try self.writeStr(", ");
-                try self.emitJsxPropClassic(idx);
-                first = false;
-            }
-            if (child_count > 0) {
-                if (!first) try self.writeStr(", ");
-                try self.writeStr("children: ");
-                try self.emitJsxChildrenValueAutomatic(children, child_count);
-            }
-            try self.writeByte('}');
-            return;
-        }
-
-        try self.writeStr("Object.assign({}, ");
+        try self.writeByte('{');
         var first = true;
-        var object_open = false;
         for (list) |idx| {
             switch (self.tree.data(idx)) {
                 .jsx_spread_attribute => |a| {
-                    if (object_open) {
-                        try self.writeByte('}');
-                        object_open = false;
-                        first = false;
-                    }
                     if (!first) try self.writeStr(", ");
+                    try self.writeStr("...");
                     try self.emit(a.argument);
                     first = false;
                 },
                 .jsx_attribute => {
-                    if (!object_open) {
-                        if (!first) try self.writeStr(", ");
-                        try self.writeByte('{');
-                        object_open = true;
-                    } else {
-                        try self.writeStr(", ");
-                    }
+                    if (!first) try self.writeStr(", ");
                     try self.emitJsxPropClassic(idx);
+                    first = false;
                 },
                 else => {},
             }
         }
-        if (object_open) {
-            try self.writeByte('}');
-            first = false;
-        }
         if (child_count > 0) {
             if (!first) try self.writeStr(", ");
-            try self.writeStr("{children: ");
+            try self.writeStr("children: ");
             try self.emitJsxChildrenValueAutomatic(children, child_count);
-            try self.writeByte('}');
         }
-        try self.writeByte(')');
+        try self.writeByte('}');
     }
 
     fn emitJsxPropClassic(self: *Self, idx: NodeIndex) Error!void {
@@ -2310,21 +2271,29 @@ fn Printer(comptime cfg: Config) type {
         if (child_count != 1) try self.writeByte('[');
         var emitted: usize = 0;
         for (self.tree.extra(children)) |idx| {
-            if (emitted > 0) try self.writeStr(", ");
             switch (self.tree.data(idx)) {
                 .jsx_text => |text| {
                     const raw_text = self.tree.string(text.value);
                     if (isAllAsciiWhitespace(raw_text)) continue;
+                    if (emitted > 0) try self.writeStr(", ");
                     const decoded = try decodeJsxTextEntities(self.arena.allocator(), raw_text);
                     try self.emitStringSliceLit(decoded);
                 },
                 .jsx_expression_container => |c| {
                     if (self.tree.data(c.expression) == .jsx_empty_expression) continue;
+                    if (emitted > 0) try self.writeStr(", ");
                     try self.emit(c.expression);
                 },
-                .jsx_element => |e| try self.emitJsxElementAutomatic(e),
-                .jsx_fragment => |f| try self.emitJsxFragmentAutomatic(f),
+                .jsx_element => {
+                    if (emitted > 0) try self.writeStr(", ");
+                    try self.emit(idx);
+                },
+                .jsx_fragment => {
+                    if (emitted > 0) try self.writeStr(", ");
+                    try self.emit(idx);
+                },
                 .jsx_spread_child => |c| {
+                    if (emitted > 0) try self.writeStr(", ");
                     try self.writeStr("...");
                     try self.emit(c.expression);
                 },

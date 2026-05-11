@@ -39,3 +39,4 @@ If you made a change that's not viable and the build worked before you made the 
 - Suppressing per-test pass-line output did not materially improve Tree time.
 - Applying unused `export const` pruning to ordinary ESM `.js` modules broke Tree collection by pruning exports still needed through unseen access patterns.
 - Modulo-based single-file test sharding was fast but invalid for Tree because it changed intra-file order enough to fail an order-sensitive test.
+- Switching TSX output to `react/jsx-dev-runtime`/`jsxDEV` did not materially improve Tree time.

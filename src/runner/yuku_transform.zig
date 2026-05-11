@@ -54,8 +54,15 @@ pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u
     const normalized_using = try replaceAll(allocator, normalized_require, "using ", "const ");
     defer allocator.free(normalized_using);
 
-    if (jsx_runtime == .automatic and std.mem.indexOf(u8, normalized_using, "__zigJsx(") != null) {
-        return insertAfterImportBlock(allocator, normalized_using, "import {jsx as __zigJsx, Fragment as __zigFragment} from \"react/jsx-runtime\";\n");
+    if (jsx_runtime == .automatic and
+        (std.mem.indexOf(u8, normalized_using, "__zigJsx(") != null or
+        std.mem.indexOf(u8, normalized_using, "__zigJsxs(") != null))
+    {
+        return insertAfterImportBlock(
+            allocator,
+            normalized_using,
+            "import {jsx as __zigJsx, jsxs as __zigJsxs, Fragment as __zigFragment} from \"react/jsx-runtime\";\n",
+        );
     }
 
     if (jsx_runtime == .classic and std.mem.indexOf(u8, normalized_using, "React.createElement") != null) {
@@ -219,13 +226,54 @@ test "yuku transform strips TypeScript" {
     try std.testing.expect(std.mem.indexOf(u8, out, " as string") == null);
 }
 
-test "yuku transform lowers JSX classic runtime" {
+test "yuku transform lowers JSX with automatic runtime" {
     const source =
         \\export const view = <button disabled className="x">Save</button>;
     ;
     const out = try transformSource(std.testing.allocator, "sample.tsx", source, "tsx");
     defer std.testing.allocator.free(out);
 
-    try std.testing.expect(std.mem.indexOf(u8, out, "React.createElement") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "__zigJsx(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "react/jsx-runtime") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "<button") == null);
+}
+
+test "yuku transform automatic JSX children avoids sparse arrays" {
+    const source =
+        \\export const view = (
+        \\  <div>
+        \\    {true && <span>A</span>}
+        \\    <span>B</span>
+        \\  </div>
+        \\);
+    ;
+    const out = try transformSource(std.testing.allocator, "sample.tsx", source, "tsx");
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, ", ,") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "[,") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, ",]") == null);
+}
+
+test "yuku transform automatic JSX props keeps spread syntax" {
+    const source =
+        \\const extra = { role: "button" };
+        \\export const view = <button className="x" {...extra} disabled />;
+    ;
+    const out = try transformSource(std.testing.allocator, "sample.tsx", source, "tsx");
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "Object.assign(") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "...extra") != null);
+}
+
+test "yuku transform automatic JSX emits jsxs for multi-child nodes" {
+    const source =
+        \\export const view = <div><span>A</span><span>B</span></div>;
+    ;
+    const out = try transformSource(std.testing.allocator, "sample.tsx", source, "tsx");
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "__zigJsxs(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "jsxs as __zigJsxs") != null);
 }
