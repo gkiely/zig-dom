@@ -21,99 +21,6 @@ pub fn defaultDomSuffixes() []const []const u8 {
     return &.{ ".jsx", ".tsx" };
 }
 
-const run_bootstrap_source =
-    \\globalThis.__zigDone = false;
-    \\globalThis.__zigRunError = "";
-    \\Promise.resolve()
-    \\  .then(() => globalThis.__zigRunner.run())
-    \\  .then(() => {
-    \\    globalThis.__zigDone = true;
-    \\  })
-    \\  .catch((error) => {
-    \\    const details = error && error.stack ? String(error.stack) : String(error);
-    \\    globalThis.__zigRunError = details;
-    \\    globalThis.__zigDone = true;
-    \\  });
-;
-
-const collection_flush_source =
-    \\globalThis.__zigCollectionFlushDone = false;
-    \\Promise.resolve().then(() => {
-    \\  globalThis.__zigCollectionFlushDone = true;
-    \\});
-;
-
-const cjs_runtime_helpers_source =
-    \\globalThis.__zigCjsRegistry = globalThis.__zigCjsRegistry || new Map();
-    \\globalThis.__zigCjsNamespaceToRequireValue = function __zigCjsNamespaceToRequireValue(ns) {
-    \\  try {
-    \\    if (Object.prototype.hasOwnProperty.call(ns, "__zigCommonJSExports")) return ns.__zigCommonJSExports;
-    \\    if (Object.prototype.hasOwnProperty.call(ns, "default")) return ns.default;
-    \\    return ns;
-    \\  } catch {
-    \\    return {};
-    \\  }
-    \\};
-    \\globalThis.__zigEsmNamespaceToRequireValue = function __zigEsmNamespaceToRequireValue(ns) {
-    \\  const out = {};
-    \\  Object.defineProperty(out, "__esModule", { value: true });
-    \\  for (const key of Reflect.ownKeys(ns)) {
-    \\    if (key === Symbol.toStringTag) continue;
-    \\    Object.defineProperty(out, key, {
-    \\      enumerable: true,
-    \\      configurable: true,
-    \\      get: () => ns[key],
-    \\    });
-    \\  }
-    \\  return out;
-    \\};
-    \\globalThis.__zigLoadCommonJS = function __zigLoadCommonJS(id, dirname, deps, factory) {
-    \\  const registry = globalThis.__zigCjsRegistry || (globalThis.__zigCjsRegistry = new Map());
-    \\  if (registry.has(id)) return registry.get(id).exports;
-    \\  const module = { exports: {} };
-    \\  registry.set(id, module);
-    \\  const require = (specifier) => {
-    \\    const key = String(specifier);
-    \\    const load = deps && deps[key];
-    \\    return load ? load() : globalThis.__zigNativeRequire(id, key, "");
-    \\  };
-    \\  require.resolve = (specifier) => String(specifier);
-    \\  factory.call(module.exports, module, module.exports, require, id, dirname, globalThis);
-    \\  return module.exports;
-    \\};
-    \\globalThis.__zigGetCjsExports = function __zigGetCjsExports(id) {
-    \\  const registry = globalThis.__zigCjsRegistry;
-    \\  return registry && registry.has(id) ? registry.get(id).exports : undefined;
-    \\};
-    \\globalThis.__zigSetCjsJsonExports = function __zigSetCjsJsonExports(id, value) {
-    \\  const registry = globalThis.__zigCjsRegistry || (globalThis.__zigCjsRegistry = new Map());
-    \\  if (!registry.has(id)) registry.set(id, { exports: value });
-    \\  return registry.get(id).exports;
-    \\};
-;
-
-const setup_dom_probe_begin_source =
-    \\globalThis.__zigSetupDocumentNodeNameHidden = false;
-    \\try {
-    \\  if (globalThis.document && globalThis.document.nodeName) {
-    \\    Object.defineProperty(globalThis.document, "nodeName", {
-    \\      value: undefined,
-    \\      configurable: true
-    \\    });
-    \\    globalThis.__zigSetupDocumentNodeNameHidden = true;
-    \\  }
-    \\} catch {}
-;
-
-const setup_dom_probe_end_source =
-    \\try {
-    \\  if (globalThis.__zigSetupDocumentNodeNameHidden && globalThis.document) {
-    \\    delete globalThis.document.nodeName;
-    \\  }
-    \\} catch {}
-    \\globalThis.__zigSetupDocumentNodeNameHidden = false;
-;
-
 const bun_specifier = "bun";
 const bun_test_specifier = "bun:test";
 const node_url_specifier = "url";
@@ -3290,10 +3197,7 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
     var vm = try Runtime.initWithDom(allocator, io, install_dom);
     defer vm.deinit();
 
-    vm.evalScript(
-        "<zig-runner-test-api>",
-        "globalThis.mock = globalThis.__zigMock; globalThis.spyOn = globalThis.__zigSpyOn; globalThis.__zigInstallBunTestApi();",
-    ) catch |err| {
+    installRunnerTestApi(&vm) catch |err| {
         return failureFromRuntimeException(allocator, path, "failed to initialize runner test API", err, &vm);
     };
 
@@ -3307,10 +3211,7 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
     installNativeRequire(&vm) catch |err| {
         return failureFromRuntimeException(allocator, path, "failed to initialize native CommonJS loader", err, &vm);
     };
-    defer vm.evalScript(
-        "<zig-cjs-cleanup>",
-        "try { if (globalThis.__zigCjsRegistry) globalThis.__zigCjsRegistry.clear(); delete globalThis.__zigCjsRegistry; delete globalThis.__zigNativeRequire; delete globalThis.__zigApplyMockModuleExports; delete globalThis.__zigPatchLoadedModuleExportByNamespace; } catch {}",
-    ) catch {};
+    defer cleanupNativeRequire(&vm);
 
     vm.setModuleLoaderFunc(ModuleLoaderState, &module_loader_state, moduleNormalize, moduleLoad);
 
@@ -3331,24 +3232,20 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
             return collectionFailureFromError(allocator, path, "collection failed", err);
         };
 
-        vm.evalScript("<zig-setup-dom-probe-begin>", setup_dom_probe_begin_source) catch |err| {
-            return failureFromRuntimeException(allocator, path, "failed to prepare setup environment", err, &vm);
-        };
+        const dom_probe_hidden = setupDomProbeBegin(&vm);
 
         const setup_eval_start = if (module_loader_state.profile_enabled) module_loader_state.profileNow() else 0;
         vm.evalModule(setup_module_id, setup_source) catch |err| {
-            vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch {};
+            setupDomProbeEnd(&vm, dom_probe_hidden);
             return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
         };
         while (vm.isJobPending()) {
             _ = vm.executePendingJob() catch |err| {
-                vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch {};
+                setupDomProbeEnd(&vm, dom_probe_hidden);
                 return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
             };
         }
-        vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch |err| {
-            return failureFromRuntimeException(allocator, path, "failed to restore setup environment", err, &vm);
-        };
+        setupDomProbeEnd(&vm, dom_probe_hidden);
         if (module_loader_state.profile_enabled) {
             module_loader_state.profile_setup_eval_ns += module_loader_state.profileNow() - setup_eval_start;
         }
@@ -3380,7 +3277,7 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
         module_loader_state.profile_entry_eval_ns += module_loader_state.profileNow() - entry_eval_start;
     }
 
-    vm.evalScript("<zig-collection-flush>", collection_flush_source) catch |err| {
+    scheduleCollectionFlush(&vm) catch |err| {
         return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
     };
 
@@ -3421,7 +3318,7 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
     }
 
     const runner_start = if (module_loader_state.profile_enabled) module_loader_state.profileNow() else 0;
-    vm.evalScript("<zig-runner-bootstrap>", run_bootstrap_source) catch |err| {
+    startRunnerExecution(&vm) catch |err| {
         return failureFromRuntimeException(allocator, path, "failed to start file execution", err, &vm);
     };
 
@@ -3657,31 +3554,215 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
     };
 }
 
+fn installRunnerTestApi(vm: *Runtime) !void {
+    const ctx = vm.adapter.ctx;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const mock_value = global.getPropertyStr(ctx, "__zigMock");
+    defer mock_value.deinit(ctx);
+    if (mock_value.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "mock", mock_value.dup(ctx)) catch return error.EvaluationFailed;
+
+    const spy_on_value = global.getPropertyStr(ctx, "__zigSpyOn");
+    defer spy_on_value.deinit(ctx);
+    if (spy_on_value.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "spyOn", spy_on_value.dup(ctx)) catch return error.EvaluationFailed;
+
+    const install_api = global.getPropertyStr(ctx, "__zigInstallBunTestApi");
+    defer install_api.deinit(ctx);
+    if (install_api.isException() or !install_api.isFunction(ctx)) return error.EvaluationFailed;
+    const result = install_api.call(ctx, quickjs.Value.undefined, &.{});
+    defer result.deinit(ctx);
+    if (result.isException()) return error.EvaluationFailed;
+}
+
+fn setupDomProbeBegin(vm: *Runtime) bool {
+    const ctx = vm.adapter.ctx;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) {
+        if (document.isException()) {
+            const exception = ctx.getException();
+            exception.deinit(ctx);
+        }
+        return false;
+    }
+
+    const node_name = document.getPropertyStr(ctx, "nodeName");
+    defer node_name.deinit(ctx);
+    if (node_name.isException()) {
+        const exception = ctx.getException();
+        exception.deinit(ctx);
+        return false;
+    }
+    if (node_name.isUndefined() or node_name.isNull()) return false;
+
+    document.setPropertyStr(ctx, "nodeName", quickjs.Value.undefined.dup(ctx)) catch return false;
+    return true;
+}
+
+fn setupDomProbeEnd(vm: *Runtime, hidden: bool) void {
+    if (!hidden) return;
+    const ctx = vm.adapter.ctx;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (document.isException() or !document.isObject()) {
+        if (document.isException()) {
+            const exception = ctx.getException();
+            exception.deinit(ctx);
+        }
+        return;
+    }
+
+    _ = document.deletePropertyStr(ctx, "nodeName") catch {};
+}
+
+fn scheduleCollectionFlush(vm: *Runtime) !void {
+    const ctx = vm.adapter.ctx;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    global.setPropertyStr(ctx, "__zigCollectionFlushDone", quickjs.Value.initBool(false)) catch return error.EvaluationFailed;
+
+    const promise_ctor = global.getPropertyStr(ctx, "Promise");
+    defer promise_ctor.deinit(ctx);
+    if (promise_ctor.isException() or !promise_ctor.isObject()) return error.EvaluationFailed;
+
+    const resolve_fn = promise_ctor.getPropertyStr(ctx, "resolve");
+    defer resolve_fn.deinit(ctx);
+    if (resolve_fn.isException() or !resolve_fn.isFunction(ctx)) return error.EvaluationFailed;
+
+    const resolved = resolve_fn.call(ctx, promise_ctor, &.{quickjs.Value.undefined});
+    defer resolved.deinit(ctx);
+    if (resolved.isException()) return error.EvaluationFailed;
+
+    const then_fn = resolved.getPropertyStr(ctx, "then");
+    defer then_fn.deinit(ctx);
+    if (then_fn.isException() or !then_fn.isFunction(ctx)) return error.EvaluationFailed;
+
+    const on_done = quickjs.Value.initCFunction(ctx, jsCollectionFlushDone, "__zigCollectionFlushDoneNative", 0);
+    if (on_done.isException()) return error.EvaluationFailed;
+    defer on_done.deinit(ctx);
+
+    const then_result = then_fn.call(ctx, resolved, &.{on_done.dup(ctx)});
+    defer then_result.deinit(ctx);
+    if (then_result.isException()) return error.EvaluationFailed;
+}
+
+fn startRunnerExecution(vm: *Runtime) !void {
+    const ctx = vm.adapter.ctx;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    global.setPropertyStr(ctx, "__zigDone", quickjs.Value.initBool(false)) catch return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigRunError", quickjs.Value.initStringLen(ctx, "")) catch return error.EvaluationFailed;
+
+    const runner = global.getPropertyStr(ctx, "__zigRunner");
+    defer runner.deinit(ctx);
+    if (runner.isException() or !runner.isObject()) return error.EvaluationFailed;
+
+    const run = runner.getPropertyStr(ctx, "run");
+    defer run.deinit(ctx);
+    if (run.isException() or !run.isFunction(ctx)) return error.EvaluationFailed;
+
+    const run_result = run.call(ctx, runner, &.{});
+    if (run_result.isException()) {
+        defer run_result.deinit(ctx);
+        setRunnerErrorFromException(ctx, global);
+        global.setPropertyStr(ctx, "__zigDone", quickjs.Value.initBool(true)) catch return error.EvaluationFailed;
+        return;
+    }
+    defer run_result.deinit(ctx);
+
+    if (!run_result.isPromise()) {
+        global.setPropertyStr(ctx, "__zigDone", quickjs.Value.initBool(true)) catch return error.EvaluationFailed;
+        return;
+    }
+
+    const then_fn = run_result.getPropertyStr(ctx, "then");
+    defer then_fn.deinit(ctx);
+    if (then_fn.isException() or !then_fn.isFunction(ctx)) return error.EvaluationFailed;
+
+    const on_fulfilled = quickjs.Value.initCFunction(ctx, jsRunnerPromiseResolved, "__zigRunnerPromiseResolved", 1);
+    if (on_fulfilled.isException()) return error.EvaluationFailed;
+    defer on_fulfilled.deinit(ctx);
+
+    const on_rejected = quickjs.Value.initCFunction(ctx, jsRunnerPromiseRejected, "__zigRunnerPromiseRejected", 1);
+    if (on_rejected.isException()) return error.EvaluationFailed;
+    defer on_rejected.deinit(ctx);
+
+    var then_args = [_]quickjs.Value{ on_fulfilled.dup(ctx), on_rejected.dup(ctx) };
+    defer then_args[0].deinit(ctx);
+    defer then_args[1].deinit(ctx);
+    const then_result = then_fn.call(ctx, run_result, &then_args);
+    if (then_result.isException()) {
+        defer then_result.deinit(ctx);
+        setRunnerErrorFromException(ctx, global);
+        global.setPropertyStr(ctx, "__zigDone", quickjs.Value.initBool(true)) catch return error.EvaluationFailed;
+        return;
+    }
+    then_result.deinit(ctx);
+}
+
 fn evalRunnerProcessGlobals(allocator: Allocator, vm: *Runtime, root: []const u8, entry_path: []const u8) !void {
-    const escaped_root = try escapeProcessJsSingleQuotedString(allocator, root);
-    defer allocator.free(escaped_root);
-    const escaped_entry = try escapeProcessJsSingleQuotedString(allocator, entry_path);
-    defer allocator.free(escaped_entry);
+    _ = allocator;
+    const ctx = vm.adapter.ctx;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
 
-    const source = try std.mem.concat(allocator, u8, &.{
-        "globalThis.process = globalThis.process || {};",
-        "globalThis.process.env = globalThis.process.env || {};",
-        "globalThis.process.cwd = function cwd() { return '",
-        escaped_root,
-        "'; };",
-        "globalThis.process.argv = ['zig-dom', 'test', '",
-        escaped_entry,
-        "'];",
-    });
-    defer allocator.free(source);
+    const existing_process = global.getPropertyStr(ctx, "process");
+    defer existing_process.deinit(ctx);
+    const process = if (!existing_process.isException() and existing_process.isObject())
+        existing_process.dup(ctx)
+    else
+        quickjs.Value.initObject(ctx);
+    defer process.deinit(ctx);
+    if (process.isException()) return error.EvaluationFailed;
 
-    try vm.evalScript("<zig-process-globals>", source);
+    const existing_env = process.getPropertyStr(ctx, "env");
+    defer existing_env.deinit(ctx);
+    const env = if (!existing_env.isException() and existing_env.isObject())
+        existing_env.dup(ctx)
+    else
+        quickjs.Value.initObject(ctx);
+    defer env.deinit(ctx);
+    if (env.isException()) return error.EvaluationFailed;
+    process.setPropertyStr(ctx, "env", env.dup(ctx)) catch return error.EvaluationFailed;
+
+    var cwd_data = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, root)};
+    defer cwd_data[0].deinit(ctx);
+    if (cwd_data[0].isException()) return error.EvaluationFailed;
+    const cwd_fn = quickjs.Value.initCFunctionData(ctx, jsProcessCwd, 0, 0, &cwd_data);
+    if (cwd_fn.isException()) return error.EvaluationFailed;
+    defer cwd_fn.deinit(ctx);
+    process.setPropertyStr(ctx, "cwd", cwd_fn.dup(ctx)) catch return error.EvaluationFailed;
+
+    const argv = quickjs.Value.initArray(ctx);
+    if (argv.isException()) return error.EvaluationFailed;
+    defer argv.deinit(ctx);
+    argv.setPropertyUint32(ctx, 0, quickjs.Value.initStringLen(ctx, "zig-dom")) catch return error.EvaluationFailed;
+    argv.setPropertyUint32(ctx, 1, quickjs.Value.initStringLen(ctx, "test")) catch return error.EvaluationFailed;
+    argv.setPropertyUint32(ctx, 2, quickjs.Value.initStringLen(ctx, entry_path)) catch return error.EvaluationFailed;
+    process.setPropertyStr(ctx, "argv", argv.dup(ctx)) catch return error.EvaluationFailed;
+
+    global.setPropertyStr(ctx, "process", process.dup(ctx)) catch return error.EvaluationFailed;
 }
 
 fn installNativeRequire(vm: *Runtime) !void {
     const ctx = vm.adapter.ctx;
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
+
+    const cjs_registry = quickjs.Value.initObject(ctx);
+    if (cjs_registry.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigCjsRegistry", cjs_registry) catch return error.EvaluationFailed;
 
     const func = quickjs.Value.initCFunction(ctx, jsNativeRequire, "__zigNativeRequire", 3);
     if (func.isException()) return error.EvaluationFailed;
@@ -3695,7 +3776,407 @@ fn installNativeRequire(vm: *Runtime) !void {
     if (patch_namespace_export.isException()) return error.EvaluationFailed;
     global.setPropertyStr(ctx, "__zigPatchLoadedModuleExportByNamespace", patch_namespace_export) catch return error.EvaluationFailed;
 
-    vm.evalScript("<zig-cjs-runtime-helpers>", cjs_runtime_helpers_source) catch return error.EvaluationFailed;
+    const cjs_namespace_to_require = quickjs.Value.initCFunction(ctx, jsCjsNamespaceToRequireValue, "__zigCjsNamespaceToRequireValue", 1);
+    if (cjs_namespace_to_require.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigCjsNamespaceToRequireValue", cjs_namespace_to_require) catch return error.EvaluationFailed;
+
+    const esm_namespace_to_require = quickjs.Value.initCFunction(ctx, jsEsmNamespaceToRequireValue, "__zigEsmNamespaceToRequireValue", 1);
+    if (esm_namespace_to_require.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigEsmNamespaceToRequireValue", esm_namespace_to_require) catch return error.EvaluationFailed;
+
+    const load_common_js = quickjs.Value.initCFunction(ctx, jsLoadCommonJS, "__zigLoadCommonJS", 4);
+    if (load_common_js.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigLoadCommonJS", load_common_js) catch return error.EvaluationFailed;
+
+    const get_cjs_exports = quickjs.Value.initCFunction(ctx, jsGetCjsExports, "__zigGetCjsExports", 1);
+    if (get_cjs_exports.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigGetCjsExports", get_cjs_exports) catch return error.EvaluationFailed;
+
+    const set_cjs_json_exports = quickjs.Value.initCFunction(ctx, jsSetCjsJsonExports, "__zigSetCjsJsonExports", 2);
+    if (set_cjs_json_exports.isException()) return error.EvaluationFailed;
+    global.setPropertyStr(ctx, "__zigSetCjsJsonExports", set_cjs_json_exports) catch return error.EvaluationFailed;
+}
+
+fn cleanupNativeRequire(vm: *Runtime) void {
+    const ctx = vm.adapter.ctx;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    _ = global.deletePropertyStr(ctx, "__zigCjsRegistry") catch {};
+    _ = global.deletePropertyStr(ctx, "__zigNativeRequire") catch {};
+    _ = global.deletePropertyStr(ctx, "__zigApplyMockModuleExports") catch {};
+    _ = global.deletePropertyStr(ctx, "__zigPatchLoadedModuleExportByNamespace") catch {};
+    _ = global.deletePropertyStr(ctx, "__zigCjsNamespaceToRequireValue") catch {};
+    _ = global.deletePropertyStr(ctx, "__zigEsmNamespaceToRequireValue") catch {};
+    _ = global.deletePropertyStr(ctx, "__zigLoadCommonJS") catch {};
+    _ = global.deletePropertyStr(ctx, "__zigGetCjsExports") catch {};
+    _ = global.deletePropertyStr(ctx, "__zigSetCjsJsonExports") catch {};
+}
+
+fn jsProcessCwd(
+    ctx_opt: ?*quickjs.Context,
+    _: quickjs.Value,
+    _: []const quickjs.c.JSValue,
+    _: c_int,
+    func_data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    return quickjs.Value.fromCVal(func_data[0]).dup(ctx);
+}
+
+fn jsCollectionFlushDone(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    global.setPropertyStr(ctx, "__zigCollectionFlushDone", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsRunnerPromiseResolved(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    global.setPropertyStr(ctx, "__zigDone", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn jsRunnerPromiseRejected(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const value = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.undefined;
+    setRunnerErrorFromValue(ctx, global, value);
+    global.setPropertyStr(ctx, "__zigDone", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
+fn setRunnerErrorFromException(ctx: *quickjs.Context, global: quickjs.Value) void {
+    const exception = ctx.getException();
+    defer exception.deinit(ctx);
+    setRunnerErrorFromValue(ctx, global, exception);
+}
+
+fn setRunnerErrorFromValue(ctx: *quickjs.Context, global: quickjs.Value, value: quickjs.Value) void {
+    const detail = blk: {
+        if (!value.isNull() and !value.isUndefined()) {
+            const stack = value.getPropertyStr(ctx, "stack");
+            defer stack.deinit(ctx);
+            if (stack.isException()) {
+                const exception = ctx.getException();
+                exception.deinit(ctx);
+            } else if (!stack.isUndefined() and !stack.isNull()) {
+                const stack_text = stack.toStringValue(ctx);
+                if (!stack_text.isException()) break :blk stack_text;
+                stack_text.deinit(ctx);
+                const exception = ctx.getException();
+                exception.deinit(ctx);
+            }
+        }
+
+        const text = value.toStringValue(ctx);
+        if (!text.isException()) break :blk text;
+        text.deinit(ctx);
+        const exception = ctx.getException();
+        exception.deinit(ctx);
+        break :blk quickjs.Value.initStringLen(ctx, "Error");
+    };
+    defer detail.deinit(ctx);
+
+    _ = global.setPropertyStr(ctx, "__zigRunError", detail.dup(ctx)) catch {};
+}
+
+fn ensureCjsRegistry(ctx: *quickjs.Context, global: quickjs.Value) !quickjs.Value {
+    var registry = global.getPropertyStr(ctx, "__zigCjsRegistry");
+    if (registry.isException()) return error.EvaluationFailed;
+    if (registry.isObject()) return registry;
+    registry.deinit(ctx);
+
+    registry = quickjs.Value.initObject(ctx);
+    if (registry.isException()) return error.EvaluationFailed;
+    errdefer registry.deinit(ctx);
+    global.setPropertyStr(ctx, "__zigCjsRegistry", registry.dup(ctx)) catch return error.EvaluationFailed;
+    return registry;
+}
+
+fn jsCjsNamespaceToRequireValue(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len < 1) return quickjs.Value.initObject(ctx);
+
+    const namespace = quickjs.Value.fromCVal(args[0]);
+    if (!namespace.isObject() and !namespace.isFunction(ctx)) {
+        return namespace.dup(ctx);
+    }
+
+    if (namespace.hasPropertyStr(ctx, "__zigCommonJSExports") catch false) {
+        const exports = namespace.getPropertyStr(ctx, "__zigCommonJSExports");
+        if (exports.isException()) {
+            const exception = ctx.getException();
+            exception.deinit(ctx);
+            return quickjs.Value.initObject(ctx);
+        }
+        return exports;
+    }
+
+    if (namespace.hasPropertyStr(ctx, "default") catch false) {
+        const default_value = namespace.getPropertyStr(ctx, "default");
+        if (default_value.isException()) {
+            const exception = ctx.getException();
+            exception.deinit(ctx);
+            return quickjs.Value.initObject(ctx);
+        }
+        return default_value;
+    }
+
+    return namespace.dup(ctx);
+}
+
+fn jsEsmNamespaceToRequireValue(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const out = quickjs.Value.initObject(ctx);
+    if (out.isException()) return quickjs.Value.exception;
+    errdefer out.deinit(ctx);
+
+    out.setPropertyStr(ctx, "__esModule", quickjs.Value.initBool(true)) catch return quickjs.Value.exception;
+    if (args.len < 1) return out;
+
+    const namespace = quickjs.Value.fromCVal(args[0]);
+    if (!namespace.isObject() and !namespace.isFunction(ctx)) return out;
+
+    const keys = objectKeys(ctx, namespace);
+    defer keys.deinit(ctx);
+    const key_count = keys.getLength(ctx) catch return quickjs.Value.exception;
+
+    var index: i64 = 0;
+    while (index < key_count) : (index += 1) {
+        const key = keys.getPropertyUint32(ctx, @intCast(index));
+        defer key.deinit(ctx);
+        if (!key.isString()) continue;
+
+        const key_text = key.toCStringLen(ctx) orelse continue;
+        defer ctx.freeCString(key_text.ptr);
+
+        const value = namespace.getPropertyStr(ctx, key_text.ptr);
+        if (value.isException()) return quickjs.Value.exception;
+        defer value.deinit(ctx);
+
+        out.setPropertyStr(ctx, key_text.ptr, value.dup(ctx)) catch return quickjs.Value.exception;
+    }
+
+    return out;
+}
+
+fn jsLoadCommonJS(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len < 4) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "__zigLoadCommonJS expects id, dirname, deps, factory");
+        return quickjs.Value.exception;
+    }
+
+    const id_value = quickjs.Value.fromCVal(args[0]).toStringValue(ctx);
+    if (id_value.isException()) return quickjs.Value.exception;
+    defer id_value.deinit(ctx);
+    const id_text = id_value.toCStringLen(ctx) orelse {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "__zigLoadCommonJS id must be coercible to string");
+        return quickjs.Value.exception;
+    };
+    defer ctx.freeCString(id_text.ptr);
+
+    const dirname_value = quickjs.Value.fromCVal(args[1]).toStringValue(ctx);
+    if (dirname_value.isException()) return quickjs.Value.exception;
+    defer dirname_value.deinit(ctx);
+
+    const factory = quickjs.Value.fromCVal(args[3]);
+    if (!factory.isFunction(ctx)) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "__zigLoadCommonJS factory must be a function");
+        return quickjs.Value.exception;
+    }
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const registry = ensureCjsRegistry(ctx, global) catch return quickjs.Value.exception;
+    defer registry.deinit(ctx);
+
+    const existing = registry.getPropertyStr(ctx, id_text.ptr);
+    defer existing.deinit(ctx);
+    if (existing.isException()) return quickjs.Value.exception;
+    if (!existing.isUndefined()) {
+        const existing_exports = existing.getPropertyStr(ctx, "exports");
+        if (existing_exports.isException()) return quickjs.Value.exception;
+        return existing_exports;
+    }
+
+    const module = quickjs.Value.initObject(ctx);
+    if (module.isException()) return quickjs.Value.exception;
+    defer module.deinit(ctx);
+
+    const module_exports = quickjs.Value.initObject(ctx);
+    if (module_exports.isException()) return quickjs.Value.exception;
+    defer module_exports.deinit(ctx);
+
+    module.setPropertyStr(ctx, "exports", module_exports.dup(ctx)) catch return quickjs.Value.exception;
+    registry.setPropertyStr(ctx, id_text.ptr, module.dup(ctx)) catch return quickjs.Value.exception;
+
+    var require_data = [_]quickjs.Value{
+        id_value.dup(ctx),
+        quickjs.Value.fromCVal(args[2]).dup(ctx),
+    };
+    defer require_data[0].deinit(ctx);
+    defer require_data[1].deinit(ctx);
+
+    const require_fn = quickjs.Value.initCFunctionData(ctx, jsCommonJsRequire, 1, 0, &require_data);
+    if (require_fn.isException()) return quickjs.Value.exception;
+    defer require_fn.deinit(ctx);
+
+    const require_resolve = quickjs.Value.initCFunction(ctx, jsCommonJsRequireResolve, "__zigCjsRequireResolve", 1);
+    if (require_resolve.isException()) return quickjs.Value.exception;
+    defer require_resolve.deinit(ctx);
+    require_fn.setPropertyStr(ctx, "resolve", require_resolve.dup(ctx)) catch return quickjs.Value.exception;
+
+    var factory_args = [_]quickjs.Value{
+        module.dup(ctx),
+        module_exports.dup(ctx),
+        require_fn.dup(ctx),
+        id_value.dup(ctx),
+        dirname_value.dup(ctx),
+        global.dup(ctx),
+    };
+    defer for (factory_args) |arg| arg.deinit(ctx);
+
+    const result = factory.call(ctx, module_exports, &factory_args);
+    defer result.deinit(ctx);
+    if (result.isException()) return quickjs.Value.exception;
+
+    const exports_out = module.getPropertyStr(ctx, "exports");
+    if (exports_out.isException()) return quickjs.Value.exception;
+    return exports_out;
+}
+
+fn jsCommonJsRequire(
+    ctx_opt: ?*quickjs.Context,
+    _: quickjs.Value,
+    args: []const quickjs.c.JSValue,
+    _: c_int,
+    func_data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len < 1) {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "require expects a specifier");
+        return quickjs.Value.exception;
+    }
+
+    const specifier_value = quickjs.Value.fromCVal(args[0]).toStringValue(ctx);
+    if (specifier_value.isException()) return quickjs.Value.exception;
+    defer specifier_value.deinit(ctx);
+    const specifier_text = specifier_value.toCStringLen(ctx) orelse {
+        _ = quickjs.c.JS_ThrowTypeError(ctx.cval(), "require specifier must be coercible to string");
+        return quickjs.Value.exception;
+    };
+    defer ctx.freeCString(specifier_text.ptr);
+
+    const deps = quickjs.Value.fromCVal(func_data[1]);
+    if (!deps.isUndefined() and !deps.isNull()) {
+        const load = deps.getPropertyStr(ctx, specifier_text.ptr);
+        defer load.deinit(ctx);
+        if (load.isException()) return quickjs.Value.exception;
+        if (load.isFunction(ctx)) {
+            const loaded = load.call(ctx, quickjs.Value.undefined, &.{});
+            if (loaded.isException()) return quickjs.Value.exception;
+            return loaded;
+        }
+    }
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const native_require = global.getPropertyStr(ctx, "__zigNativeRequire");
+    defer native_require.deinit(ctx);
+    if (native_require.isException() or !native_require.isFunction(ctx)) {
+        _ = quickjs.c.JS_ThrowReferenceError(ctx.cval(), "__zigNativeRequire is not installed");
+        return quickjs.Value.exception;
+    }
+
+    const empty = quickjs.Value.initStringLen(ctx, "");
+    if (empty.isException()) return quickjs.Value.exception;
+    defer empty.deinit(ctx);
+
+    var native_args = [_]quickjs.Value{
+        quickjs.Value.fromCVal(func_data[0]).dup(ctx),
+        specifier_value.dup(ctx),
+        empty.dup(ctx),
+    };
+    defer for (native_args) |arg| arg.deinit(ctx);
+
+    const loaded = native_require.call(ctx, quickjs.Value.undefined, &native_args);
+    if (loaded.isException()) return quickjs.Value.exception;
+    return loaded;
+}
+
+fn jsCommonJsRequireResolve(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len < 1) return quickjs.Value.undefined.toStringValue(ctx);
+    const value = quickjs.Value.fromCVal(args[0]).toStringValue(ctx);
+    if (value.isException()) return quickjs.Value.exception;
+    return value;
+}
+
+fn jsGetCjsExports(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len < 1) return quickjs.Value.undefined;
+
+    const id_value = quickjs.Value.fromCVal(args[0]).toStringValue(ctx);
+    if (id_value.isException()) return quickjs.Value.exception;
+    defer id_value.deinit(ctx);
+    const id_text = id_value.toCStringLen(ctx) orelse return quickjs.Value.undefined;
+    defer ctx.freeCString(id_text.ptr);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const registry = global.getPropertyStr(ctx, "__zigCjsRegistry");
+    defer registry.deinit(ctx);
+    if (registry.isException()) return quickjs.Value.exception;
+    if (!registry.isObject()) return quickjs.Value.undefined;
+
+    const module = registry.getPropertyStr(ctx, id_text.ptr);
+    defer module.deinit(ctx);
+    if (module.isException()) return quickjs.Value.exception;
+    if (module.isUndefined()) return quickjs.Value.undefined;
+
+    const exports = module.getPropertyStr(ctx, "exports");
+    if (exports.isException()) return quickjs.Value.exception;
+    return exports;
+}
+
+fn jsSetCjsJsonExports(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    if (args.len < 2) return quickjs.Value.undefined;
+
+    const id_value = quickjs.Value.fromCVal(args[0]).toStringValue(ctx);
+    if (id_value.isException()) return quickjs.Value.exception;
+    defer id_value.deinit(ctx);
+    const id_text = id_value.toCStringLen(ctx) orelse return quickjs.Value.exception;
+    defer ctx.freeCString(id_text.ptr);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const registry = ensureCjsRegistry(ctx, global) catch return quickjs.Value.exception;
+    defer registry.deinit(ctx);
+
+    const module = registry.getPropertyStr(ctx, id_text.ptr);
+    defer module.deinit(ctx);
+    if (module.isException()) return quickjs.Value.exception;
+    if (!module.isUndefined()) {
+        const existing_exports = module.getPropertyStr(ctx, "exports");
+        if (existing_exports.isException()) return quickjs.Value.exception;
+        return existing_exports;
+    }
+
+    const module_object = quickjs.Value.initObject(ctx);
+    if (module_object.isException()) return quickjs.Value.exception;
+    defer module_object.deinit(ctx);
+
+    const exports_value = quickjs.Value.fromCVal(args[1]);
+    module_object.setPropertyStr(ctx, "exports", exports_value.dup(ctx)) catch return quickjs.Value.exception;
+    registry.setPropertyStr(ctx, id_text.ptr, module_object.dup(ctx)) catch return quickjs.Value.exception;
+    return exports_value.dup(ctx);
 }
 
 fn jsNativeRequire(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
@@ -3894,24 +4375,6 @@ fn dupArgString(allocator: Allocator, ctx: *quickjs.Context, value: quickjs.c.JS
     const c_text = js_value.toCStringLen(ctx) orelse return error.ValueConversionFailed;
     defer ctx.freeCString(c_text.ptr);
     return allocator.dupe(u8, c_text.ptr[0..c_text.len]);
-}
-
-fn escapeProcessJsSingleQuotedString(allocator: Allocator, text: []const u8) ![]u8 {
-    var builder: std.ArrayList(u8) = .empty;
-    errdefer builder.deinit(allocator);
-
-    for (text) |ch| {
-        switch (ch) {
-            '\\' => try builder.appendSlice(allocator, "\\\\"),
-            '\'' => try builder.appendSlice(allocator, "\\'"),
-            '\n' => try builder.appendSlice(allocator, "\\n"),
-            '\r' => try builder.appendSlice(allocator, "\\r"),
-            '\t' => try builder.appendSlice(allocator, "\\t"),
-            else => try builder.append(allocator, ch),
-        }
-    }
-
-    return builder.toOwnedSlice(allocator);
 }
 
 fn moduleNormalize(
