@@ -264,7 +264,8 @@ fn installProcess(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
     }
     try setString(ctx, env, "ZIG_DOM_SKIP_TESTING_LIBRARY", "1");
     try setString(ctx, env, "ZIG_DOM", "1");
-    try setString(ctx, env, "NODE_ENV", "test");
+    const node_env = if (std.c.getenv("NODE_ENV")) |raw| std.mem.span(raw) else "test";
+    try setString(ctx, env, "NODE_ENV", node_env);
 
     const argv = quickjs.Value.initArray(ctx);
     if (argv.isException()) return error.JSError;
@@ -678,7 +679,23 @@ fn jsConsoleAssert(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const
     return quickjs.Value.undefined;
 }
 
+fn consoleStdioEnabled() bool {
+    const raw = std.c.getenv("ZIG_DOM_CONSOLE_STDIO") orelse return true;
+    const value = std.mem.trim(u8, std.mem.span(raw), " \t\r\n");
+    if (value.len == 0) return true;
+    if (std.mem.eql(u8, value, "0") or
+        std.ascii.eqlIgnoreCase(value, "false") or
+        std.ascii.eqlIgnoreCase(value, "no") or
+        std.ascii.eqlIgnoreCase(value, "off"))
+    {
+        return false;
+    }
+    return true;
+}
+
 fn emitConsoleLine(ctx: *quickjs.Context, prefix: ?[]const u8, args: []const quickjs.c.JSValue) void {
+    if (!consoleStdioEnabled()) return;
+
     var out = std.ArrayList(u8).empty;
     defer out.deinit(c_allocator);
 
