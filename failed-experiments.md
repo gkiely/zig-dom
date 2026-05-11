@@ -49,8 +49,6 @@
 - Resetting `Event._path` to `undefined` (instead of allocating an empty array each dispatch) slightly improved tmp click/act microbenches but did not materially improve full `Tree.test.tsx` runtime.
 - Raising QuickJS `JS_PROP_INITIAL_SIZE` from `8` to `16` (build-time patch in `vendor/zig-quickjs-ng/build.zig`) regressed full `Tree.test.tsx` runtime across repeated warm runs.
 - Forcing event timestamps to `0` via a temporary env-gated path in `createEventObject` (`ZIG_DOM_EVENT_TIMESTAMP_ZERO`) did not materially improve `Tree.test.tsx` or tmp act scheduler runtime.
-- Re-enabling `installObjectPrototypeHelpers()` (adds `getAutoHeightDuration` on `Object.prototype`) fixed Avatar/Share Modal failures but regressed tmp act/click perf and slightly regressed Tree runtime, so it remains disabled.
-- Adding an `OP_apply_eval` packed-array/arguments fast path in patched QuickJS (borrowing argv instead of `build_arg_list`) regressed tmp apply and full `Tree.test.tsx` runtime.
 - Replacing `js_call_bound_function` loops with a small-stack/memcpy fast path (for bound-call argv stitching) regressed tmp bound-call speed and slightly regressed full `Tree.test.tsx` runtime.
 - Replacing `RegExp.prototype.test` internals with a `js_regexp_test` fast path (builtin `exec` check + direct `lre_exec` bool path) did not materially improve tmp act counters or full `Tree.test.tsx` runtime.
 - Adding a small-string non-global `RegExp.prototype.test` result cache in patched QuickJS did not produce stable/material `Tree.test.tsx` gains (mixed run-to-run noise only).

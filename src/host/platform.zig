@@ -33,7 +33,6 @@ var native_next_timer_id: i32 = 1;
 var crypto_uuid_counter: u64 = 0;
 var crypto_uuid_state: u64 = 0xA409_3822_299F_31D0;
 var object_url_counter: u64 = 0;
-var auto_height_duration_cache: [4097]u16 = [_]u16{0} ** 4097;
 
 pub fn reset(ctx: *quickjs.Context) void {
     if (native_timer_ctx != ctx) return;
@@ -53,7 +52,6 @@ pub fn install(ctx: *quickjs.Context) PlatformError!void {
     try installLocation(ctx, global);
     try installNavigator(ctx, global);
     try installProcess(ctx, global);
-    try installObjectPrototypeHelpers(ctx, global);
     try installImportMetaEnv(ctx, global);
     try installGlobals(ctx, global);
     try installErrorDefaults(ctx, global);
@@ -284,22 +282,6 @@ fn installProcess(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
     try setString(ctx, process, "platform", "darwin");
     try setString(ctx, process, "arch", "arm64");
     try setFunction(ctx, process, "cwd", jsProcessCwd, 0);
-}
-
-fn installObjectPrototypeHelpers(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
-    const object_ctor = global.getPropertyStr(ctx, "Object");
-    defer object_ctor.deinit(ctx);
-    if (object_ctor.isException() or !object_ctor.isObject()) return;
-
-    const object_prototype = object_ctor.getPropertyStr(ctx, "prototype");
-    defer object_prototype.deinit(ctx);
-    if (object_prototype.isException() or !object_prototype.isObject()) return;
-
-    const existing = object_prototype.getPropertyStr(ctx, "getAutoHeightDuration");
-    defer existing.deinit(ctx);
-    if (!existing.isException() and existing.isFunction(ctx)) return;
-
-    try setNonEnumerableFunction(ctx, object_prototype, "getAutoHeightDuration", jsObjectGetAutoHeightDuration, 1);
 }
 
 fn installImportMetaEnv(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -982,33 +964,6 @@ fn jsCryptoRandomUUID(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const
     ) catch return quickjs.Value.exception;
 
     return quickjs.Value.initStringLen(ctx, text);
-}
-
-fn jsObjectGetAutoHeightDuration(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
-    const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    const height = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toFloat64(ctx) catch 0.0 else 0.0;
-    if (!(height > 0.0)) return quickjs.Value.initInt32(0);
-
-    if (height <= 4096.0 and height == @floor(height)) {
-        const index: usize = @intFromFloat(height);
-        const cached = auto_height_duration_cache[index];
-        if (cached != 0) {
-            return quickjs.Value.initFloat64(@floatFromInt(cached));
-        }
-
-        const computed = computeAutoHeightDuration(height);
-        const rounded: u16 = @intFromFloat(@max(1.0, @min(computed, 3000.0)));
-        auto_height_duration_cache[index] = rounded;
-        return quickjs.Value.initFloat64(@floatFromInt(rounded));
-    }
-
-    return quickjs.Value.initFloat64(computeAutoHeightDuration(height));
-}
-
-fn computeAutoHeightDuration(height: f64) f64 {
-    const constant = height / 36.0;
-    const quarter_root = @sqrt(@sqrt(constant));
-    return @min(@round((4.0 + 15.0 * quarter_root + constant / 5.0) * 10.0), 3000.0);
 }
 
 fn clearNativeTimers(ctx: *quickjs.Context) void {
