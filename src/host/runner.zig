@@ -51,6 +51,20 @@ fn runnerProfileActive() bool {
     return runnerProfileEnabled() or runnerProfileTestsEnabled();
 }
 
+fn autoRestoreSpiesEnabled() bool {
+    const raw = std.c.getenv("ZIG_DOM_AUTO_RESTORE_SPIES") orelse return false;
+    const value = std.mem.trim(u8, std.mem.span(raw), " \t\r\n");
+    if (value.len == 0) return false;
+    if (std.mem.eql(u8, value, "0") or
+        std.ascii.eqlIgnoreCase(value, "false") or
+        std.ascii.eqlIgnoreCase(value, "no") or
+        std.ascii.eqlIgnoreCase(value, "off"))
+    {
+        return false;
+    }
+    return true;
+}
+
 const Hook = struct {
     callback: quickjs.Value,
     timeout_ms: i64,
@@ -475,11 +489,14 @@ pub const HostRunner = struct {
     }
 
     fn runTestEntry(self: *HostRunner, test_entry: *TestEntry, result: *RunResult, only_mode: bool) !void {
-        const spy_checkpoint = self.captureSpyCheckpoint();
-        defer {
-            const restore_start = if (runnerProfileActive()) profileNowNs() else 0;
-            self.restoreSpiesSince(spy_checkpoint);
-            if (runnerProfileActive()) runner_perf_stats.restore_spies_ns += profileNowNs() - restore_start;
+        const auto_restore_spies = autoRestoreSpiesEnabled();
+        const spy_checkpoint = if (auto_restore_spies) self.captureSpyCheckpoint() else 0;
+        if (auto_restore_spies) {
+            defer {
+                const restore_start = if (runnerProfileActive()) profileNowNs() else 0;
+                self.restoreSpiesSince(spy_checkpoint);
+                if (runnerProfileActive()) runner_perf_stats.restore_spies_ns += profileNowNs() - restore_start;
+            }
         }
 
         const full_name = try self.testPath(test_entry);
@@ -1119,6 +1136,8 @@ fn jsRunnerDomCleanup(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const q
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
 
+    runTestingLibraryCleanup(ctx, global);
+
     const document = global.getPropertyStr(ctx, "document");
     defer document.deinit(ctx);
     if (!document.isException() and document.isObject()) {
@@ -1134,6 +1153,30 @@ fn jsRunnerDomCleanup(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const q
     clearStorageObject(ctx, global, "sessionStorage");
 
     return quickjs.Value.undefined;
+}
+
+fn runTestingLibraryCleanup(ctx: *quickjs.Context, global: quickjs.Value) void {
+    const testing_library = global.getPropertyStr(ctx, "__zigTestingLibraryReact");
+    defer testing_library.deinit(ctx);
+    if (testing_library.isException()) {
+        clearPendingException(ctx);
+        return;
+    }
+    if (!testing_library.isObject()) return;
+
+    const cleanup_fn = testing_library.getPropertyStr(ctx, "cleanup");
+    defer cleanup_fn.deinit(ctx);
+    if (cleanup_fn.isException()) {
+        clearPendingException(ctx);
+        return;
+    }
+    if (!cleanup_fn.isFunction(ctx)) return;
+
+    const result = cleanup_fn.call(ctx, testing_library, &.{});
+    defer result.deinit(ctx);
+    if (result.isException()) {
+        clearPendingException(ctx);
+    }
 }
 
 fn clearDocumentWindowNodes(ctx: *quickjs.Context, document: quickjs.Value) void {

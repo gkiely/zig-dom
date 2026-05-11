@@ -1,5 +1,6 @@
 const std = @import("std");
 const parser = @import("yuku_parser");
+const traversal = @import("traversal.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -54,13 +55,16 @@ pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u
     const normalized_using = try replaceAll(allocator, normalized_require, "using ", "const ");
     defer allocator.free(normalized_using);
 
+    const normalized_jsx_keys = try liftAutomaticJsxKeys(allocator, normalized_using);
+    defer allocator.free(normalized_jsx_keys);
+
     if (jsx_runtime == .automatic and
-        (std.mem.indexOf(u8, normalized_using, "__zigJsx(") != null or
-        std.mem.indexOf(u8, normalized_using, "__zigJsxs(") != null))
+        (std.mem.indexOf(u8, normalized_jsx_keys, "__zigJsx(") != null or
+        std.mem.indexOf(u8, normalized_jsx_keys, "__zigJsxs(") != null))
     {
         return insertAfterImportBlock(
             allocator,
-            normalized_using,
+            normalized_jsx_keys,
             "import {jsx as __zigJsx, jsxs as __zigJsxs, Fragment as __zigFragment} from \"react/jsx-runtime\";\n",
         );
     }
@@ -77,7 +81,153 @@ pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u
     }
 
     _ = path;
-    return allocator.dupe(u8, normalized_using);
+    return allocator.dupe(u8, normalized_jsx_keys);
+}
+
+fn liftAutomaticJsxKeys(allocator: Allocator, source: []const u8) ![]u8 {
+    if (std.mem.indexOf(u8, source, "__zigJsx(") == null and std.mem.indexOf(u8, source, "__zigJsxs(") == null) {
+        return allocator.dupe(u8, source);
+    }
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    var emit_from: usize = 0;
+    var changed = false;
+
+    while (true) {
+        const jsx_idx = std.mem.indexOfPos(u8, source, cursor, "__zigJsx(");
+        const jsxs_idx = std.mem.indexOfPos(u8, source, cursor, "__zigJsxs(");
+        if (jsx_idx == null and jsxs_idx == null) break;
+
+        const call_start: usize, const name_len: usize = blk: {
+            if (jsx_idx) |idx| {
+                if (jsxs_idx) |idxs| {
+                    if (idx <= idxs) break :blk .{ idx, "__zigJsx".len };
+                    break :blk .{ idxs, "__zigJsxs".len };
+                }
+                break :blk .{ idx, "__zigJsx".len };
+            }
+            break :blk .{ jsxs_idx.?, "__zigJsxs".len };
+        };
+        const open_paren = call_start + name_len;
+        const close_paren = traversal.findMatchingDelimiter(source, open_paren, '(', ')') orelse {
+            cursor = call_start + 1;
+            continue;
+        };
+
+        const rewritten = try rewriteAutomaticJsxCallWithLeadingKey(allocator, source[call_start .. close_paren + 1], name_len);
+        if (rewritten) |replacement| {
+            defer allocator.free(replacement);
+            changed = true;
+            try out.appendSlice(allocator, source[emit_from..call_start]);
+            try out.appendSlice(allocator, replacement);
+            emit_from = close_paren + 1;
+            cursor = emit_from;
+        } else {
+            // Keep scanning inside this call so nested JSX nodes can be rewritten.
+            cursor = call_start + 1;
+        }
+    }
+
+    if (!changed) {
+        return allocator.dupe(u8, source);
+    }
+
+    try out.appendSlice(allocator, source[emit_from..]);
+    return out.toOwnedSlice(allocator);
+}
+
+fn rewriteAutomaticJsxCallWithLeadingKey(
+    allocator: Allocator,
+    call_source: []const u8,
+    name_len: usize,
+) !?[]u8 {
+    if (call_source.len <= name_len + 2 or call_source[name_len] != '(' or call_source[call_source.len - 1] != ')') {
+        return null;
+    }
+
+    const args = call_source[name_len + 1 .. call_source.len - 1];
+    const first_comma = traversal.findTopLevelDelimiter(args, 0, ',') orelse return null;
+
+    const props_start = traversal.skipAsciiSpaces(args, first_comma + 1);
+    if (props_start >= args.len or args[props_start] != '{') return null;
+
+    const props_end = traversal.findMatchingDelimiter(args, props_start, '{', '}') orelse return null;
+    const after_props = traversal.skipAsciiSpaces(args, props_end + 1);
+    if (after_props < args.len and args[after_props] == ',') return null;
+
+    const obj_inner = args[props_start + 1 .. props_end];
+    var key_value: ?[]const u8 = null;
+    var rewritten_inner: std.ArrayList(u8) = .empty;
+    defer rewritten_inner.deinit(allocator);
+
+    var segment_start: usize = 0;
+    var kept_count: usize = 0;
+    while (segment_start <= obj_inner.len) {
+        const comma_index = traversal.findTopLevelDelimiter(obj_inner, segment_start, ',');
+        const segment_end = comma_index orelse obj_inner.len;
+        const segment = std.mem.trim(u8, obj_inner[segment_start..segment_end], " \t\r\n");
+        if (segment.len > 0) {
+            const lifted = extractKeyPropertyValue(segment);
+            if (key_value == null) {
+                key_value = lifted;
+            }
+            if (key_value == null or lifted == null) {
+                if (kept_count > 0) try rewritten_inner.append(allocator, ',');
+                try rewritten_inner.appendSlice(allocator, segment);
+                kept_count += 1;
+            }
+        }
+        if (comma_index == null) break;
+        segment_start = comma_index.? + 1;
+    }
+    const lifted_key = key_value orelse return null;
+
+    var rewritten_props: std.ArrayList(u8) = .empty;
+    defer rewritten_props.deinit(allocator);
+    try rewritten_props.append(allocator, '{');
+    if (rewritten_inner.items.len > 0) try rewritten_props.appendSlice(allocator, rewritten_inner.items);
+    try rewritten_props.append(allocator, '}');
+
+    var rewritten: std.ArrayList(u8) = .empty;
+    errdefer rewritten.deinit(allocator);
+    try rewritten.appendSlice(allocator, call_source[0 .. name_len + 1]);
+    try rewritten.appendSlice(allocator, args[0..props_start]);
+    try rewritten.appendSlice(allocator, rewritten_props.items);
+    try rewritten.appendSlice(allocator, args[props_end + 1 ..]);
+    try rewritten.append(allocator, ',');
+    try rewritten.appendSlice(allocator, lifted_key);
+    try rewritten.append(allocator, ')');
+    const owned = try rewritten.toOwnedSlice(allocator);
+    return owned;
+}
+
+fn extractKeyPropertyValue(segment: []const u8) ?[]const u8 {
+    if (segment.len == 0) return null;
+    if (std.mem.startsWith(u8, segment, "...")) return null;
+    var cursor = traversal.skipAsciiSpaces(segment, 0);
+    if (cursor >= segment.len) return null;
+
+    if (segment[cursor] == '"') {
+        if (!std.mem.startsWith(u8, segment[cursor..], "\"key\"")) return null;
+        cursor += "\"key\"".len;
+    } else if (std.mem.startsWith(u8, segment[cursor..], "key")) {
+        if (cursor + "key".len < segment.len) {
+            const next = segment[cursor + "key".len];
+            if (std.ascii.isAlphanumeric(next) or next == '_' or next == '$') return null;
+        }
+        cursor += "key".len;
+    } else {
+        return null;
+    }
+
+    cursor = traversal.skipAsciiSpaces(segment, cursor);
+    if (cursor >= segment.len or segment[cursor] != ':') return null;
+    const value = std.mem.trim(u8, segment[cursor + 1 ..], " \t\r\n");
+    if (value.len == 0) return null;
+    return value;
 }
 
 fn insertAfterImportBlock(allocator: Allocator, source: []const u8, insertion: []const u8) ![]u8 {
@@ -276,4 +426,27 @@ test "yuku transform automatic JSX emits jsxs for multi-child nodes" {
 
     try std.testing.expect(std.mem.indexOf(u8, out, "__zigJsxs(") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "jsxs as __zigJsxs") != null);
+}
+
+test "yuku transform automatic JSX lifts key out of props" {
+    const source =
+        \\const id = "file-id";
+        \\export const view = <div key={id} role="treeitem">child</div>;
+    ;
+    const out = try transformSource(std.testing.allocator, "sample.tsx", source, "tsx");
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"key\":") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, ",id)") != null);
+}
+
+test "automatic JSX key rewrite handles template literals" {
+    const call =
+        \\__zigJsxs("div", {"key": file.id, "role": "treeitem", children: [__zigJsxs(Link, {"to": `/app/page/${wiki.id}/${file.id}${search}`})]})
+    ;
+    const rewritten = (try rewriteAutomaticJsxCallWithLeadingKey(std.testing.allocator, call, "__zigJsxs".len)).?;
+    defer std.testing.allocator.free(rewritten);
+
+    try std.testing.expect(std.mem.indexOf(u8, rewritten, "\"key\":") == null);
+    try std.testing.expect(std.mem.indexOf(u8, rewritten, ",file.id)") != null);
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const runtime_pkg = @import("../runtime.zig");
 const transform = @import("transform.zig");
+const traversal = @import("traversal.zig");
 const yuku_transform = @import("yuku_transform.zig");
 const quickjs = @import("quickjs");
 
@@ -147,6 +148,26 @@ const node_vm_specifier = "vm";
 const node_vm_colon_specifier = "node:vm";
 const node_perf_hooks_specifier = "perf_hooks";
 const node_perf_hooks_colon_specifier = "node:perf_hooks";
+const node_specifier_prefix = "node:";
+
+const native_node_builtin_specifiers = [_][]const u8{
+    node_assert_specifier,
+    node_url_specifier,
+    node_fs_specifier,
+    node_path_specifier,
+    node_util_specifier,
+    node_buffer_specifier,
+    node_crypto_specifier,
+    node_http_specifier,
+    node_https_specifier,
+    node_net_specifier,
+    node_zlib_specifier,
+    node_child_process_specifier,
+    node_stream_specifier,
+    node_stream_web_specifier,
+    node_vm_specifier,
+    node_perf_hooks_specifier,
+};
 
 const native_builtin_stub_source =
     \\export {};
@@ -5491,76 +5512,17 @@ fn exportGlobalMembersAsModule(
 }
 
 fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
-    if (std.mem.eql(u8, module_name, bun_specifier)) {
+    if (std.mem.eql(u8, module_name, bun_specifier) or std.mem.eql(u8, module_name, bun_test_specifier)) {
         return native_builtin_stub_source;
     }
 
-    if (std.mem.eql(u8, module_name, bun_test_specifier)) {
-        return native_builtin_stub_source;
-    }
+    const bare_name = if (std.mem.startsWith(u8, module_name, node_specifier_prefix))
+        module_name[node_specifier_prefix.len..]
+    else
+        module_name;
 
-    if (std.mem.eql(u8, module_name, node_assert_specifier) or std.mem.eql(u8, module_name, node_assert_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_url_specifier) or std.mem.eql(u8, module_name, node_url_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_fs_specifier) or std.mem.eql(u8, module_name, node_fs_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_path_specifier) or std.mem.eql(u8, module_name, node_path_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_util_specifier) or std.mem.eql(u8, module_name, node_util_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_buffer_specifier) or std.mem.eql(u8, module_name, node_buffer_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_crypto_specifier) or std.mem.eql(u8, module_name, node_crypto_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_http_specifier) or std.mem.eql(u8, module_name, node_http_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_https_specifier) or std.mem.eql(u8, module_name, node_https_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_net_specifier) or std.mem.eql(u8, module_name, node_net_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_zlib_specifier) or std.mem.eql(u8, module_name, node_zlib_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_child_process_specifier) or std.mem.eql(u8, module_name, node_child_process_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_stream_specifier) or std.mem.eql(u8, module_name, node_stream_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_stream_web_specifier) or std.mem.eql(u8, module_name, node_stream_web_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_vm_specifier) or std.mem.eql(u8, module_name, node_vm_colon_specifier)) {
-        return native_builtin_stub_source;
-    }
-
-    if (std.mem.eql(u8, module_name, node_perf_hooks_specifier) or std.mem.eql(u8, module_name, node_perf_hooks_colon_specifier)) {
-        return native_builtin_stub_source;
+    inline for (native_node_builtin_specifiers) |specifier| {
+        if (std.mem.eql(u8, bare_name, specifier)) return native_builtin_stub_source;
     }
 
     return null;
@@ -6101,40 +6063,7 @@ fn findNodeEnvConditional(source: []const u8, start: usize) ?NodeEnvConditional 
 }
 
 fn findMatchingBrace(source: []const u8, open_index: usize) ?usize {
-    if (open_index >= source.len or source[open_index] != '{') return null;
-
-    var depth: usize = 0;
-    var cursor = open_index;
-    var quote: ?u8 = null;
-    var escaped = false;
-
-    while (cursor < source.len) : (cursor += 1) {
-        const ch = source[cursor];
-        if (quote) |q| {
-            if (escaped) {
-                escaped = false;
-            } else if (ch == '\\') {
-                escaped = true;
-            } else if (ch == q) {
-                quote = null;
-            }
-            continue;
-        }
-
-        if (ch == '"' or ch == '\'' or ch == '`') {
-            quote = ch;
-            continue;
-        }
-
-        if (ch == '{') {
-            depth += 1;
-        } else if (ch == '}') {
-            depth -= 1;
-            if (depth == 0) return cursor;
-        }
-    }
-
-    return null;
+    return traversal.findMatchingDelimiter(source, open_index, '{', '}');
 }
 
 fn looksLikeJsxSource(source: []const u8) bool {
@@ -6808,6 +6737,11 @@ test "isRelativeSpecifier detects relative paths" {
 test "shim sources resolve built-ins and fallback shims" {
     try std.testing.expect(builtInModuleSource("bun") != null);
     try std.testing.expect(builtInModuleSource("bun:test") != null);
+    try std.testing.expect(builtInModuleSource("fs") != null);
+    try std.testing.expect(builtInModuleSource("node:fs") != null);
+    try std.testing.expect(builtInModuleSource("stream/web") != null);
+    try std.testing.expect(builtInModuleSource("node:stream/web") != null);
+    try std.testing.expect(builtInModuleSource("node:react") == null);
     try std.testing.expect(builtInModuleSource("zig-dom") == null);
     try std.testing.expect(builtInModuleSource("react") == null);
     try std.testing.expect(builtInModuleSource("@testing-library/react") == null);

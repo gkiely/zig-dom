@@ -644,25 +644,25 @@ fn jsNoop(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) 
 
 fn jsConsoleLog(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    emitConsoleLine(ctx, null, args);
+    emitConsoleLine(ctx, null, args, .log);
     return quickjs.Value.undefined;
 }
 
 fn jsConsoleWarn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    emitConsoleLine(ctx, null, args);
+    emitConsoleLine(ctx, null, args, .warn);
     return quickjs.Value.undefined;
 }
 
 fn jsConsoleError(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    emitConsoleLine(ctx, null, args);
+    emitConsoleLine(ctx, null, args, .err);
     return quickjs.Value.undefined;
 }
 
 fn jsConsoleTrace(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    emitConsoleLine(ctx, "Trace", args);
+    emitConsoleLine(ctx, "Trace", args, .trace);
     return quickjs.Value.undefined;
 }
 
@@ -670,12 +670,24 @@ fn jsConsoleAssert(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     if (args.len > 0 and (quickjs.Value.fromCVal(args[0]).toBool(ctx) catch false)) return quickjs.Value.undefined;
     if (args.len > 1) {
-        emitConsoleLine(ctx, "Assertion failed:", args[1..]);
+        emitConsoleLine(ctx, "Assertion failed:", args[1..], .err);
     } else {
-        emitConsoleLine(ctx, "Assertion failed", &[_]quickjs.c.JSValue{});
+        emitConsoleLine(ctx, "Assertion failed", &[_]quickjs.c.JSValue{}, .err);
     }
     return quickjs.Value.undefined;
 }
+
+const ConsoleLevel = enum {
+    log,
+    warn,
+    err,
+    trace,
+};
+
+const ansi_reset = "\x1b[0m";
+const ansi_yellow = "\x1b[33m";
+const ansi_red = "\x1b[31m";
+const ansi_dim = "\x1b[2m";
 
 fn consoleStdioEnabled() bool {
     const raw = std.c.getenv("ZIG_DOM_CONSOLE_STDIO") orelse return true;
@@ -691,7 +703,7 @@ fn consoleStdioEnabled() bool {
     return true;
 }
 
-fn emitConsoleLine(ctx: *quickjs.Context, prefix: ?[]const u8, args: []const quickjs.c.JSValue) void {
+fn emitConsoleLine(ctx: *quickjs.Context, prefix: ?[]const u8, args: []const quickjs.c.JSValue, level: ConsoleLevel) void {
     if (!consoleStdioEnabled()) return;
 
     var out = std.ArrayList(u8).empty;
@@ -708,7 +720,20 @@ fn emitConsoleLine(ctx: *quickjs.Context, prefix: ?[]const u8, args: []const qui
         appendConsoleArg(ctx, &out, quickjs.Value.fromCVal(arg));
     }
 
+    if (consoleLevelColor(level)) |color| {
+        std.debug.print("{s}{s}{s}\n", .{ color, out.items, ansi_reset });
+        return;
+    }
     std.debug.print("{s}\n", .{out.items});
+}
+
+fn consoleLevelColor(level: ConsoleLevel) ?[]const u8 {
+    return switch (level) {
+        .warn => ansi_yellow,
+        .err => ansi_red,
+        .trace => ansi_dim,
+        .log => null,
+    };
 }
 
 fn appendConsoleArg(ctx: *quickjs.Context, out: *std.ArrayList(u8), value: quickjs.Value) void {
