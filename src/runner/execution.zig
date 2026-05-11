@@ -1032,6 +1032,19 @@ const ModuleLoaderState = struct {
         }
         if (profile) self.profile_cjs_require_cache_misses += 1;
 
+        if (builtInModuleSource(resolved) != null) {
+            const global = ctx.getGlobalObject();
+            defer global.deinit(ctx);
+            if (std.mem.eql(u8, resolved, node_crypto_specifier) or std.mem.eql(u8, resolved, node_crypto_colon_specifier)) {
+                const crypto_value = global.getPropertyStr(ctx, "crypto");
+                defer crypto_value.deinit(ctx);
+                if (!crypto_value.isException() and crypto_value.isObject()) {
+                    return crypto_value.dup(ctx);
+                }
+            }
+            return quickjs.Value.initObject(ctx);
+        }
+
         if (std.mem.endsWith(u8, resolved, ".json")) {
             if (profile) self.profile_cjs_require_json_count += 1;
             return self.loadCommonJsJsonValue(ctx, resolved);
@@ -1047,7 +1060,11 @@ const ModuleLoaderState = struct {
 
         const source = blk: {
             const raw = try self.readFileCached(resolved, max_module_source_bytes);
-            if (!isCommonJsSource(resolved, raw)) return error.UnsupportedExternalModule;
+            if (!isCommonJsSource(resolved, raw)) {
+                if (sourceHasCodePattern(raw, "import ") or sourceHasCodePattern(raw, "export ")) {
+                    return error.UnsupportedExternalModule;
+                }
+            }
             break :blk try self.buildLazyCommonJsScriptSource(resolved, raw);
         };
         defer self.allocator.free(source);
@@ -1600,15 +1617,7 @@ const ModuleLoaderState = struct {
         else
             return error.UnsupportedTransformLoader;
         _ = extension;
-        const can_tree_shake = std.mem.endsWith(u8, module_id, ".css.ts") and std.mem.eql(u8, loader, "ts");
-        const source = if (can_tree_shake) blk: {
-            const requested = self.requestedExportsFor(module_id) orelse break :blk try self.rewriteBarePackageNamedImports(module_id, contents);
-            const export_pruned = try pruneUnrequestedTsExports(self.allocator, contents, requested);
-            defer self.allocator.free(export_pruned);
-            const const_pruned = try pruneUnusedTsConstDeclarations(self.allocator, export_pruned);
-            defer self.allocator.free(const_pruned);
-            break :blk try self.rewriteBarePackageNamedImports(module_id, const_pruned);
-        } else try self.rewriteBarePackageNamedImports(module_id, contents);
+        const source = try self.rewriteBarePackageNamedImports(module_id, contents);
         defer self.allocator.free(source);
 
         const transformed = try yuku_transform.transformSource(self.allocator, module_id, source, loader);
@@ -1620,9 +1629,7 @@ const ModuleLoaderState = struct {
                 }) catch {};
             }
         }
-        if (!can_tree_shake) return transformed;
-        defer self.allocator.free(transformed);
-        return try pruneUnusedImports(self.allocator, transformed);
+        return transformed;
     }
 
     fn rewriteBarePackageNamedImports(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
@@ -1689,31 +1696,56 @@ const ModuleLoaderState = struct {
             imports.deinit(self.allocator);
         }
 
+        var saw_part = false;
         var parts = std.mem.tokenizeScalar(u8, bindings[1 .. bindings.len - 1], ',');
         while (parts.next()) |raw_part| {
             const part = std.mem.trim(u8, raw_part, " \t\r\n");
-            if (part.len == 0 or std.mem.startsWith(u8, part, "type ")) continue;
+            if (part.len == 0) continue;
+            saw_part = true;
+            if (std.mem.startsWith(u8, part, "type ")) continue;
             const as_index = std.mem.indexOf(u8, part, " as ");
             const imported = std.mem.trim(u8, if (as_index) |idx| part[0..idx] else part, " \t\r\n");
             const local = std.mem.trim(u8, if (as_index) |idx| part[idx + " as ".len ..] else part, " \t\r\n");
             if (!isValidIdentifier(imported) or !isValidIdentifier(local)) return null;
 
-            const subpath_specifier = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ parsed.specifier, imported });
-            errdefer self.allocator.free(subpath_specifier);
-            const resolved = self.normalizeSpecifier(module_id, subpath_specifier) catch {
-                self.allocator.free(subpath_specifier);
-                return null;
-            };
-            self.allocator.free(resolved);
-
             try imports.append(self.allocator, .{
                 .imported = try self.allocator.dupe(u8, imported),
                 .local = try self.allocator.dupe(u8, local),
-                .specifier = subpath_specifier,
+                .specifier = try self.allocator.dupe(u8, parsed.specifier),
             });
         }
 
-        if (imports.items.len == 0) return null;
+        if (imports.items.len == 0) {
+            if (saw_part) return @as(?[]u8, try self.allocator.dupe(u8, ""));
+            return null;
+        }
+
+        var use_subpath_specifiers = true;
+        for (imports.items) |*part| {
+            const subpath_specifier = std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ parsed.specifier, part.imported }) catch {
+                use_subpath_specifiers = false;
+                break;
+            };
+            const resolved = self.normalizeSpecifier(module_id, subpath_specifier) catch {
+                self.allocator.free(subpath_specifier);
+                const rewrite = try self.resolveCommonJsBarrelNamedImport(module_id, parsed.specifier, part.imported);
+                if (rewrite) |barrel| {
+                    defer self.allocator.free(barrel.export_name);
+                    self.allocator.free(part.specifier);
+                    part.specifier = barrel.resolved_specifier;
+                    self.allocator.free(part.imported);
+                    part.imported = barrel.member_name;
+                    continue;
+                }
+                use_subpath_specifiers = false;
+                break;
+            };
+            self.allocator.free(resolved);
+            self.allocator.free(part.specifier);
+            part.specifier = subpath_specifier;
+        }
+
+        if (!use_subpath_specifiers) return null;
 
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(self.allocator);
@@ -1725,6 +1757,21 @@ const ModuleLoaderState = struct {
         }
         const owned = try out.toOwnedSlice(self.allocator);
         return owned;
+    }
+
+    fn resolveCommonJsBarrelNamedImport(
+        self: *ModuleLoaderState,
+        module_id: []const u8,
+        package_specifier: []const u8,
+        imported_name: []const u8,
+    ) !?CommonJsBarrelPropertyRewrite {
+        const root_module_id = self.normalizeSpecifier(module_id, package_specifier) catch return null;
+        defer self.allocator.free(root_module_id);
+        if (builtInModuleSource(root_module_id) != null or isMockModuleId(root_module_id)) return null;
+
+        const root_source = self.readFileCached(root_module_id, max_module_source_bytes) catch return null;
+        if (!isCommonJsSource(root_module_id, root_source)) return null;
+        return commonJsBarrelRewriteForExport(self, root_module_id, root_source, imported_name);
     }
 
     fn hasOnLoadForSpecifier(self: *ModuleLoaderState, module_id: []const u8, specifier: []const u8) anyerror!bool {
@@ -5743,27 +5790,214 @@ fn commonJsBarrelRewriteForExport(
     root_module_id: []const u8,
     root_source: []const u8,
     name: []const u8,
-) !?CommonJsBarrelPropertyRewrite {
-    const export_index = findDefinePropertyExport(root_source, name) orelse return null;
-    const statement_end = findStatementEnd(root_source, export_index);
-    const statement = root_source[export_index..statement_end];
-    const return_index = std.mem.indexOf(u8, statement, "return ") orelse return null;
-    const return_expr = std.mem.trim(u8, statement[return_index + "return ".len ..], " \t\r\n;");
-    const dot_index = std.mem.indexOfScalar(u8, return_expr, '.') orelse return null;
-    const local = return_expr[0..dot_index];
-    if (local.len == 0 or !std.mem.startsWith(u8, local, "_")) return null;
-    const member_start = dot_index + 1;
-    const member_end = readIdentifierEnd(return_expr, member_start);
-    if (member_end == member_start) return null;
-    const member = return_expr[member_start..member_end];
-    const required = findCommonJsLocalRequireSpecifier(root_source, local) orelse return null;
-    const resolved = try state.normalizeRequireSpecifier(root_module_id, required);
-    errdefer state.allocator.free(resolved);
-    return .{
-        .export_name = try state.allocator.dupe(u8, name),
-        .resolved_specifier = resolved,
-        .member_name = try state.allocator.dupe(u8, member),
-    };
+) anyerror!?CommonJsBarrelPropertyRewrite {
+    if (findDefinePropertyExport(root_source, name)) |export_index| {
+        const statement_end = findStatementEnd(root_source, export_index);
+        const statement = root_source[export_index..statement_end];
+        const return_index = std.mem.indexOf(u8, statement, "return ") orelse return null;
+        const return_expr = std.mem.trim(u8, statement[return_index + "return ".len ..], " \t\r\n;");
+        const dot_index = std.mem.indexOfScalar(u8, return_expr, '.') orelse return null;
+        const local = return_expr[0..dot_index];
+        if (local.len == 0 or !std.mem.startsWith(u8, local, "_")) return null;
+        const member_start = dot_index + 1;
+        const member_end = readIdentifierEnd(return_expr, member_start);
+        if (member_end == member_start) return null;
+        const member = return_expr[member_start..member_end];
+        const required = findCommonJsLocalRequireSpecifier(root_source, local) orelse return null;
+        const resolved = try state.normalizeRequireSpecifier(root_module_id, required);
+        errdefer state.allocator.free(resolved);
+        return .{
+            .export_name = try state.allocator.dupe(u8, name),
+            .resolved_specifier = resolved,
+            .member_name = try state.allocator.dupe(u8, member),
+        };
+    }
+
+    if (parseModuleExportsRequireSpecifier(root_source)) |required| {
+        const resolved = try state.normalizeRequireSpecifier(root_module_id, required);
+        defer state.allocator.free(resolved);
+        if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) return null;
+        const child_source = state.readFileCached(resolved, max_module_source_bytes) catch return null;
+        if (!isCommonJsSource(resolved, child_source)) return null;
+
+        if (try commonJsBarrelRewriteForExport(state, resolved, child_source, name)) |nested| {
+            return nested;
+        }
+        if (commonJsModuleExportsObjectContainsKey(child_source, name)) {
+            return .{
+                .export_name = try state.allocator.dupe(u8, name),
+                .resolved_specifier = try state.allocator.dupe(u8, resolved),
+                .member_name = try state.allocator.dupe(u8, name),
+            };
+        }
+    }
+
+    if (parseModuleExportsIdentifier(root_source)) |target_ident| {
+        if (try commonJsObjectAssignRewriteForExport(state, root_module_id, root_source, target_ident, name)) |rewrite| {
+            return rewrite;
+        }
+    }
+
+    return null;
+}
+
+fn commonJsObjectAssignRewriteForExport(
+    state: *ModuleLoaderState,
+    root_module_id: []const u8,
+    root_source: []const u8,
+    target_ident: []const u8,
+    name: []const u8,
+) anyerror!?CommonJsBarrelPropertyRewrite {
+    var cursor: usize = 0;
+    while (std.mem.indexOfPos(u8, root_source, cursor, "Object.assign(")) |assign_index| {
+        var parse_cursor = assign_index + "Object.assign(".len;
+        skipTrivia(root_source, &parse_cursor);
+        const local_end = readIdentifierEnd(root_source, parse_cursor);
+        if (local_end == parse_cursor) {
+            cursor = assign_index + "Object.assign(".len;
+            continue;
+        }
+        const local = root_source[parse_cursor..local_end];
+        if (!std.mem.eql(u8, local, target_ident)) {
+            cursor = local_end;
+            continue;
+        }
+        parse_cursor = local_end;
+        skipTrivia(root_source, &parse_cursor);
+        if (parse_cursor >= root_source.len or root_source[parse_cursor] != ',') {
+            cursor = local_end;
+            continue;
+        }
+        parse_cursor += 1;
+        skipTrivia(root_source, &parse_cursor);
+        if (!std.mem.startsWith(u8, root_source[parse_cursor..], "require(")) {
+            cursor = parse_cursor;
+            continue;
+        }
+        const required = parseRequireSpecifierAt(root_source, parse_cursor) orelse {
+            cursor = parse_cursor + "require(".len;
+            continue;
+        };
+        const resolved = state.normalizeRequireSpecifier(root_module_id, required) catch {
+            cursor = parse_cursor + "require(".len;
+            continue;
+        };
+        defer state.allocator.free(resolved);
+        if (builtInModuleSource(resolved) != null or isMockModuleId(resolved)) {
+            cursor = parse_cursor + "require(".len;
+            continue;
+        }
+
+        const child_source = state.readFileCached(resolved, max_module_source_bytes) catch {
+            cursor = parse_cursor + "require(".len;
+            continue;
+        };
+        if (!isCommonJsSource(resolved, child_source)) {
+            cursor = parse_cursor + "require(".len;
+            continue;
+        }
+        if (try commonJsBarrelRewriteForExport(state, resolved, child_source, name)) |nested| {
+            return nested;
+        }
+        if (commonJsModuleExportsObjectContainsKey(child_source, name)) {
+            return .{
+                .export_name = try state.allocator.dupe(u8, name),
+                .resolved_specifier = try state.allocator.dupe(u8, resolved),
+                .member_name = try state.allocator.dupe(u8, name),
+            };
+        }
+        cursor = parse_cursor + "require(".len;
+    }
+    return null;
+}
+
+fn parseModuleExportsIdentifier(source: []const u8) ?[]const u8 {
+    const assignment = findModuleExportsAssignment(source) orelse return null;
+    var cursor = assignment;
+    skipTrivia(source, &cursor);
+    if (cursor >= source.len or std.mem.startsWith(u8, source[cursor..], "require(")) return null;
+    if (!isIdentifierStart(source[cursor])) return null;
+    const ident_end = readIdentifierEnd(source, cursor);
+    if (ident_end == cursor) return null;
+    return source[cursor..ident_end];
+}
+
+fn parseModuleExportsRequireSpecifier(source: []const u8) ?[]const u8 {
+    const assignment = findModuleExportsAssignment(source) orelse return null;
+    var cursor = assignment;
+    skipTrivia(source, &cursor);
+    if (!std.mem.startsWith(u8, source[cursor..], "require(")) return null;
+    return parseRequireSpecifierAt(source, cursor);
+}
+
+fn findModuleExportsAssignment(source: []const u8) ?usize {
+    const exports_index = std.mem.indexOf(u8, source, "module.exports") orelse return null;
+    var cursor = exports_index + "module.exports".len;
+    skipTrivia(source, &cursor);
+    if (cursor >= source.len or source[cursor] != '=') return null;
+    return cursor + 1;
+}
+
+fn commonJsModuleExportsObjectContainsKey(source: []const u8, key: []const u8) bool {
+    const assignment = findModuleExportsAssignment(source) orelse return false;
+    var cursor = assignment;
+    skipTrivia(source, &cursor);
+    if (cursor >= source.len or source[cursor] != '{') return false;
+    var depth: usize = 0;
+
+    while (cursor < source.len) : (cursor += 1) {
+        const ch = source[cursor];
+        if (ch == '/' and cursor + 1 < source.len and source[cursor + 1] == '/') {
+            cursor = skipLineComment(source, cursor);
+            continue;
+        }
+        if (ch == '/' and cursor + 1 < source.len and source[cursor + 1] == '*') {
+            cursor = skipBlockComment(source, cursor);
+            continue;
+        }
+        if (ch == '\'' or ch == '"' or ch == '`') {
+            const quoted_end = skipQuotedLiteral(source, cursor);
+            if (depth == 1 and ch != '`') {
+                if (parseQuotedSpecifier(source, cursor)) |literal| {
+                    var after_key = literal.next_index;
+                    skipTrivia(source, &after_key);
+                    if (after_key < source.len and source[after_key] == ':' and std.mem.eql(u8, literal.specifier, key)) {
+                        return true;
+                    }
+                }
+            }
+            cursor = quoted_end - 1;
+            continue;
+        }
+        if (ch == '{') {
+            depth += 1;
+            continue;
+        }
+        if (ch == '}') {
+            if (depth == 0) return false;
+            depth -= 1;
+            if (depth == 0) return false;
+            continue;
+        }
+        if (depth == 1 and isIdentifierStart(ch)) {
+            const key_start = cursor;
+            const key_end = readIdentifierEnd(source, key_start);
+            if (key_end > key_start) {
+                var after_key = key_end;
+                skipTrivia(source, &after_key);
+                if (after_key < source.len and source[after_key] == ':' and std.mem.eql(u8, source[key_start..key_end], key)) {
+                    return true;
+                }
+                cursor = key_end - 1;
+            }
+        }
+    }
+
+    return false;
+}
+
+fn isIdentifierStart(ch: u8) bool {
+    return std.ascii.isAlphabetic(ch) or ch == '_' or ch == '$';
 }
 
 fn findDefinePropertyExport(source: []const u8, name: []const u8) ?usize {

@@ -434,6 +434,15 @@ fn jsCustomMatcher(
         call_args[index + 1] = quickjs.Value.fromCVal(arg);
     }
 
+    const matcher_name_text = matcher_name.toCStringLen(ctx) orelse return quickjs.Value.exception;
+    defer ctx.freeCString(matcher_name_text.ptr);
+    const matcher_name_slice = matcher_name_text.ptr[0..matcher_name_text.len];
+    if (std.mem.eql(u8, matcher_name_slice, "toHaveFocus")) {
+        drainPendingJobsAndTimers(ctx) catch {
+            if (ctx.hasException()) return quickjs.Value.exception;
+        };
+    }
+
     const result = matcher_fn.call(ctx, quickjs.Value.undefined, call_args);
     defer result.deinit(ctx);
     if (result.isException()) return quickjs.Value.exception;

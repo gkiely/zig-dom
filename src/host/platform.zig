@@ -261,6 +261,18 @@ fn installProcess(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
     const argv = quickjs.Value.initArray(ctx);
     if (argv.isException()) return error.JSError;
     process.setPropertyStr(ctx, "argv", argv) catch return error.JSError;
+
+    var versions = process.getPropertyStr(ctx, "versions");
+    defer versions.deinit(ctx);
+    if (versions.isException() or versions.isUndefined() or versions.isNull() or !versions.isObject()) {
+        versions.deinit(ctx);
+        versions = quickjs.Value.initObject(ctx);
+        if (versions.isException()) return error.JSError;
+        process.setPropertyStr(ctx, "versions", versions.dup(ctx)) catch return error.JSError;
+    }
+    try setString(ctx, versions, "node", "20.0.0");
+    try setString(ctx, process, "version", "v20.0.0");
+
     try setString(ctx, process, "platform", "darwin");
     try setString(ctx, process, "arch", "arm64");
     try setFunction(ctx, process, "cwd", jsProcessCwd, 0);
@@ -522,13 +534,21 @@ fn installIntl(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void 
         global.setPropertyStr(ctx, "Intl", intl.dup(ctx)) catch return error.JSError;
     }
 
-    const current = intl.getPropertyStr(ctx, "Collator");
-    defer current.deinit(ctx);
-    if (!current.isUndefined() and !current.isNull()) return;
+    const collator_current = intl.getPropertyStr(ctx, "Collator");
+    defer collator_current.deinit(ctx);
+    if (collator_current.isUndefined() or collator_current.isNull()) {
+        const collator_ctor = quickjs.Value.initCFunction2(ctx, jsCollatorCtor, "Collator", 0, .constructor_or_func, 0);
+        if (collator_ctor.isException()) return error.JSError;
+        intl.setPropertyStr(ctx, "Collator", collator_ctor) catch return error.JSError;
+    }
 
-    const ctor = quickjs.Value.initCFunction2(ctx, jsCollatorCtor, "Collator", 0, .constructor_or_func, 0);
-    if (ctor.isException()) return error.JSError;
-    intl.setPropertyStr(ctx, "Collator", ctor) catch return error.JSError;
+    const number_format_current = intl.getPropertyStr(ctx, "NumberFormat");
+    defer number_format_current.deinit(ctx);
+    if (number_format_current.isUndefined() or number_format_current.isNull()) {
+        const number_format_ctor = quickjs.Value.initCFunction2(ctx, jsNumberFormatCtor, "NumberFormat", 2, .constructor_or_func, 0);
+        if (number_format_ctor.isException()) return error.JSError;
+        intl.setPropertyStr(ctx, "NumberFormat", number_format_ctor) catch return error.JSError;
+    }
 }
 
 fn installDateLocale(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
@@ -1790,6 +1810,74 @@ fn jsCollatorCompare(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, ar
     const options = readCollatorOptions(ctx, this_value);
     const order = compareCollatorSlices(left_slice, right_slice, options);
     return quickjs.Value.initInt32(order);
+}
+
+fn jsNumberFormatCtor(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const obj = quickjs.Value.initObject(ctx);
+    if (obj.isException()) return quickjs.Value.exception;
+
+    var style_value = quickjs.Value.initStringLen(ctx, "decimal");
+    defer style_value.deinit(ctx);
+    var currency_value = quickjs.Value.initStringLen(ctx, "USD");
+    defer currency_value.deinit(ctx);
+
+    const options = if (args.len > 1) quickjs.Value.fromCVal(args[1]) else quickjs.Value.undefined;
+    if (options.isObject()) {
+        const style = options.getPropertyStr(ctx, "style");
+        defer style.deinit(ctx);
+        if (!style.isException() and !style.isUndefined() and !style.isNull()) {
+            const style_text = style.toCStringLen(ctx);
+            if (style_text) |text| {
+                defer ctx.freeCString(text.ptr);
+                style_value.deinit(ctx);
+                style_value = quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]);
+                if (style_value.isException()) return quickjs.Value.exception;
+            }
+        }
+
+        const currency = options.getPropertyStr(ctx, "currency");
+        defer currency.deinit(ctx);
+        if (!currency.isException() and !currency.isUndefined() and !currency.isNull()) {
+            const currency_text = currency.toCStringLen(ctx);
+            if (currency_text) |text| {
+                defer ctx.freeCString(text.ptr);
+                currency_value.deinit(ctx);
+                currency_value = quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]);
+                if (currency_value.isException()) return quickjs.Value.exception;
+            }
+        }
+    }
+
+    obj.setPropertyStr(ctx, "__zigNumberFormatStyle", style_value.dup(ctx)) catch return quickjs.Value.exception;
+    obj.setPropertyStr(ctx, "__zigNumberFormatCurrency", currency_value.dup(ctx)) catch return quickjs.Value.exception;
+    setFunction(ctx, obj, "format", jsNumberFormatFormat, 1) catch return quickjs.Value.exception;
+    return obj;
+}
+
+fn jsNumberFormatFormat(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    const input = if (args.len > 0) quickjs.Value.fromCVal(args[0]) else quickjs.Value.initInt32(0);
+    const value = input.toFloat64(ctx) catch 0;
+
+    const style_prop = if (this_value.isObject()) this_value.getPropertyStr(ctx, "__zigNumberFormatStyle") else quickjs.Value.undefined;
+    defer style_prop.deinit(ctx);
+    const style_text = style_prop.toCStringLen(ctx);
+    defer if (style_text) |text| ctx.freeCString(text.ptr);
+    const style = if (style_text) |text| text.ptr[0..text.len] else "";
+
+    const currency_prop = if (this_value.isObject()) this_value.getPropertyStr(ctx, "__zigNumberFormatCurrency") else quickjs.Value.undefined;
+    defer currency_prop.deinit(ctx);
+    const currency_text = currency_prop.toCStringLen(ctx);
+    defer if (currency_text) |text| ctx.freeCString(text.ptr);
+    const currency = if (currency_text) |text| text.ptr[0..text.len] else "USD";
+
+    const formatted = if (std.mem.eql(u8, style, "currency")) blk: {
+        const prefix = if (std.ascii.eqlIgnoreCase(currency, "USD")) "$" else "";
+        break :blk std.fmt.allocPrint(c_allocator, "{s}{d:.2}", .{ prefix, value }) catch return quickjs.Value.exception;
+    } else std.fmt.allocPrint(c_allocator, "{d}", .{value}) catch return quickjs.Value.exception;
+    defer c_allocator.free(formatted);
+    return quickjs.Value.initStringLen(ctx, formatted);
 }
 
 const CollatorOptions = struct {
