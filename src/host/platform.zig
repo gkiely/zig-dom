@@ -55,6 +55,7 @@ pub fn install(ctx: *quickjs.Context) PlatformError!void {
     try installObjectPrototypeHelpers(ctx, global);
     try installImportMetaEnv(ctx, global);
     try installGlobals(ctx, global);
+    try installErrorDefaults(ctx, global);
     try installTimers(ctx, global);
     try installMatchMedia(ctx, global);
     try installKeyboardEvent(ctx, global);
@@ -343,6 +344,13 @@ fn normalizeImportMetaEnvValue(ctx: *quickjs.Context, value: quickjs.Value) quic
     if (std.ascii.eqlIgnoreCase(slice, "true")) return quickjs.Value.initBool(true);
     if (std.ascii.eqlIgnoreCase(slice, "false")) return quickjs.Value.initBool(false);
     return quickjs.Value.initStringLen(ctx, slice);
+}
+
+fn installErrorDefaults(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {
+    const error_ctor = global.getPropertyStr(ctx, "Error");
+    defer error_ctor.deinit(ctx);
+    if (error_ctor.isException() or !error_ctor.isObject()) return;
+    error_ctor.setPropertyStr(ctx, "stackTraceLimit", quickjs.Value.initInt32(0)) catch return error.JSError;
 }
 
 fn installGlobals(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!void {

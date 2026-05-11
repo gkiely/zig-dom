@@ -40,3 +40,17 @@ If you made a change that's not viable and the build worked before you made the 
 - Applying unused `export const` pruning to ordinary ESM `.js` modules broke Tree collection by pruning exports still needed through unseen access patterns.
 - Modulo-based single-file test sharding was fast but invalid for Tree because it changed intra-file order enough to fail an order-sensitive test.
 - Switching TSX output to `react/jsx-dev-runtime`/`jsxDEV` did not materially improve Tree time.
+- Caching mock metadata / call indexes in `src/host/mocks.zig` reduced a synthetic `queueMicrotask` spy benchmark but did not materially improve full `Tree.test.tsx` runtime.
+- Forcing `queueMicrotask` to run synchronously (env-gated in `platform.zig`) was invalid and much slower: `Tree.test.tsx` regressed badly and failed `rename` (`toHaveFocus`).
+- Disabling the injected `process.env.ZIG_DOM` flag (env-gated in `platform.zig`) was invalid: `Tree.test.tsx` collection failed via Happy DOM module eval (`BrowserErrorCaptureEnum` syntax error).
+- Making timeout-turn scaling configurable (`ZIG_DOM_TIMEOUT_TURN_MS`) did not improve Tree at `100` (same/slower) and became invalid at `250` (`waitForElementToBeRemoved` failures).
+- Switching TSX output to classic `React.createElement` (`jsx_runtime = .classic`) did not materially improve Tree time.
+- Replacing event `timeStamp` initialization with a native monotonic clock path in `createEventObject` regressed full `Tree.test.tsx` runtime.
+- Caching `_nodeTypeOverride` on every wrapped node (not just doctype) did not materially improve full `Tree.test.tsx` runtime.
+- Disabling mutation observers (`ZIG_DOM_DISABLE_MUTATION_OBSERVER=1`) is invalid for Tree: it introduced `waitForElementToBeRemoved` timeouts/failures.
+- Forcing `Object.freeze` to a no-op in a Tree wrapper did not materially improve zig-dom runtime.
+- Forcing production module folding with a temporary `React.act` fallback remained invalid for Tree (many render/query failures).
+- Processing only one pending QuickJS job per promise-loop iteration in `host/runner.zig` (instead of draining all jobs) regressed `Tree.test.tsx` runtime.
+- Replacing `Object.assign` with a temporary fast-path implementation (env-gated in `platform.zig`) did not improve the assign microbench or full `Tree.test.tsx` runtime.
+- Switching runner DOM cleanup to `zig_dom_document_reset` (instead of clearing head/body via `set_inner_html`) did not improve `Tree.test.tsx` and slightly regressed `afterEach` cleanup time.
+- Skipping `<head>` cleanup during runner `afterEach` (env-gated in `runner.zig`) did not improve `Tree.test.tsx` runtime.

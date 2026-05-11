@@ -69,3 +69,7 @@ const { cleanup, configure } = await import('@testing-library/react');
 configure({ eventWrapper: (cb) => cb() });
 ```
 • dispatch never crossed 5ms, query/assert steps are sub-ms to a few ms, and the repeated slow entries are React’s flushSyncWorkAcrossRoots_impl -> performSyncWorkOnRoot inside RTL act().
+
+•  The strongest new signal is that QuickJS object-clone patterns are dramatically slower in this workload (Object.assign/object spread microbench is ~6–7x slower than Bun), which matches the beginWork hotspot profile and points to prop-object churn during render rather than DOM/query/event overhead.
+
+• I found a concrete hotspot: raw button.click() is ~25x slower in zig-dom (280ms vs 11ms for 10k clicks). I’m now tracing the DOM event dispatch/click path in Zig to remove that overhead.

@@ -420,9 +420,6 @@ fn jsCustomMatcher(
 ) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const inverted = magic != 0;
-    drainPendingJobs(ctx) catch {
-        if (ctx.hasException()) return quickjs.Value.exception;
-    };
 
     const received = quickjs.Value.fromCVal(data[0]);
     const matcher_fn = quickjs.Value.fromCVal(data[1]);
