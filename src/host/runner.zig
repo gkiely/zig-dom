@@ -52,9 +52,9 @@ fn runnerProfileActive() bool {
 }
 
 fn autoRestoreSpiesEnabled() bool {
-    const raw = std.c.getenv("ZIG_DOM_AUTO_RESTORE_SPIES") orelse return false;
+    const raw = std.c.getenv("ZIG_DOM_AUTO_RESTORE_SPIES") orelse return true;
     const value = std.mem.trim(u8, std.mem.span(raw), " \t\r\n");
-    if (value.len == 0) return false;
+    if (value.len == 0) return true;
     if (std.mem.eql(u8, value, "0") or
         std.ascii.eqlIgnoreCase(value, "false") or
         std.ascii.eqlIgnoreCase(value, "no") or
@@ -491,8 +491,8 @@ pub const HostRunner = struct {
     fn runTestEntry(self: *HostRunner, test_entry: *TestEntry, result: *RunResult, only_mode: bool) !void {
         const auto_restore_spies = autoRestoreSpiesEnabled();
         const spy_checkpoint = if (auto_restore_spies) self.captureSpyCheckpoint() else 0;
-        if (auto_restore_spies) {
-            defer {
+        defer {
+            if (auto_restore_spies) {
                 const restore_start = if (runnerProfileActive()) profileNowNs() else 0;
                 self.restoreSpiesSince(spy_checkpoint);
                 if (runnerProfileActive()) runner_perf_stats.restore_spies_ns += profileNowNs() - restore_start;
