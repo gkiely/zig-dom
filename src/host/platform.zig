@@ -94,6 +94,7 @@ pub fn linkWindow(ctx: *quickjs.Context) PlatformError!void {
     try linkWindowProperty(ctx, global, window, "fetch");
     try linkWindowProperty(ctx, global, window, "Image");
     try linkWindowProperty(ctx, global, window, "Intl");
+    try linkWindowProperty(ctx, global, window, "console");
     try linkWindowProperty(ctx, global, window, "history");
     try linkWindowProperty(ctx, global, window, "crypto");
     try linkWindowProperty(ctx, global, window, "DOMParser");
@@ -154,9 +155,14 @@ fn installConsole(ctx: *quickjs.Context, global: quickjs.Value) PlatformError!vo
     if (console.isException()) return error.JSError;
     errdefer console.deinit(ctx);
 
-    inline for (.{ "assert", "clear", "debug", "error", "info", "log", "trace", "warn" }) |name| {
-        try setFunction(ctx, console, name, jsNoop, 0);
-    }
+    try setFunction(ctx, console, "assert", jsConsoleAssert, 1);
+    try setFunction(ctx, console, "clear", jsNoop, 0);
+    try setFunction(ctx, console, "debug", jsConsoleLog, 1);
+    try setFunction(ctx, console, "error", jsConsoleError, 1);
+    try setFunction(ctx, console, "info", jsConsoleLog, 1);
+    try setFunction(ctx, console, "log", jsConsoleLog, 1);
+    try setFunction(ctx, console, "trace", jsConsoleTrace, 1);
+    try setFunction(ctx, console, "warn", jsConsoleWarn, 1);
 
     global.setPropertyStr(ctx, "console", console) catch return error.JSError;
 }
@@ -633,6 +639,84 @@ fn installSymbolDisposers(ctx: *quickjs.Context, global: quickjs.Value) Platform
 
 fn jsNoop(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     return quickjs.Value.undefined;
+}
+
+fn jsConsoleLog(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    emitConsoleLine(ctx, null, args);
+    return quickjs.Value.undefined;
+}
+
+fn jsConsoleWarn(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    emitConsoleLine(ctx, null, args);
+    return quickjs.Value.undefined;
+}
+
+fn jsConsoleError(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    emitConsoleLine(ctx, null, args);
+    return quickjs.Value.undefined;
+}
+
+fn jsConsoleTrace(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    emitConsoleLine(ctx, "Trace", args);
+    return quickjs.Value.undefined;
+}
+
+fn jsConsoleAssert(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    if (args.len > 0 and (quickjs.Value.fromCVal(args[0]).toBool(ctx) catch false)) return quickjs.Value.undefined;
+    if (args.len > 1) {
+        emitConsoleLine(ctx, "Assertion failed:", args[1..]);
+    } else {
+        emitConsoleLine(ctx, "Assertion failed", &[_]quickjs.c.JSValue{});
+    }
+    return quickjs.Value.undefined;
+}
+
+fn emitConsoleLine(ctx: *quickjs.Context, prefix: ?[]const u8, args: []const quickjs.c.JSValue) void {
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(c_allocator);
+
+    if (prefix) |text| {
+        out.appendSlice(c_allocator, text) catch return;
+    }
+
+    for (args, 0..) |arg, index| {
+        if (out.items.len > 0 and (prefix != null or index > 0)) {
+            out.append(c_allocator, ' ') catch return;
+        }
+        appendConsoleArg(ctx, &out, quickjs.Value.fromCVal(arg));
+    }
+
+    std.debug.print("{s}\n", .{out.items});
+}
+
+fn appendConsoleArg(ctx: *quickjs.Context, out: *std.ArrayList(u8), value: quickjs.Value) void {
+    if (value.isUndefined()) {
+        out.appendSlice(c_allocator, "undefined") catch {};
+        return;
+    }
+    if (value.isNull()) {
+        out.appendSlice(c_allocator, "null") catch {};
+        return;
+    }
+
+    const rendered = value.toStringValue(ctx);
+    defer rendered.deinit(ctx);
+    if (rendered.isException()) {
+        out.appendSlice(c_allocator, "[console-arg-error]") catch {};
+        return;
+    }
+
+    const text = rendered.toCStringLen(ctx) orelse {
+        out.appendSlice(c_allocator, "[console-arg-error]") catch {};
+        return;
+    };
+    defer ctx.freeCString(text.ptr);
+    out.appendSlice(c_allocator, text.ptr[0..text.len]) catch {};
 }
 
 fn jsClipboardReadText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {

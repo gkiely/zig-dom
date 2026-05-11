@@ -3,11 +3,8 @@ V1 [x]
 - JS classes, bun:ffi for operations
 
 V2 []
-- DOM and test runner that is faster than bun for all tests using QuickJS
-- Yuku
-- Native DOM and test selector
-- Parallel test workers
-- Multi-threading: 
+- Native testing-library
+- Parallel test workers/Multi-threading: 
 https://github.com/bellard/quickjs/issues/362
 https://github.com/quickjs-ng/quickjs/commit/5ce2957e
 
