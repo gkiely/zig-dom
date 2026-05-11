@@ -14,4 +14,8 @@ Don't do bytecode caching to disk, avoid any type of cache to disk.
 
 If you made a change that's not viable and the build worked before you made the change, you don't need to rebuild, just revert and proceed.
 
-Failed perf experiments: see failed-experiments.md
+At the end of each session run `bun run test:branch:gate` to confirm no breaking changes.
+
+Before making a perf experiment, check failed-experiments.md
+If you make a failed perf experiment, add it to failed-experiments.md, if it does not exist.
+
