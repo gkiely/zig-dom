@@ -11,8 +11,8 @@
     .dependencies = .{
         // quickjs-ng/quickjs
         .quickjs = .{
-            .url = "https://github.com/quickjs-ng/quickjs/archive/85640f81e04bc93940acc2756c792c66076dd768.tar.gz",
-            .hash = "N-V-__8AAIZ_PAA7y10jIaLigzkK4qd5-jfKEoTOOfHCsIGM",
+            .url = "https://github.com/quickjs-ng/quickjs/archive/a7f0b8a4c294e15c69e67dae55b2ad2e2e3e6f76.tar.gz",
+            .hash = "N-V-__8AAOEHQAA92OnvMj2218JNLCTh4_ieO9qsUsl_FmQ-",
         },
     },
 }

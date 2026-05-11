@@ -1145,7 +1145,7 @@ pub const Value = extern struct {
     ///
     /// C: `JS_SetConstructor`
     pub fn setConstructor(self: Value, ctx: *Context, proto: Value) void {
-        c.JS_SetConstructor(ctx.cval(), self.cval(), proto.cval());
+        _ = c.JS_SetConstructor(ctx.cval(), self.cval(), proto.cval());
     }
 
     /// Sets the constructor bit on a function object.

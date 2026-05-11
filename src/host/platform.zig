@@ -52,7 +52,9 @@ pub fn install(ctx: *quickjs.Context) PlatformError!void {
     try installLocation(ctx, global);
     try installNavigator(ctx, global);
     try installProcess(ctx, global);
-    try installObjectPrototypeHelpers(ctx, global);
+    // Avoid mutating Object.prototype globally; this helper is legacy and
+    // measurably slows object-heavy React render paths.
+    // try installObjectPrototypeHelpers(ctx, global);
     try installImportMetaEnv(ctx, global);
     try installGlobals(ctx, global);
     try installErrorDefaults(ctx, global);
@@ -721,20 +723,38 @@ fn appendConsoleArg(ctx: *quickjs.Context, out: *std.ArrayList(u8), value: quick
 
 fn jsClipboardReadText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    if (!this_value.isObject()) return quickjs.Value.initStringLen(ctx, "");
+    if (!this_value.isObject()) {
+        const empty = quickjs.Value.initStringLen(ctx, "");
+        if (empty.isException()) return quickjs.Value.exception;
+        defer empty.deinit(ctx);
+        return resolvedPromise(ctx, empty);
+    }
 
     const value = this_value.getPropertyStr(ctx, "__zigClipboardText");
     defer value.deinit(ctx);
-    if (value.isException() or value.isUndefined() or value.isNull()) return quickjs.Value.initStringLen(ctx, "");
+    if (value.isException() or value.isUndefined() or value.isNull()) {
+        const empty = quickjs.Value.initStringLen(ctx, "");
+        if (empty.isException()) return quickjs.Value.exception;
+        defer empty.deinit(ctx);
+        return resolvedPromise(ctx, empty);
+    }
 
-    const text = value.toCStringLen(ctx) orelse return quickjs.Value.initStringLen(ctx, "");
+    const text = value.toCStringLen(ctx) orelse {
+        const empty = quickjs.Value.initStringLen(ctx, "");
+        if (empty.isException()) return quickjs.Value.exception;
+        defer empty.deinit(ctx);
+        return resolvedPromise(ctx, empty);
+    };
     defer ctx.freeCString(text.ptr);
-    return quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]);
+    const text_value = quickjs.Value.initStringLen(ctx, text.ptr[0..text.len]);
+    if (text_value.isException()) return quickjs.Value.exception;
+    defer text_value.deinit(ctx);
+    return resolvedPromise(ctx, text_value);
 }
 
 fn jsClipboardWriteText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
-    if (!this_value.isObject()) return quickjs.Value.undefined;
+    if (!this_value.isObject()) return resolvedPromise(ctx, quickjs.Value.undefined);
 
     const text = if (args.len > 0) quickjs.Value.fromCVal(args[0]).toCStringLen(ctx) else null;
     if (text) |value| {
@@ -744,7 +764,26 @@ fn jsClipboardWriteText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value,
         this_value.setPropertyStr(ctx, "__zigClipboardText", quickjs.Value.initStringLen(ctx, "")) catch return quickjs.Value.exception;
     }
 
-    return quickjs.Value.undefined;
+    return resolvedPromise(ctx, quickjs.Value.undefined);
+}
+
+fn resolvedPromise(ctx: *quickjs.Context, value: quickjs.Value) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const promise_ctor = global.getPropertyStr(ctx, "Promise");
+    defer promise_ctor.deinit(ctx);
+    if (promise_ctor.isException() or !promise_ctor.isObject()) return value.dup(ctx);
+
+    const resolve_fn = promise_ctor.getPropertyStr(ctx, "resolve");
+    defer resolve_fn.deinit(ctx);
+    if (resolve_fn.isException() or !resolve_fn.isFunction(ctx)) return value.dup(ctx);
+
+    var args = [_]quickjs.Value{value.dup(ctx)};
+    defer args[0].deinit(ctx);
+    const resolved = resolve_fn.call(ctx, promise_ctor, &args);
+    if (resolved.isException()) return value.dup(ctx);
+    return resolved;
 }
 
 fn jsHistoryPushState(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
