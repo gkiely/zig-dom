@@ -559,7 +559,7 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
     return quickjs.Value.undefined.cval();
 }
 
-const request_delay_ms: i32 = 155;
+const request_delay_ms: i32 = 35;
 
 fn isRequestMockProperty(ctx: *quickjs.Context, state: *MockState) bool {
     if (!state.restore_property.isString()) return false;
@@ -580,25 +580,23 @@ fn defaultRequestFallback(ctx: *quickjs.Context, args: []const quickjs.Value) ?q
     defer ctx.freeCString(path_text.ptr);
     const path = path_text.ptr[0..path_text.len];
 
-    if (!std.mem.eql(u8, path, "https://www.googleapis.com/drive/v3/files")) return null;
+    if (!std.mem.startsWith(u8, path, "https://www.googleapis.com/drive/v3/")) return null;
 
-    const params_value = request.getPropertyStr(ctx, "params");
-    defer params_value.deinit(ctx);
-    if (!params_value.isObject()) return null;
-    const query_value = params_value.getPropertyStr(ctx, "q");
-    defer query_value.deinit(ctx);
-    if (query_value.isException() or query_value.isUndefined() or query_value.isNull()) return null;
-    const query_text = query_value.toCStringLen(ctx) orelse return null;
-    defer ctx.freeCString(query_text.ptr);
-    const query = query_text.ptr[0..query_text.len];
-
-    const root_folder_query = "'root' in parents and mimeType = 'application/vnd.google-apps.folder' and name = 'YNAW'";
-    if (!std.mem.startsWith(u8, query, root_folder_query)) return null;
-
-    const message = quickjs.Value.initStringLen(ctx, "https://www.googleapis.com/drive/v3/files not implemented");
+    const message = quickjs.Value.initStringLen(ctx, "https://www.googleapis.com/drive/v3 request not implemented");
     if (message.isException()) return quickjs.Value.exception;
     defer message.deinit(ctx);
-    return rejectedPromise(ctx, message);
+
+    const rejected = rejectedPromise(ctx, message);
+    if (rejected.isException()) return quickjs.Value.exception;
+    defer rejected.deinit(ctx);
+
+    const request_object = quickjs.Value.initObject(ctx);
+    if (request_object.isException()) return quickjs.Value.exception;
+    if (!installSourceBackedGetPromise(ctx, request_object, rejected)) {
+        request_object.deinit(ctx);
+        return quickjs.Value.exception;
+    }
+    return request_object;
 }
 
 fn finalizeMockReturn(ctx: *quickjs.Context, request_mock: bool, value: quickjs.Value) quickjs.Value {
