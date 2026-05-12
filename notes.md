@@ -25,20 +25,20 @@
 
   Verification:
 
-  - Restored ../youneedawiki/src/components/Tree/Tree.test.tsx; no downstream diff remains.
+  - Restored ../youneedawiki-zig-dom/src/components/Tree/Tree.test.tsx; no downstream diff remains.
   - Rebuilt zig-dom successfully with gtimeout 120s zig build -Doptimize=ReleaseFast --summary none.
 
 
   ---
   Our file scanner is really slow:
-bun run test:perf ../youneedawiki/src/elements/Buttons/
+bun run test:perf ../youneedawiki-zig-dom/src/elements/Buttons/
 
 real	0m0.290s
 user	0m0.269s
 sys	0m0.020s
 
 Compared to: 
-bun run test:perf ../youneedawiki/src/elements/Buttons/Edit.test.tsx
+bun run test:perf ../youneedawiki-zig-dom/src/elements/Buttons/Edit.test.tsx
 real	0m0.152s
 user	0m0.139s
 sys	0m0.012s

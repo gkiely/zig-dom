@@ -290,6 +290,7 @@ const ElementCallbacks = struct {
     pub const focus = jsElementFocus;
     pub const blur = jsElementBlur;
     pub const select = jsElementSelect;
+    pub const setSelectionRange = jsElementSetSelectionRange;
     pub const valueGet = jsElementValueGet;
     pub const valueSet = jsElementValueSet;
     pub const checkedGet = jsElementCheckedGet;
@@ -1604,9 +1605,15 @@ fn jsDocumentGetSelection(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value,
     if (selection.isException()) return selection;
     selection.setPropertyStr(ctx, "__zigRange", quickjs.Value.null) catch return quickjs.Value.exception;
     selection.setPropertyStr(ctx, "rangeCount", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    selection.setPropertyStr(ctx, "anchorNode", quickjs.Value.null) catch return quickjs.Value.exception;
+    selection.setPropertyStr(ctx, "focusNode", quickjs.Value.null) catch return quickjs.Value.exception;
+    selection.setPropertyStr(ctx, "anchorOffset", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    selection.setPropertyStr(ctx, "focusOffset", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
     installMethod(ctx, selection, "removeAllRanges", jsSelectionRemoveAllRanges, 0) catch return quickjs.Value.exception;
     installMethod(ctx, selection, "addRange", jsSelectionAddRange, 1) catch return quickjs.Value.exception;
     installMethod(ctx, selection, "getRangeAt", jsSelectionGetRangeAt, 1) catch return quickjs.Value.exception;
+    installMethod(ctx, selection, "setBaseAndExtent", jsSelectionSetBaseAndExtent, 4) catch return quickjs.Value.exception;
+    installMethod(ctx, selection, "extend", jsSelectionExtend, 2) catch return quickjs.Value.exception;
     installMethod(ctx, selection, "toString", jsSelectionToString, 0) catch return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "__zigSelection", selection.dup(ctx)) catch return quickjs.Value.exception;
     return selection;
@@ -6224,6 +6231,31 @@ fn jsElementSelect(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _: []c
     return quickjs.Value.undefined;
 }
 
+fn jsElementSetSelectionRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+
+    var start = if (args.len > 0) (args[0].toInt64(ctx) catch 0) else 0;
+    var end = if (args.len > 1) (args[1].toInt64(ctx) catch start) else start;
+    if (start < 0) start = 0;
+    if (end < 0) end = 0;
+    if (end < start) end = start;
+
+    const value = jsElementValueGet(ctx, this_value);
+    defer value.deinit(ctx);
+    const max_len = if (value.toCStringLen(ctx)) |text| blk: {
+        defer ctx.freeCString(text.ptr);
+        break :blk @as(i64, @intCast(text.len));
+    } else 0;
+
+    if (start > max_len) start = max_len;
+    if (end > max_len) end = max_len;
+
+    this_value.setPropertyStr(ctx, "selectionStart", quickjs.Value.initInt64(start)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "selectionEnd", quickjs.Value.initInt64(end)) catch return quickjs.Value.exception;
+    return quickjs.Value.undefined;
+}
+
 fn jsElementScrollIntoView(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const c.JSValue) quickjs.Value {
     _ = ctx_opt orelse return quickjs.Value.exception;
     return quickjs.Value.undefined;
@@ -7795,6 +7827,10 @@ fn jsSelectionRemoveAllRanges(ctx_opt: ?*quickjs.Context, this_value: quickjs.Va
     const ctx = ctx_opt orelse return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "__zigRange", quickjs.Value.null) catch return quickjs.Value.exception;
     this_value.setPropertyStr(ctx, "rangeCount", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "anchorNode", quickjs.Value.null) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "focusNode", quickjs.Value.null) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "anchorOffset", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
+    this_value.setPropertyStr(ctx, "focusOffset", quickjs.Value.initInt64(0)) catch return quickjs.Value.exception;
     return quickjs.Value.undefined;
 }
 
@@ -7804,6 +7840,17 @@ fn jsSelectionAddRange(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, ra
     if (args.len > 0 and args[0].isObject()) {
         this_value.setPropertyStr(ctx, "__zigRange", args[0].dup(ctx)) catch return quickjs.Value.exception;
         this_value.setPropertyStr(ctx, "rangeCount", quickjs.Value.initInt64(1)) catch return quickjs.Value.exception;
+
+        const start_container = args[0].getPropertyStr(ctx, "startContainer");
+        defer start_container.deinit(ctx);
+        const end_container = args[0].getPropertyStr(ctx, "endContainer");
+        defer end_container.deinit(ctx);
+        const start_offset = getIntProperty(ctx, args[0], "startOffset") orelse 0;
+        const end_offset = getIntProperty(ctx, args[0], "endOffset") orelse 0;
+        this_value.setPropertyStr(ctx, "anchorNode", if (start_container.isObject()) start_container.dup(ctx) else quickjs.Value.null) catch return quickjs.Value.exception;
+        this_value.setPropertyStr(ctx, "focusNode", if (end_container.isObject()) end_container.dup(ctx) else quickjs.Value.null) catch return quickjs.Value.exception;
+        this_value.setPropertyStr(ctx, "anchorOffset", quickjs.Value.initInt64(start_offset)) catch return quickjs.Value.exception;
+        this_value.setPropertyStr(ctx, "focusOffset", quickjs.Value.initInt64(end_offset)) catch return quickjs.Value.exception;
     }
     return quickjs.Value.undefined;
 }
@@ -7824,6 +7871,109 @@ fn jsSelectionToString(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, _:
     defer range.deinit(ctx);
     if (!range.isObject()) return quickjs.Value.initStringLen(ctx, "");
     return jsRangeToString(ctx, range, &.{});
+}
+
+fn jsSelectionSetBaseAndExtent(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len < 4) return quickjs.Value.undefined;
+    if (!args[0].isObject() or !args[2].isObject()) return quickjs.Value.undefined;
+    const anchor_offset = args[1].toInt64(ctx) catch 0;
+    const focus_offset = args[3].toInt64(ctx) catch 0;
+    if (!setSelectionEndpoints(ctx, this_value, args[0], anchor_offset, args[2], focus_offset)) {
+        return quickjs.Value.exception;
+    }
+    return quickjs.Value.undefined;
+}
+
+fn jsSelectionExtend(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw_args: []const c.JSValue) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const args: []const quickjs.Value = @ptrCast(raw_args);
+    if (args.len < 2) return quickjs.Value.undefined;
+    if (!args[0].isObject()) return quickjs.Value.undefined;
+
+    const anchor_node = this_value.getPropertyStr(ctx, "anchorNode");
+    defer anchor_node.deinit(ctx);
+    const anchor_offset_value = this_value.getPropertyStr(ctx, "anchorOffset");
+    defer anchor_offset_value.deinit(ctx);
+    const anchor_offset = if (!anchor_offset_value.isException()) (anchor_offset_value.toInt64(ctx) catch 0) else 0;
+    const focus_offset = args[1].toInt64(ctx) catch 0;
+
+    if (!anchor_node.isObject()) {
+        if (!setSelectionEndpoints(ctx, this_value, args[0], focus_offset, args[0], focus_offset)) {
+            return quickjs.Value.exception;
+        }
+        return quickjs.Value.undefined;
+    }
+
+    if (!setSelectionEndpoints(ctx, this_value, anchor_node, anchor_offset, args[0], focus_offset)) {
+        return quickjs.Value.exception;
+    }
+    return quickjs.Value.undefined;
+}
+
+fn setSelectionEndpoints(
+    ctx: *quickjs.Context,
+    selection: quickjs.Value,
+    anchor_node: quickjs.Value,
+    anchor_offset: i64,
+    focus_node: quickjs.Value,
+    focus_offset: i64,
+) bool {
+    const range = createRangeFromEndpoints(ctx, anchor_node, anchor_offset, focus_node, focus_offset) orelse return false;
+    defer range.deinit(ctx);
+
+    selection.setPropertyStr(ctx, "__zigRange", range.dup(ctx)) catch return false;
+    selection.setPropertyStr(ctx, "rangeCount", quickjs.Value.initInt64(1)) catch return false;
+    selection.setPropertyStr(ctx, "anchorNode", anchor_node.dup(ctx)) catch return false;
+    selection.setPropertyStr(ctx, "focusNode", focus_node.dup(ctx)) catch return false;
+    selection.setPropertyStr(ctx, "anchorOffset", quickjs.Value.initInt64(anchor_offset)) catch return false;
+    selection.setPropertyStr(ctx, "focusOffset", quickjs.Value.initInt64(focus_offset)) catch return false;
+    return true;
+}
+
+fn createRangeFromEndpoints(
+    ctx: *quickjs.Context,
+    anchor_node: quickjs.Value,
+    anchor_offset: i64,
+    focus_node: quickjs.Value,
+    focus_offset: i64,
+) ?quickjs.Value {
+    const owner_document = anchor_node.getPropertyStr(ctx, "ownerDocument");
+    defer owner_document.deinit(ctx);
+    if (!owner_document.isObject()) return null;
+
+    const create_range = owner_document.getPropertyStr(ctx, "createRange");
+    defer create_range.deinit(ctx);
+    if (!create_range.isFunction(ctx)) return null;
+    const range = create_range.call(ctx, owner_document, &.{});
+    if (!range.isObject()) {
+        range.deinit(ctx);
+        return null;
+    }
+    errdefer range.deinit(ctx);
+
+    const set_start = range.getPropertyStr(ctx, "setStart");
+    defer set_start.deinit(ctx);
+    if (!set_start.isFunction(ctx)) return null;
+    var start_args = [_]quickjs.Value{ anchor_node.dup(ctx), quickjs.Value.initInt64(anchor_offset) };
+    defer start_args[0].deinit(ctx);
+    defer start_args[1].deinit(ctx);
+    const start_result = set_start.call(ctx, range, &start_args);
+    defer start_result.deinit(ctx);
+    if (start_result.isException()) return null;
+
+    const set_end = range.getPropertyStr(ctx, "setEnd");
+    defer set_end.deinit(ctx);
+    if (!set_end.isFunction(ctx)) return null;
+    var end_args = [_]quickjs.Value{ focus_node.dup(ctx), quickjs.Value.initInt64(focus_offset) };
+    defer end_args[0].deinit(ctx);
+    defer end_args[1].deinit(ctx);
+    const end_result = set_end.call(ctx, range, &end_args);
+    defer end_result.deinit(ctx);
+    if (end_result.isException()) return null;
+
+    return range;
 }
 
 fn upgradeCustomElement(ctx: *quickjs.Context, node: quickjs.Value, ctor: quickjs.Value) !void {
@@ -9907,11 +10057,28 @@ fn jsNodeInsertBefore(ctx_opt: ?*quickjs.Context, this_value: quickjs.Value, raw
     }
     collectScriptNodes(ctx, args[0], &scripts) catch return quickjs.Value.exception;
 
-    const status = if (zig_dom.zig_dom_node_type(child_handle) == 11)
+    var status = if (zig_dom.zig_dom_node_type(child_handle) == 11)
         insertFragmentBefore(this_handle, child_handle, reference_handle)
     else
         zig_dom.zig_dom_node_insert_before(this_handle, child_handle, reference_handle);
+    if (status == 3 and reference_handle != 0 and zig_dom.zig_dom_node_parent(reference_handle) == 0) {
+        status = if (zig_dom.zig_dom_node_type(child_handle) == 11)
+            insertFragmentBefore(this_handle, child_handle, 0)
+        else
+            zig_dom.zig_dom_node_insert_before(this_handle, child_handle, 0);
+    }
     if (status != 0) {
+        if (status == 3 and std.c.getenv("ZIG_DOM_DEBUG_INSERT_BEFORE") != null) {
+            std.debug.print(
+                "[zig-dom insertBefore] parent={} child={} ref={} ref_parent={}\n",
+                .{
+                    this_handle,
+                    child_handle,
+                    reference_handle,
+                    if (reference_handle != 0) zig_dom.zig_dom_node_parent(reference_handle) else @as(u64, 0),
+                },
+            );
+        }
         return throwStatus(ctx, "insertBefore", status);
     }
 
@@ -10353,10 +10520,16 @@ fn insertChildNodeArguments(
     }
 
     for (handles.items) |child_handle| {
-        const status = if (zig_dom.zig_dom_node_type(child_handle) == 11)
+        var status = if (zig_dom.zig_dom_node_type(child_handle) == 11)
             insertFragmentBefore(parent_handle, child_handle, reference_handle)
         else
             zig_dom.zig_dom_node_insert_before(parent_handle, child_handle, reference_handle);
+        if (status == 3 and reference_handle != 0 and zig_dom.zig_dom_node_parent(reference_handle) == 0) {
+            status = if (zig_dom.zig_dom_node_type(child_handle) == 11)
+                insertFragmentBefore(parent_handle, child_handle, 0)
+            else
+                zig_dom.zig_dom_node_insert_before(parent_handle, child_handle, 0);
+        }
         if (status != 0) return throwStatus(ctx, operation, status);
     }
 

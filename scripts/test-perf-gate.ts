@@ -63,7 +63,7 @@ const { warmTimeoutMs, runnerArgs } = parseTimeoutMs(process.argv.slice(2));
 let exitCode = await run("zig", ["build", "-Doptimize=ReleaseFast", "--summary", "none"], null, null);
 if (exitCode !== 0) process.exit(exitCode);
 
-const testArgs = ["test", "--dom", "--root", "../youneedawiki", ...runnerArgs];
+const testArgs = ["test", "--dom", "--root", "../youneedawiki-zig-dom", ...runnerArgs];
 const timedTestArgs = ["-p", "zig-out/bin/zig-dom", ...testArgs];
 exitCode = await run("/usr/bin/time", timedTestArgs, "cold perf run", null);
 if (exitCode !== 0) process.exit(exitCode);

@@ -852,12 +852,40 @@ fn resolvedPromise(ctx: *quickjs.Context, value: quickjs.Value) quickjs.Value {
     return resolved;
 }
 
-fn jsHistoryPushState(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsHistoryPushState(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    applyHistoryUrl(ctx, args);
     return quickjs.Value.undefined;
 }
 
-fn jsHistoryReplaceState(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+fn jsHistoryReplaceState(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
+    const ctx = maybe_ctx orelse return quickjs.Value.exception;
+    applyHistoryUrl(ctx, args);
     return quickjs.Value.undefined;
+}
+
+fn applyHistoryUrl(ctx: *quickjs.Context, args: []const quickjs.c.JSValue) void {
+    if (args.len < 3) return;
+    const url_text = quickjs.Value.fromCVal(args[2]).toCStringLen(ctx) orelse return;
+    defer ctx.freeCString(url_text.ptr);
+    const url = url_text.ptr[0..url_text.len];
+    if (url.len == 0) return;
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const location = global.getPropertyStr(ctx, "location");
+    defer location.deinit(ctx);
+    if (location.isException() or !location.isObject()) return;
+
+    location.setPropertyStr(ctx, "href", quickjs.Value.initStringLen(ctx, url)) catch return;
+
+    const pathname = location.getPropertyStr(ctx, "pathname");
+    defer pathname.deinit(ctx);
+    if (!pathname.isException() and pathname.isString()) return;
+
+    if (std.mem.startsWith(u8, url, "/")) {
+        location.setPropertyStr(ctx, "pathname", quickjs.Value.initStringLen(ctx, url)) catch {};
+    }
 }
 
 fn jsScrollTo(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs.c.JSValue) quickjs.Value {
@@ -985,8 +1013,8 @@ fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
 }
 
 fn delayToTimerTurns(delay_ms: f64) u32 {
-    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 1;
-    const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 25.0)));
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 16;
+    const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 10.0)));
     return @intCast(@max(1, @min(turns, 10_000)));
 }
 
@@ -1227,6 +1255,11 @@ pub fn hasPendingNativeTimers() bool {
     return native_timers.items.len > 0;
 }
 
+pub fn clearPendingNativeTimers(ctx: *quickjs.Context) void {
+    if (native_timer_ctx != ctx) return;
+    clearNativeTimers(ctx);
+}
+
 pub fn hasDueNativeTimers() bool {
     for (native_timers.items) |timer| {
         if (timer.remaining_turns <= 1) return true;
@@ -1237,17 +1270,14 @@ pub fn hasDueNativeTimers() bool {
 pub fn runNativeTimerTurn(ctx: *quickjs.Context) quickjs.Value {
     if (native_timers.items.len == 0) return quickjs.Value.undefined;
 
-    var due_index: ?usize = null;
-    for (native_timers.items, 0..) |*timer, index| {
+    for (native_timers.items, 0..) |timer, index| {
         if (timer.remaining_turns <= 1) {
-            due_index = index;
-            break;
+            return invokeNativeTimerAt(ctx, index);
         }
-        timer.remaining_turns -= 1;
     }
 
-    if (due_index) |index| {
-        return invokeNativeTimerAt(ctx, index);
+    for (native_timers.items) |*timer| {
+        if (timer.remaining_turns > 0) timer.remaining_turns -= 1;
     }
 
     return quickjs.Value.undefined;
@@ -1875,6 +1905,26 @@ fn resolvePromiseValue(ctx: *quickjs.Context, value: quickjs.Value) quickjs.Valu
     return promise;
 }
 
+fn rejectPromiseValue(ctx: *quickjs.Context, reason: quickjs.Value) quickjs.Value {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+
+    const promise_ctor = global.getPropertyStr(ctx, "Promise");
+    defer promise_ctor.deinit(ctx);
+    if (!promise_ctor.isObject()) return reason.throw(ctx);
+
+    const reject = promise_ctor.getPropertyStr(ctx, "reject");
+    defer reject.deinit(ctx);
+    if (!reject.isFunction(ctx)) return reason.throw(ctx);
+
+    var call_args = [_]quickjs.Value{reason.dup(ctx)};
+    defer call_args[0].deinit(ctx);
+    const promise = reject.call(ctx, promise_ctor, &call_args);
+    if (promise.isException()) return reason.throw(ctx);
+    reason.deinit(ctx);
+    return promise;
+}
+
 fn jsBodyText(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const body = this_value.getPropertyStr(ctx, "__zigBody");
@@ -1889,20 +1939,34 @@ fn jsBodyJson(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, _: []cons
     const ctx = maybe_ctx orelse return quickjs.Value.exception;
     const body = this_value.getPropertyStr(ctx, "__zigBody");
     defer body.deinit(ctx);
-    if (body.isException() or body.isUndefined()) return resolvePromiseValue(ctx, quickjs.Value.null);
-    const json = body.toCStringLen(ctx) orelse return resolvePromiseValue(ctx, quickjs.Value.null);
-    defer ctx.freeCString(json.ptr);
-    if (json.len == 0) return resolvePromiseValue(ctx, quickjs.Value.null);
+    const json = if (body.isException() or body.isUndefined() or body.isNull())
+        ""
+    else if (body.toCStringLen(ctx)) |text|
+        blk: {
+            defer ctx.freeCString(text.ptr);
+            break :blk text.ptr[0..text.len];
+        }
+    else
+        "";
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
     const json_obj = global.getPropertyStr(ctx, "JSON");
     defer json_obj.deinit(ctx);
+    if (!json_obj.isObject()) {
+        return rejectPromiseValue(ctx, quickjs.Value.initStringLen(ctx, "JSON.parse is unavailable"));
+    }
     const parse = json_obj.getPropertyStr(ctx, "parse");
     defer parse.deinit(ctx);
-    var call_args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, json.ptr[0..json.len])};
+    if (!parse.isFunction(ctx)) {
+        return rejectPromiseValue(ctx, quickjs.Value.initStringLen(ctx, "JSON.parse is unavailable"));
+    }
+    var call_args = [_]quickjs.Value{quickjs.Value.initStringLen(ctx, json)};
     defer call_args[0].deinit(ctx);
     const parsed = parse.call(ctx, json_obj, &call_args);
-    if (parsed.isException()) return parsed;
+    if (parsed.isException()) {
+        const exception = ctx.getException();
+        return rejectPromiseValue(ctx, exception);
+    }
     return resolvePromiseValue(ctx, parsed);
 }
 

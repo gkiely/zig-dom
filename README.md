@@ -7,14 +7,14 @@ A Zig-backed native DOM implementation with a built-in test runner.
 ```sh
 bun run test basic.test
 bun run test tests/runner/basic.test.ts
-bun run test --root ../youneedawiki src/components/Tree/Tree.test.tsx
-bun run test:perf --root ../youneedawiki src/components/Tree/Tree.test.tsx
+bun run test --root ../youneedawiki-zig-dom src/components/Tree/Tree.test.tsx
+bun run test:perf --root ../youneedawiki-zig-dom src/components/Tree/Tree.test.tsx
 ```
 
 Sample a command on macOS:
 
 ```sh
-bun run sample -- zig-out/bin/zig-dom test --root ../youneedawiki src/components/Tree/Tree.test.tsx
+bun run sample -- zig-out/bin/zig-dom test --root ../youneedawiki-zig-dom src/components/Tree/Tree.test.tsx
 ```
 
 The `test` command runs JavaScript, TypeScript, JSX, and TSX tests through the embedded QuickJS-ng runtime. DOM support can be enabled for all files with `--dom`, is enabled automatically for `.jsx` and `.tsx`, or can be customized with suffixes:

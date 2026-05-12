@@ -24,16 +24,14 @@ pub fn defaultDomSuffixes() []const []const u8 {
 const run_bootstrap_source =
     \\globalThis.__zigDone = false;
     \\globalThis.__zigRunError = "";
-    \\Promise.resolve()
-    \\  .then(() => globalThis.__zigRunner.run())
-    \\  .then(() => {
-    \\    globalThis.__zigDone = true;
-    \\  })
-    \\  .catch((error) => {
-    \\    const details = error && error.stack ? String(error.stack) : String(error);
-    \\    globalThis.__zigRunError = details;
-    \\    globalThis.__zigDone = true;
-    \\  });
+    \\try {
+    \\  globalThis.__zigRunner.run();
+    \\  globalThis.__zigDone = true;
+    \\} catch (error) {
+    \\  const details = error && error.stack ? String(error.stack) : String(error);
+    \\  globalThis.__zigRunError = details;
+    \\  globalThis.__zigDone = true;
+    \\}
 ;
 
 const collection_flush_source =
@@ -94,11 +92,15 @@ const cjs_runtime_helpers_source =
 
 const setup_dom_probe_begin_source =
     \\globalThis.__zigSetupDocumentNodeNameHidden = false;
+    \\globalThis.__zigSetupDocumentSaved = undefined;
     \\try {
     \\  if (globalThis.document && globalThis.document.nodeName) {
-    \\    Object.defineProperty(globalThis.document, "nodeName", {
-    \\      value: undefined,
-    \\      configurable: true
+    \\    globalThis.__zigSetupDocumentSaved = globalThis.document;
+    \\    globalThis.document = new Proxy(globalThis.document, {
+    \\      get(target, prop, receiver) {
+    \\        if (prop === "nodeName") return undefined;
+    \\        return Reflect.get(target, prop, receiver);
+    \\      }
     \\    });
     \\    globalThis.__zigSetupDocumentNodeNameHidden = true;
     \\  }
@@ -107,15 +109,36 @@ const setup_dom_probe_begin_source =
 
 const setup_dom_probe_end_source =
     \\try {
-    \\  if (globalThis.__zigSetupDocumentNodeNameHidden && globalThis.document) {
-    \\    delete globalThis.document.nodeName;
+    \\  if (globalThis.__zigSetupDocumentNodeNameHidden && globalThis.__zigSetupDocumentSaved) {
+    \\    globalThis.document = globalThis.__zigSetupDocumentSaved;
     \\  }
     \\} catch {}
+    \\globalThis.__zigSetupDocumentSaved = undefined;
     \\globalThis.__zigSetupDocumentNodeNameHidden = false;
+;
+
+const sync_window_globals_source =
+    \\try {
+    \\  if (globalThis.window && globalThis.window !== globalThis) {
+    \\    const names = Object.getOwnPropertyNames(globalThis.window);
+    \\    for (const name of names) {
+    \\      if (name in globalThis) continue;
+    \\      Object.defineProperty(globalThis, name, {
+    \\        configurable: true,
+    \\        enumerable: true,
+    \\        get() { return globalThis.window[name]; },
+    \\        set(value) { globalThis.window[name] = value; },
+    \\      });
+    \\    }
+    \\  }
+    \\} catch {}
 ;
 
 const bun_specifier = "bun";
 const bun_test_specifier = "bun:test";
+const happy_dom_global_registrator_specifier = "@happy-dom/global-registrator";
+const testing_library_dom_specifier = "@testing-library/dom";
+const testing_library_react_specifier = "@testing-library/react";
 const node_url_specifier = "url";
 const node_url_colon_specifier = "node:url";
 const node_assert_specifier = "assert";
@@ -172,6 +195,131 @@ const native_node_builtin_specifiers = [_][]const u8{
 const native_builtin_stub_source =
     \\export {};
 ;
+
+const testing_library_dom_export_names = [_][:0]const u8{
+    "screen",
+    "within",
+    "queries",
+    "queryByText",
+    "queryAllByText",
+    "getByText",
+    "getAllByText",
+    "findByText",
+    "findAllByText",
+    "queryByTestId",
+    "queryAllByTestId",
+    "getByTestId",
+    "getAllByTestId",
+    "findByTestId",
+    "findAllByTestId",
+    "queryByLabelText",
+    "queryAllByLabelText",
+    "getByLabelText",
+    "getAllByLabelText",
+    "findByLabelText",
+    "findAllByLabelText",
+    "queryByRole",
+    "queryAllByRole",
+    "getByRole",
+    "getAllByRole",
+    "findByRole",
+    "findAllByRole",
+    "queryByDisplayValue",
+    "queryAllByDisplayValue",
+    "getByDisplayValue",
+    "getAllByDisplayValue",
+    "findByDisplayValue",
+    "findAllByDisplayValue",
+    "queryByPlaceholderText",
+    "queryAllByPlaceholderText",
+    "getByPlaceholderText",
+    "getAllByPlaceholderText",
+    "findByPlaceholderText",
+    "findAllByPlaceholderText",
+    "queryByTitle",
+    "queryAllByTitle",
+    "getByTitle",
+    "getAllByTitle",
+    "findByTitle",
+    "findAllByTitle",
+    "queryByAltText",
+    "queryAllByAltText",
+    "getByAltText",
+    "getAllByAltText",
+    "findByAltText",
+    "findAllByAltText",
+    "fireEvent",
+    "cleanup",
+    "getConfig",
+    "configure",
+    "setConfig",
+    "waitFor",
+    "waitForElementToBeRemoved",
+};
+
+const testing_library_react_export_names = [_][:0]const u8{
+    "render",
+    "renderHook",
+    "screen",
+    "within",
+    "queries",
+    "queryByText",
+    "queryAllByText",
+    "getByText",
+    "getAllByText",
+    "findByText",
+    "findAllByText",
+    "queryByTestId",
+    "queryAllByTestId",
+    "getByTestId",
+    "getAllByTestId",
+    "findByTestId",
+    "findAllByTestId",
+    "queryByLabelText",
+    "queryAllByLabelText",
+    "getByLabelText",
+    "getAllByLabelText",
+    "findByLabelText",
+    "findAllByLabelText",
+    "queryByRole",
+    "queryAllByRole",
+    "getByRole",
+    "getAllByRole",
+    "findByRole",
+    "findAllByRole",
+    "queryByDisplayValue",
+    "queryAllByDisplayValue",
+    "getByDisplayValue",
+    "getAllByDisplayValue",
+    "findByDisplayValue",
+    "findAllByDisplayValue",
+    "queryByPlaceholderText",
+    "queryAllByPlaceholderText",
+    "getByPlaceholderText",
+    "getAllByPlaceholderText",
+    "findByPlaceholderText",
+    "findAllByPlaceholderText",
+    "queryByTitle",
+    "queryAllByTitle",
+    "getByTitle",
+    "getAllByTitle",
+    "findByTitle",
+    "findAllByTitle",
+    "queryByAltText",
+    "queryAllByAltText",
+    "getByAltText",
+    "getAllByAltText",
+    "findByAltText",
+    "findAllByAltText",
+    "fireEvent",
+    "cleanup",
+    "getConfig",
+    "configure",
+    "setConfig",
+    "waitFor",
+    "waitForElementToBeRemoved",
+    "act",
+};
 
 const max_module_source_bytes = 4 * 1024 * 1024;
 const max_tsconfig_bytes = 2 * 1024 * 1024;
@@ -306,12 +454,20 @@ const ModuleLoaderState = struct {
         path: []u8,
     };
 
+    const OnLoadTransformCacheKey = struct {
+        loader_tag: u8,
+        dir_hash: u64,
+        content_hash: u64,
+        content_len: usize,
+    };
+
     allocator: Allocator,
     io: std.Io,
     runtime: ?*Runtime,
     entry_module_id: []const u8,
     loaded_modules: std.StringHashMap(*ModuleDef),
     source_cache: std.StringHashMap([]u8),
+    onload_transform_cache: std.AutoHashMap(OnLoadTransformCacheKey, []u8),
     specifier_cache: std.StringHashMap([]u8),
     require_specifier_cache: std.StringHashMap([]u8),
     cjs_lazy_compat_cache: std.StringHashMap(bool),
@@ -403,6 +559,7 @@ const ModuleLoaderState = struct {
             .entry_module_id = "",
             .loaded_modules = std.StringHashMap(*ModuleDef).init(allocator),
             .source_cache = std.StringHashMap([]u8).init(allocator),
+            .onload_transform_cache = std.AutoHashMap(OnLoadTransformCacheKey, []u8).init(allocator),
             .specifier_cache = std.StringHashMap([]u8).init(allocator),
             .require_specifier_cache = std.StringHashMap([]u8).init(allocator),
             .cjs_lazy_compat_cache = std.StringHashMap(bool).init(allocator),
@@ -515,6 +672,12 @@ const ModuleLoaderState = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.source_cache.deinit();
+
+        var onload_transform_cache_iterator = self.onload_transform_cache.iterator();
+        while (onload_transform_cache_iterator.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.onload_transform_cache.deinit();
 
         var specifier_iterator = self.specifier_cache.iterator();
         while (specifier_iterator.next()) |entry| {
@@ -783,7 +946,7 @@ const ModuleLoaderState = struct {
                 return try self.loadCommonJsModuleSource(module_id);
             }
 
-            return try self.allocator.dupe(u8, source);
+            return try self.rewriteTestingLibraryNamedImports(module_id, source);
         }
 
         if (std.mem.eql(u8, default_loader, "json")) {
@@ -804,8 +967,10 @@ const ModuleLoaderState = struct {
         if (self.profile_enabled) self.profile_load_transformed_count += 1;
         const start = if (self.profile_enabled) self.profileNow() else 0;
         const raw_source = try self.readFileCached(module_id, max_module_source_bytes);
+        const testing_library_rewritten = try self.rewriteTestingLibraryNamedImports(module_id, raw_source);
+        defer self.allocator.free(testing_library_rewritten);
         const rewrite_start = if (self.profile_enabled) self.profileNow() else 0;
-        const linked_source = try self.rewriteBarePackageNamedImports(module_id, raw_source);
+        const linked_source = try self.rewriteBarePackageNamedImports(module_id, testing_library_rewritten);
         if (self.profile_enabled) {
             self.profile_transform_rewrite_ns += self.profileNow() - rewrite_start;
         }
@@ -1583,11 +1748,7 @@ const ModuleLoaderState = struct {
             std.debug.print("[zig-dom onload] hit {s} loader={s} requested={s} bytes={d}\n", .{ module_id, effective_loader, requested_text, hook_result.contents.len });
         }
         if (std.mem.eql(u8, effective_loader, "js")) {
-            const js_onload_source = blk: {
-                const requested = self.requestedExportsFor(module_id) orelse break :blk try self.allocator.dupe(u8, hook_result.contents);
-                if (requested.all) break :blk try self.allocator.dupe(u8, hook_result.contents);
-                break :blk try pruneUnrequestedTsExports(self.allocator, hook_result.contents, requested);
-            };
+            const js_onload_source = try self.allocator.dupe(u8, hook_result.contents);
             defer self.allocator.free(js_onload_source);
 
             if (looksLikeJsxSource(js_onload_source)) {
@@ -1629,19 +1790,28 @@ const ModuleLoaderState = struct {
         loader: []const u8,
         contents: []const u8,
     ) ![]u8 {
-        const extension = if (std.mem.eql(u8, loader, "ts"))
-            ".ts"
-        else if (std.mem.eql(u8, loader, "tsx"))
-            ".tsx"
-        else if (std.mem.eql(u8, loader, "jsx"))
-            ".jsx"
-        else
-            return error.UnsupportedTransformLoader;
-        _ = extension;
-        const source = try self.rewriteBarePackageNamedImports(module_id, contents);
+        const loader_tag = loaderTagForTransform(loader) orelse return error.UnsupportedTransformLoader;
+        const module_dir = std.fs.path.dirname(module_id) orelse "";
+        const cache_key: OnLoadTransformCacheKey = .{
+            .loader_tag = loader_tag,
+            .dir_hash = std.hash.Wyhash.hash(0, module_dir),
+            .content_hash = std.hash.Wyhash.hash(0, contents),
+            .content_len = contents.len,
+        };
+        if (self.onload_transform_cache.get(cache_key)) |cached| {
+            return self.allocator.dupe(u8, cached);
+        }
+
+        const testing_library_rewritten = try self.rewriteTestingLibraryNamedImports(module_id, contents);
+        defer self.allocator.free(testing_library_rewritten);
+        const source = try self.rewriteBarePackageNamedImports(module_id, testing_library_rewritten);
         defer self.allocator.free(source);
 
         const transformed = try yuku_transform.transformSource(self.allocator, module_id, source, loader);
+        const cache_entry = try self.onload_transform_cache.getOrPut(cache_key);
+        if (!cache_entry.found_existing) {
+            cache_entry.value_ptr.* = try self.allocator.dupe(u8, transformed);
+        }
         if (std.c.getenv("ZIG_DOM_DUMP_TRANSFORMED")) |dump_path_raw| {
             if (std.mem.indexOf(u8, module_id, "Tree.test.tsx") != null) {
                 _ = std.Io.Dir.cwd().writeFile(self.io, .{
@@ -1651,6 +1821,48 @@ const ModuleLoaderState = struct {
             }
         }
         return transformed;
+    }
+
+    fn loaderTagForTransform(loader: []const u8) ?u8 {
+        if (std.mem.eql(u8, loader, "ts")) return 1;
+        if (std.mem.eql(u8, loader, "tsx")) return 2;
+        if (std.mem.eql(u8, loader, "jsx")) return 3;
+        return null;
+    }
+
+    fn rewriteTestingLibraryNamedImports(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
+        if (std.mem.indexOf(u8, module_id, "/node_modules/") != null) return self.allocator.dupe(u8, source);
+        if (std.mem.indexOf(u8, source, "@testing-library/") == null) return self.allocator.dupe(u8, source);
+
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(self.allocator);
+
+        var cursor: usize = 0;
+        while (nextStaticImportKeyword(source, cursor)) |start| {
+            const end = findImportStatementEnd(source, start);
+            const statement = source[start..end];
+            const parsed = parseImportStatement(statement) orelse {
+                try out.appendSlice(self.allocator, source[cursor..end]);
+                cursor = end;
+                continue;
+            };
+
+            const replacement = try buildTestingLibraryNamedImportReplacement(self.allocator, parsed);
+            if (replacement) |rewritten| {
+                defer self.allocator.free(rewritten);
+                try out.appendSlice(self.allocator, source[cursor..start]);
+                try out.appendSlice(self.allocator, rewritten);
+                cursor = end;
+                if (cursor < source.len and source[cursor] == ';') cursor += 1;
+                continue;
+            }
+
+            try out.appendSlice(self.allocator, source[cursor..end]);
+            cursor = end;
+        }
+
+        try out.appendSlice(self.allocator, source[cursor..]);
+        return out.toOwnedSlice(self.allocator);
     }
 
     fn rewriteBarePackageNamedImports(self: *ModuleLoaderState, module_id: []const u8, source: []const u8) ![]u8 {
@@ -3340,7 +3552,25 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
             vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch {};
             return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
         };
+        const setup_jobs_timeout_ms: i64 = 10_000;
+        const setup_jobs_start_ts = std.Io.Clock.Timestamp.now(io, .awake);
         while (vm.isJobPending()) {
+            const setup_jobs_elapsed_ms = setup_jobs_start_ts.untilNow(io).raw.toMilliseconds();
+            if (setup_jobs_elapsed_ms > setup_jobs_timeout_ms) {
+                vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch {};
+                return .{
+                    .path = try allocator.dupe(u8, path),
+                    .passed = 0,
+                    .failed = 0,
+                    .skipped = 0,
+                    .timed_out = 0,
+                    .collection_errors = 1,
+                    .expect_calls = 0,
+                    .passed_report = null,
+                    .failure_report = null,
+                    .collection_report = try allocator.dupe(u8, "collection failed: setup async jobs timed out"),
+                };
+            }
             _ = vm.executePendingJob() catch |err| {
                 vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch {};
                 return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
@@ -3348,6 +3578,9 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
         }
         vm.evalScript("<zig-setup-dom-probe-end>", setup_dom_probe_end_source) catch |err| {
             return failureFromRuntimeException(allocator, path, "failed to restore setup environment", err, &vm);
+        };
+        vm.evalScript("<zig-sync-window-globals>", sync_window_globals_source) catch |err| {
+            return failureFromRuntimeException(allocator, path, "failed to sync setup globals", err, &vm);
         };
         if (module_loader_state.profile_enabled) {
             module_loader_state.profile_setup_eval_ns += module_loader_state.profileNow() - setup_eval_start;
@@ -3371,7 +3604,24 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
         return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
     };
 
+    const entry_jobs_timeout_ms: i64 = 10_000;
+    const entry_jobs_start_ts = std.Io.Clock.Timestamp.now(io, .awake);
     while (vm.isJobPending()) {
+        const entry_jobs_elapsed_ms = entry_jobs_start_ts.untilNow(io).raw.toMilliseconds();
+        if (entry_jobs_elapsed_ms > entry_jobs_timeout_ms) {
+            return .{
+                .path = try allocator.dupe(u8, path),
+                .passed = 0,
+                .failed = 0,
+                .skipped = 0,
+                .timed_out = 0,
+                .collection_errors = 1,
+                .expect_calls = 0,
+                .passed_report = null,
+                .failure_report = null,
+                .collection_report = try allocator.dupe(u8, "collection failed: entry async jobs timed out"),
+            };
+        }
         _ = vm.executePendingJob() catch |err| {
             return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
         };
@@ -3410,7 +3660,24 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
         }
     }
 
+    const post_flush_jobs_timeout_ms: i64 = 10_000;
+    const post_flush_jobs_start_ts = std.Io.Clock.Timestamp.now(io, .awake);
     while (vm.isJobPending()) {
+        const post_flush_jobs_elapsed_ms = post_flush_jobs_start_ts.untilNow(io).raw.toMilliseconds();
+        if (post_flush_jobs_elapsed_ms > post_flush_jobs_timeout_ms) {
+            return .{
+                .path = try allocator.dupe(u8, path),
+                .passed = 0,
+                .failed = 0,
+                .skipped = 0,
+                .timed_out = 0,
+                .collection_errors = 1,
+                .expect_calls = 0,
+                .passed_report = null,
+                .failure_report = null,
+                .collection_report = try allocator.dupe(u8, "collection failed: post-flush async jobs timed out"),
+            };
+        }
         _ = vm.executePendingJob() catch |err| {
             return collectionFailureFromRuntimeException(allocator, path, "collection failed", err, &vm);
         };
@@ -3430,6 +3697,17 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
     while (!(vm.getGlobalBool("__zigDone") catch false)) {
         const elapsed_ms = start_ts.untilNow(io).raw.toMilliseconds();
         if (elapsed_ms > run_timeout_ms) {
+            const timeout_message = try std.fmt.allocPrint(
+                allocator,
+                "Runner timed out while waiting for async jobs (jobs_pending={}, timers_pending={}, registered_tests={d}, has_runnable={}, only_mode={}).",
+                .{
+                    vm.isJobPending(),
+                    vm.hasPendingNativeTimers(),
+                    vm.getGlobalInt32("__zigRegisteredTests") catch -1,
+                    vm.getGlobalBool("__zigHasRunnable") catch false,
+                    vm.getGlobalBool("__zigOnlyMode") catch false,
+                },
+            );
             return .{
                 .path = try allocator.dupe(u8, path),
                 .passed = 0,
@@ -3439,7 +3717,7 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
                 .collection_errors = 0,
                 .expect_calls = 0,
                 .passed_report = null,
-                .failure_report = try allocator.dupe(u8, "Runner timed out while waiting for async jobs."),
+                .failure_report = timeout_message,
                 .collection_report = null,
             };
         }
@@ -4071,6 +4349,31 @@ fn loadNativeBuiltInModule(ctx: *ModuleContext, module_name: [:0]const u8) ?*Mod
         return module;
     }
 
+    if (std.mem.eql(u8, module_name, happy_dom_global_registrator_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeHappyDomGlobalRegistratorModule) orelse return null;
+        if (!module.addExport(ctx, "GlobalRegistrator")) return null;
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, testing_library_dom_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeTestingLibraryDomModule) orelse return null;
+        inline for (testing_library_dom_export_names) |member_name| {
+            if (!module.addExport(ctx, member_name)) return null;
+        }
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
+    if (std.mem.eql(u8, module_name, testing_library_react_specifier)) {
+        const module = ModuleDef.init(ctx, module_name, initNativeTestingLibraryReactModule) orelse return null;
+        inline for (testing_library_react_export_names) |member_name| {
+            if (!module.addExport(ctx, member_name)) return null;
+        }
+        if (!module.addExport(ctx, "default")) return null;
+        return module;
+    }
+
     if (std.mem.eql(u8, module_name, node_assert_specifier) or std.mem.eql(u8, module_name, node_assert_colon_specifier)) {
         const module = ModuleDef.init(ctx, module_name, initNativeNodeAssertModule) orelse return null;
         if (!module.addExport(ctx, "default")) return null;
@@ -4241,6 +4544,33 @@ fn initNativeBunTestModule(ctx: *ModuleContext, module: *ModuleDef) bool {
         "afterEach",
         "afterAll",
     });
+}
+
+fn initNativeHappyDomGlobalRegistratorModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    const registrator = quickjs.Value.initObject(ctx);
+    defer registrator.deinit(ctx);
+    if (registrator.isException()) return false;
+
+    const register_fn = quickjs.Value.initCFunction(ctx, jsNoop, "register", 1);
+    defer register_fn.deinit(ctx);
+    if (register_fn.isException()) return false;
+
+    registrator.setPropertyStr(ctx, "register", register_fn.dup(ctx)) catch return false;
+    if (!module.setExport(ctx, "GlobalRegistrator", registrator.dup(ctx))) return false;
+    if (!module.setExport(ctx, "default", registrator.dup(ctx))) return false;
+    return true;
+}
+
+fn jsNoop(_: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    return quickjs.Value.undefined;
+}
+
+fn initNativeTestingLibraryDomModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    return exportApiMembersAsModule(ctx, module, "__zigTestingLibraryDom", &testing_library_dom_export_names);
+}
+
+fn initNativeTestingLibraryReactModule(ctx: *ModuleContext, module: *ModuleDef) bool {
+    return exportApiMembersAsModule(ctx, module, "__zigTestingLibraryReact", &testing_library_react_export_names);
 }
 
 fn initNativeNodeStreamWebModule(ctx: *ModuleContext, module: *ModuleDef) bool {
@@ -5512,7 +5842,12 @@ fn exportGlobalMembersAsModule(
 }
 
 fn builtInModuleSource(module_name: []const u8) ?[]const u8 {
-    if (std.mem.eql(u8, module_name, bun_specifier) or std.mem.eql(u8, module_name, bun_test_specifier)) {
+    if (std.mem.eql(u8, module_name, bun_specifier) or
+        std.mem.eql(u8, module_name, bun_test_specifier) or
+        std.mem.eql(u8, module_name, happy_dom_global_registrator_specifier) or
+        std.mem.eql(u8, module_name, testing_library_dom_specifier) or
+        std.mem.eql(u8, module_name, testing_library_react_specifier))
+    {
         return native_builtin_stub_source;
     }
 
@@ -6184,6 +6519,98 @@ fn parseImportQuotedSpecifier(source: []const u8) ?[]const u8 {
     return null;
 }
 
+const TestingLibraryNamedBinding = struct {
+    imported: []u8,
+    local: []u8,
+
+    fn deinit(self: *TestingLibraryNamedBinding, allocator: Allocator) void {
+        allocator.free(self.imported);
+        allocator.free(self.local);
+    }
+};
+
+fn buildTestingLibraryNamedImportReplacement(
+    allocator: Allocator,
+    parsed: ParsedImportStatement,
+) !?[]u8 {
+    const global_name = if (std.mem.eql(u8, parsed.specifier, testing_library_dom_specifier))
+        "__zigTestingLibraryDom"
+    else if (std.mem.eql(u8, parsed.specifier, testing_library_react_specifier))
+        "__zigTestingLibraryReact"
+    else
+        return null;
+
+    if (parsed.all) return null;
+    const bindings = std.mem.trim(u8, parsed.bindings, " \t\r\n");
+    if (!std.mem.startsWith(u8, bindings, "{") or !std.mem.endsWith(u8, bindings, "}")) return null;
+
+    var runtime_bindings: std.ArrayList(TestingLibraryNamedBinding) = .empty;
+    defer {
+        for (runtime_bindings.items) |*binding| binding.deinit(allocator);
+        runtime_bindings.deinit(allocator);
+    }
+
+    var type_bindings: std.ArrayList([]u8) = .empty;
+    defer {
+        for (type_bindings.items) |item| allocator.free(item);
+        type_bindings.deinit(allocator);
+    }
+
+    var saw_part = false;
+    var parts = std.mem.tokenizeScalar(u8, bindings[1 .. bindings.len - 1], ',');
+    while (parts.next()) |raw_part| {
+        const part = std.mem.trim(u8, raw_part, " \t\r\n");
+        if (part.len == 0) continue;
+        saw_part = true;
+
+        if (std.mem.startsWith(u8, part, "type ")) {
+            try type_bindings.append(allocator, try allocator.dupe(u8, part));
+            continue;
+        }
+
+        const as_index = std.mem.indexOf(u8, part, " as ");
+        const imported = std.mem.trim(u8, if (as_index) |idx| part[0..idx] else part, " \t\r\n");
+        const local = std.mem.trim(u8, if (as_index) |idx| part[idx + " as ".len ..] else part, " \t\r\n");
+        if (!isValidIdentifier(imported) or !isValidIdentifier(local)) return null;
+
+        try runtime_bindings.append(allocator, .{
+            .imported = try allocator.dupe(u8, imported),
+            .local = try allocator.dupe(u8, local),
+        });
+    }
+
+    if (!saw_part) return null;
+    if (runtime_bindings.items.len == 0) return null;
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    if (type_bindings.items.len > 0) {
+        try out.appendSlice(allocator, "import { ");
+        for (type_bindings.items, 0..) |binding, index| {
+            if (index > 0) try out.appendSlice(allocator, ", ");
+            try out.appendSlice(allocator, binding);
+        }
+        try out.appendSlice(allocator, " } from \"");
+        try out.appendSlice(allocator, parsed.specifier);
+        try out.appendSlice(allocator, "\";\n");
+    }
+
+    try out.appendSlice(allocator, "const { ");
+    for (runtime_bindings.items, 0..) |binding, index| {
+        if (index > 0) try out.appendSlice(allocator, ", ");
+        if (std.mem.eql(u8, binding.imported, binding.local)) {
+            try out.appendSlice(allocator, binding.local);
+        } else {
+            try appendFmt(allocator, &out, "{s}: {s}", .{ binding.imported, binding.local });
+        }
+    }
+    try out.appendSlice(allocator, " } = globalThis.");
+    try out.appendSlice(allocator, global_name);
+    try out.appendSlice(allocator, ";\n");
+    return @as(?[]u8, try out.toOwnedSlice(allocator));
+}
+
 fn parseRequireSpecifierAt(source: []const u8, require_index: usize) ?[]const u8 {
     if (!std.mem.startsWith(u8, source[require_index..], "require(")) return null;
     var cursor = require_index + "require(".len;
@@ -6531,6 +6958,36 @@ fn onLoadTransformExtension(loader: []const u8) ?[]const u8 {
     return null;
 }
 
+test "testing library import rewrite handles named imports" {
+    const statement = "import { cleanup, render } from \"@testing-library/react\";";
+    const parsed = parseImportStatement(statement).?;
+    const rewritten = (try buildTestingLibraryNamedImportReplacement(std.testing.allocator, parsed)).?;
+    defer std.testing.allocator.free(rewritten);
+
+    try std.testing.expect(std.mem.indexOf(u8, rewritten, "cleanup") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rewritten, "render") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rewritten, "globalThis.__zigTestingLibraryReact") != null);
+}
+
+test "testing library import rewrite preserves aliases" {
+    const statement = "import { render as rtlRender } from \"@testing-library/react\";";
+    const parsed = parseImportStatement(statement).?;
+    const rewritten = (try buildTestingLibraryNamedImportReplacement(std.testing.allocator, parsed)).?;
+    defer std.testing.allocator.free(rewritten);
+
+    try std.testing.expect(std.mem.indexOf(u8, rewritten, "render: rtlRender") != null);
+}
+
+test "testing library import rewrite keeps type-only bindings" {
+    const statement = "import { type RenderResult, render } from \"@testing-library/react\";";
+    const parsed = parseImportStatement(statement).?;
+    const rewritten = (try buildTestingLibraryNamedImportReplacement(std.testing.allocator, parsed)).?;
+    defer std.testing.allocator.free(rewritten);
+
+    try std.testing.expect(std.mem.indexOf(u8, rewritten, "import { type RenderResult } from \"@testing-library/react\";") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rewritten, "const { render } = globalThis.__zigTestingLibraryReact;") != null);
+}
+
 test "pruneUnusedImports removes only unused import statements" {
     const source = "import { unused } from \"pkg\";export const value = 1;\n";
     const out = try pruneUnusedImports(std.testing.allocator, source);
@@ -6737,6 +7194,9 @@ test "isRelativeSpecifier detects relative paths" {
 test "shim sources resolve built-ins and fallback shims" {
     try std.testing.expect(builtInModuleSource("bun") != null);
     try std.testing.expect(builtInModuleSource("bun:test") != null);
+    try std.testing.expect(builtInModuleSource("@happy-dom/global-registrator") != null);
+    try std.testing.expect(builtInModuleSource("@testing-library/dom") != null);
+    try std.testing.expect(builtInModuleSource("@testing-library/react") != null);
     try std.testing.expect(builtInModuleSource("fs") != null);
     try std.testing.expect(builtInModuleSource("node:fs") != null);
     try std.testing.expect(builtInModuleSource("stream/web") != null);
@@ -6744,5 +7204,4 @@ test "shim sources resolve built-ins and fallback shims" {
     try std.testing.expect(builtInModuleSource("node:react") == null);
     try std.testing.expect(builtInModuleSource("zig-dom") == null);
     try std.testing.expect(builtInModuleSource("react") == null);
-    try std.testing.expect(builtInModuleSource("@testing-library/react") == null);
 }

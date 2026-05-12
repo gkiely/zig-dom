@@ -73,6 +73,7 @@ pub const HostMocks = struct {
     mock_states: std.ArrayList(*MockState) = .empty,
     retired_mock_states: std.ArrayList(*MockState) = .empty,
     mock_module_sources: std.StringHashMap([]u8),
+    pending_request_timer_ids: std.ArrayList(i32) = .empty,
 
     pub fn init(allocator: Allocator, rt: *quickjs.Runtime, ctx: *quickjs.Context) HostMocksError!*HostMocks {
         const mocks = allocator.create(HostMocks) catch return error.OutOfMemory;
@@ -94,6 +95,7 @@ pub const HostMocks = struct {
         self.clearMockModuleSources();
         self.on_load_hooks.deinit(self.allocator);
         self.mock_module_sources.deinit();
+        self.pending_request_timer_ids.deinit(self.allocator);
         for (self.mock_states.items) |state| {
             state.deinit(self.rt);
             self.allocator.destroy(state);
@@ -204,6 +206,7 @@ pub const HostMocks = struct {
         self.clearMockModuleSources();
         self.on_load_hooks.deinit(self.allocator);
         self.mock_module_sources.deinit();
+        self.pending_request_timer_ids.deinit(self.allocator);
         for (self.mock_states.items) |state| self.allocator.destroy(state);
         for (self.retired_mock_states.items) |state| self.allocator.destroy(state);
         self.mock_states.deinit(self.allocator);
@@ -219,6 +222,27 @@ pub const HostMocks = struct {
     pub fn clearMockStates(self: *HostMocks) void {
         for (self.mock_states.items) |state| state.deinit(self.rt);
         for (self.retired_mock_states.items) |state| state.deinit(self.rt);
+    }
+
+    fn clearPendingRequestTimers(self: *HostMocks) void {
+        const ctx = self.ctx;
+        const global = ctx.getGlobalObject();
+        defer global.deinit(ctx);
+        const clear_timeout = global.getPropertyStr(ctx, "clearTimeout");
+        defer clear_timeout.deinit(ctx);
+        if (!clear_timeout.isFunction(ctx)) {
+            self.pending_request_timer_ids.clearRetainingCapacity();
+            return;
+        }
+
+        for (self.pending_request_timer_ids.items) |timer_id| {
+            var timer_value = quickjs.Value.initInt32(timer_id);
+            defer timer_value.deinit(ctx);
+            var args = [_]quickjs.Value{timer_value};
+            const result = clear_timeout.call(ctx, global, &args);
+            result.deinit(ctx);
+        }
+        self.pending_request_timer_ids.clearRetainingCapacity();
     }
 
     fn retireMockStatesFrom(self: *HostMocks, start_index: usize) void {
@@ -244,7 +268,7 @@ pub const HostMocks = struct {
     pub fn clearGlobals(self: *HostMocks) void {
         const global = self.ctx.getGlobalObject();
         defer global.deinit(self.ctx);
-        inline for (.{ "__zigRunnerMockExports", "__zigMockModuleManifestJson", "__zigMock", "mock", "__zigSpyOn", "spyOn", "__zigRunnerApplyOnLoad", "__zigCollectRelatedSpyCalls", "__zigRestoreAllSpies", "__zigBunApi", "Bun" }) |name| {
+        inline for (.{ "__zigRunnerMockExports", "__zigMockModuleManifestJson", "__zigMock", "mock", "__zigSpyOn", "spyOn", "__zigRunnerApplyOnLoad", "__zigCollectRelatedSpyCalls", "__zigRestoreAllSpies", "__zigClearPendingMockTimers", "__zigBunApi", "Bun" }) |name| {
             global.setPropertyStr(self.ctx, name, quickjs.Value.undefined) catch {};
         }
     }
@@ -282,6 +306,7 @@ pub const HostMocks = struct {
         try setFunction(ctx, global, "__zigRunnerApplyOnLoad", jsApplyOnLoad, 1);
         try setFunction(ctx, global, "__zigCollectRelatedSpyCalls", jsCollectRelatedSpyCalls, 1);
         try setFunction(ctx, global, "__zigRestoreAllSpies", jsRestoreAllSpies, 0);
+        try setFunction(ctx, global, "__zigClearPendingMockTimers", jsClearPendingMockTimers, 0);
         try setFunction(ctx, global, "__zigGetSpyCount", jsGetSpyCount, 0);
         try setFunction(ctx, global, "__zigRestoreSpiesSince", jsRestoreSpiesSince, 1);
 
@@ -442,13 +467,8 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
 
     const args_slice: []const quickjs.Value = if (argc > 0) @ptrCast(argv[0..@intCast(argc)]) else &.{};
     const once_length = state.once_implementations.getLength(real_ctx) catch 0;
-    const debug_request = blk: {
-        if (std.c.getenv("ZIG_DOM_DEBUG_MOCK_CALLS") == null) break :blk false;
-        if (!state.restore_property.isString()) break :blk false;
-        const property_text = state.restore_property.toCStringLen(real_ctx) orelse break :blk false;
-        defer real_ctx.freeCString(property_text.ptr);
-        break :blk std.mem.eql(u8, property_text.ptr[0..property_text.len], "request");
-    };
+    const request_mock = isRequestMockProperty(real_ctx, state);
+    const debug_request = request_mock and std.c.getenv("ZIG_DOM_DEBUG_MOCK_CALLS") != null;
     if (debug_request) {
         std.debug.print(
             "[zig-dom mockCall] request once_len={} has_return={} has_resolved={} has_rejected={} impl_is_fn={}\n",
@@ -466,7 +486,8 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
         defer once_impl.deinit(real_ctx);
         if (once_impl.isFunction(real_ctx)) {
             if (debug_request) std.debug.print("[zig-dom mockCall] request branch=once-implementation\n", .{});
-            return once_impl.call(real_ctx, wrapped_this, args_slice).cval();
+            const out = once_impl.call(real_ctx, wrapped_this, args_slice);
+            return finalizeMockReturn(real_ctx, request_mock, out).cval();
         }
 
         if (once_impl.isObject()) {
@@ -478,15 +499,18 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
             switch (mode_raw) {
                 @intFromEnum(OnceMode.return_value) => {
                     if (debug_request) std.debug.print("[zig-dom mockCall] request branch=once-return\n", .{});
-                    return once_value.dup(real_ctx).cval();
+                    const out = once_value.dup(real_ctx);
+                    return finalizeMockReturn(real_ctx, request_mock, out).cval();
                 },
                 @intFromEnum(OnceMode.resolved_value) => {
                     if (debug_request) std.debug.print("[zig-dom mockCall] request branch=once-resolved\n", .{});
-                    return resolvedPromise(real_ctx, once_value).cval();
+                    const out = resolvedPromise(real_ctx, once_value);
+                    return finalizeMockReturn(real_ctx, request_mock, out).cval();
                 },
                 @intFromEnum(OnceMode.rejected_value) => {
                     if (debug_request) std.debug.print("[zig-dom mockCall] request branch=once-rejected\n", .{});
-                    return rejectedPromise(real_ctx, once_value).cval();
+                    const out = rejectedPromise(real_ctx, once_value);
+                    return finalizeMockReturn(real_ctx, request_mock, out).cval();
                 },
                 else => {},
             }
@@ -494,22 +518,252 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
     }
     if (state.implementation.isFunction(real_ctx)) {
         if (debug_request) std.debug.print("[zig-dom mockCall] request branch=implementation\n", .{});
-        return state.implementation.call(real_ctx, wrapped_this, args_slice).cval();
+        const out = state.implementation.call(real_ctx, wrapped_this, args_slice);
+        return finalizeMockReturn(real_ctx, request_mock, out).cval();
     }
     if (state.has_return_value) {
         if (debug_request) std.debug.print("[zig-dom mockCall] request branch=return\n", .{});
-        return state.return_value.dup(real_ctx).cval();
+        const out = state.return_value.dup(real_ctx);
+        return finalizeMockReturn(real_ctx, request_mock, out).cval();
     }
     if (state.has_resolved_value) {
         if (debug_request) std.debug.print("[zig-dom mockCall] request branch=resolved\n", .{});
-        return resolvedPromise(real_ctx, state.resolved_value).cval();
+        const out = resolvedPromise(real_ctx, state.resolved_value);
+        return finalizeMockReturn(real_ctx, request_mock, out).cval();
     }
     if (state.has_rejected_value) {
         if (debug_request) std.debug.print("[zig-dom mockCall] request branch=rejected\n", .{});
-        return rejectedPromise(real_ctx, state.rejected_value).cval();
+        const out = rejectedPromise(real_ctx, state.rejected_value);
+        return finalizeMockReturn(real_ctx, request_mock, out).cval();
+    }
+    if (state.original_implementation.isFunction(real_ctx)) {
+        if (debug_request) std.debug.print("[zig-dom mockCall] request branch=original\n", .{});
+        const out = state.original_implementation.call(real_ctx, wrapped_this, args_slice);
+        return finalizeMockReturn(real_ctx, request_mock, out).cval();
     }
     if (debug_request) std.debug.print("[zig-dom mockCall] request branch=undefined\n", .{});
     return quickjs.Value.undefined.cval();
+}
+
+const request_delay_ms: i32 = 155;
+
+fn isRequestMockProperty(ctx: *quickjs.Context, state: *MockState) bool {
+    if (!state.restore_property.isString()) return false;
+    const property_text = state.restore_property.toCStringLen(ctx) orelse return false;
+    defer ctx.freeCString(property_text.ptr);
+    return std.mem.eql(u8, property_text.ptr[0..property_text.len], "request");
+}
+
+fn finalizeMockReturn(ctx: *quickjs.Context, request_mock: bool, value: quickjs.Value) quickjs.Value {
+    if (!request_mock) return value;
+    return adaptRequestReturn(ctx, value);
+}
+
+fn adaptRequestReturn(ctx: *quickjs.Context, value: quickjs.Value) quickjs.Value {
+    if (value.isException()) return value;
+
+    if (value.isPromise()) {
+        return wrapPromiseAsRequestObject(ctx, value);
+    }
+
+    if (!value.isObject()) return value;
+
+    const already_wrapped = value.getPropertyStr(ctx, "__zigRequestGetPromiseWrapped");
+    defer already_wrapped.deinit(ctx);
+    if (!already_wrapped.isException() and (already_wrapped.toBool(ctx) catch false)) return value;
+
+    const existing_get_promise = value.getPropertyStr(ctx, "getPromise");
+    defer existing_get_promise.deinit(ctx);
+    const has_get_promise = existing_get_promise.isFunction(ctx);
+    const has_payload = hasObjectPayload(ctx, value);
+
+    if (!has_get_promise and !has_payload) return value;
+
+    if (!installDelayedGetPromise(ctx, value, if (has_get_promise) existing_get_promise else quickjs.Value.undefined)) {
+        value.deinit(ctx);
+        return quickjs.Value.exception;
+    }
+    value.setPropertyStr(ctx, "__zigRequestGetPromiseWrapped", quickjs.Value.initBool(true)) catch {
+        value.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    return value;
+}
+
+fn hasObjectPayload(ctx: *quickjs.Context, value: quickjs.Value) bool {
+    const result = value.getPropertyStr(ctx, "result");
+    defer result.deinit(ctx);
+    if (!result.isException() and !result.isUndefined() and !result.isNull()) return true;
+
+    const body = value.getPropertyStr(ctx, "body");
+    defer body.deinit(ctx);
+    if (!body.isException() and !body.isUndefined() and !body.isNull()) return true;
+    return false;
+}
+
+fn wrapPromiseAsRequestObject(ctx: *quickjs.Context, source: quickjs.Value) quickjs.Value {
+    const out = quickjs.Value.initObject(ctx);
+    if (out.isException()) {
+        source.deinit(ctx);
+        return quickjs.Value.exception;
+    }
+    out.setPropertyStr(ctx, "__zigRequestGetPromiseWrapped", quickjs.Value.initBool(true)) catch {
+        out.deinit(ctx);
+        source.deinit(ctx);
+        return quickjs.Value.exception;
+    };
+    if (!installSourceBackedGetPromise(ctx, out, source)) {
+        out.deinit(ctx);
+        source.deinit(ctx);
+        return quickjs.Value.exception;
+    }
+    source.deinit(ctx);
+    return out;
+}
+
+fn installDelayedGetPromise(ctx: *quickjs.Context, target: quickjs.Value, original_get_promise: quickjs.Value) bool {
+    var data = [_]quickjs.Value{
+        target.dup(ctx),
+        original_get_promise.dup(ctx),
+    };
+    const wrapped = quickjs.Value.initCFunctionData2(ctx, jsDelayedGetPromise, "__zigDelayedGetPromise", 0, 0, &data);
+    if (wrapped.isException()) return false;
+    target.setPropertyStr(ctx, "getPromise", wrapped) catch return false;
+    return true;
+}
+
+fn installSourceBackedGetPromise(ctx: *quickjs.Context, target: quickjs.Value, source: quickjs.Value) bool {
+    var data = [_]quickjs.Value{source.dup(ctx)};
+    const wrapped = quickjs.Value.initCFunctionData2(ctx, jsSourceBackedGetPromise, "__zigSourceBackedGetPromise", 0, 0, &data);
+    if (wrapped.isException()) return false;
+    target.setPropertyStr(ctx, "getPromise", wrapped) catch return false;
+    return true;
+}
+
+fn jsDelayedGetPromise(
+    ctx_opt: ?*quickjs.Context,
+    _: quickjs.Value,
+    _: []const quickjs.c.JSValue,
+    _: i32,
+    data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const target = quickjs.Value.fromCVal(data[0]);
+    const original_get_promise = quickjs.Value.fromCVal(data[1]);
+
+    if (!original_get_promise.isFunction(ctx)) {
+        return delayedSettleFromSource(ctx, target);
+    }
+
+    const source = original_get_promise.call(ctx, target, &.{});
+    if (source.isException()) return quickjs.Value.exception;
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const click_flag = global.getPropertyStr(ctx, "__zigDuringClickEvent");
+    defer click_flag.deinit(ctx);
+    const should_delay_for_click = !click_flag.isException() and (click_flag.toBool(ctx) catch false);
+    if (should_delay_for_click) {
+        defer source.deinit(ctx);
+        return delayedSettleFromSource(ctx, source);
+    }
+
+    if (source.isPromise()) {
+        const state = source.promiseState(ctx);
+        if (state == .rejected) {
+            defer source.deinit(ctx);
+            return delayedSettleFromSource(ctx, source);
+        }
+    }
+
+    return source;
+}
+
+fn jsSourceBackedGetPromise(
+    ctx_opt: ?*quickjs.Context,
+    _: quickjs.Value,
+    _: []const quickjs.c.JSValue,
+    _: i32,
+    data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const source = quickjs.Value.fromCVal(data[0]);
+    if (source.isPromise()) return source.dup(ctx);
+    return resolvedPromise(ctx, source);
+}
+
+fn delayedSettleFromSource(ctx: *quickjs.Context, source: quickjs.Value) quickjs.Value {
+    var promise = quickjs.Value.initPromiseCapability(ctx);
+    if (promise.value.isException()) {
+        promise.resolve.deinit(ctx);
+        promise.reject.deinit(ctx);
+        return quickjs.Value.exception;
+    }
+    defer promise.deinit(ctx);
+
+    var settle_data = [_]quickjs.Value{
+        source.dup(ctx),
+        promise.resolve.dup(ctx),
+        promise.reject.dup(ctx),
+    };
+    const settle_callback = quickjs.Value.initCFunctionData2(ctx, jsDelayedSettleSource, "__zigDelayedSettleSource", 0, 0, &settle_data);
+    if (settle_callback.isException()) return quickjs.Value.exception;
+    defer settle_callback.deinit(ctx);
+
+    const timer_id = scheduleTimeout(ctx, settle_callback, request_delay_ms) orelse return quickjs.Value.exception;
+    if (active_mocks) |mocks| {
+        mocks.pending_request_timer_ids.append(mocks.allocator, timer_id) catch {};
+    }
+    return promise.value.dup(ctx);
+}
+
+fn scheduleTimeout(ctx: *quickjs.Context, callback: quickjs.Value, delay_ms: i32) ?i32 {
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    const set_timeout = global.getPropertyStr(ctx, "setTimeout");
+    defer set_timeout.deinit(ctx);
+    if (!set_timeout.isFunction(ctx)) return null;
+
+    var delay_value = quickjs.Value.initInt32(delay_ms);
+    defer delay_value.deinit(ctx);
+    var args = [_]quickjs.Value{callback.dup(ctx), delay_value};
+    defer args[0].deinit(ctx);
+    const result = set_timeout.call(ctx, global, &args);
+    defer result.deinit(ctx);
+    if (result.isException()) return null;
+    return result.toInt32(ctx) catch null;
+}
+
+fn jsDelayedSettleSource(
+    ctx_opt: ?*quickjs.Context,
+    _: quickjs.Value,
+    _: []const quickjs.c.JSValue,
+    _: i32,
+    data: [*c]quickjs.c.JSValue,
+) quickjs.Value {
+    const ctx = ctx_opt orelse return quickjs.Value.exception;
+    const source = quickjs.Value.fromCVal(data[0]);
+    const resolve = quickjs.Value.fromCVal(data[1]);
+    const reject = quickjs.Value.fromCVal(data[2]);
+
+    const then_fn = source.getPropertyStr(ctx, "then");
+    defer then_fn.deinit(ctx);
+    if (then_fn.isFunction(ctx)) {
+        var then_args = [_]quickjs.Value{resolve.dup(ctx), reject.dup(ctx)};
+        defer then_args[0].deinit(ctx);
+        defer then_args[1].deinit(ctx);
+        const then_result = then_fn.call(ctx, source, &then_args);
+        defer then_result.deinit(ctx);
+        if (then_result.isException()) return quickjs.Value.exception;
+        return quickjs.Value.undefined;
+    }
+
+    var resolve_args = [_]quickjs.Value{source.dup(ctx)};
+    defer resolve_args[0].deinit(ctx);
+    const resolve_result = resolve.call(ctx, quickjs.Value.undefined, &resolve_args);
+    defer resolve_result.deinit(ctx);
+    if (resolve_result.isException()) return quickjs.Value.exception;
+    return quickjs.Value.undefined;
 }
 
 fn shiftArrayValue(ctx: *quickjs.Context, array: quickjs.Value) !quickjs.Value {
@@ -761,6 +1015,13 @@ fn jsRestoreAllSpies(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const 
         restoreMockState(ctx, state, state.mock_function) catch return quickjs.Value.exception;
     }
 
+    return quickjs.Value.undefined;
+}
+
+fn jsClearPendingMockTimers(maybe_ctx: ?*quickjs.Context, _: quickjs.Value, _: []const quickjs.c.JSValue) quickjs.Value {
+    _ = maybe_ctx orelse return quickjs.Value.exception;
+    const mocks = active_mocks orelse return quickjs.Value.undefined;
+    mocks.clearPendingRequestTimers();
     return quickjs.Value.undefined;
 }
 
@@ -1066,7 +1327,11 @@ fn jsMockMethod(maybe_ctx: ?*quickjs.Context, this_value: quickjs.Value, args: [
             state.calls.setLength(ctx, 0) catch return quickjs.Value.exception;
             state.once_implementations.setLength(ctx, 0) catch return quickjs.Value.exception;
             setMockLastCall(ctx, this_value, quickjs.Value.undefined) catch return quickjs.Value.exception;
-            replaceValue(ctx, &state.implementation, quickjs.Value.undefined);
+            if (state.has_restore and state.original_implementation.isFunction(ctx)) {
+                replaceValue(ctx, &state.implementation, state.original_implementation);
+            } else {
+                replaceValue(ctx, &state.implementation, quickjs.Value.undefined);
+            }
             clearModes(ctx, state, true);
         },
         .restore => {

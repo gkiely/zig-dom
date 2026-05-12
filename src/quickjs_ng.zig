@@ -7,6 +7,8 @@ const platform = @import("host/platform.zig");
 const assertions = @import("host/assertions.zig");
 const runner = @import("host/runner.zig");
 const mocks = @import("host/mocks.zig");
+const testing_library_dom = @import("host/testing_library_dom.zig");
+const testing_library_react = @import("host/testing_library_react.zig");
 
 const Allocator = std.mem.Allocator;
 var host_io: ?std.Io = null;
@@ -150,6 +152,7 @@ pub const Runtime = struct {
         try runtime.installHostAssertions();
         try runtime.installHostMocks();
         try runtime.installHostRunner();
+        try runtime.installHostTestingLibrary();
         return runtime;
     }
 
@@ -701,6 +704,11 @@ pub const Runtime = struct {
                 else => error.EvaluationFailed,
             };
         };
+    }
+
+    fn installHostTestingLibrary(self: *Runtime) RuntimeError!void {
+        testing_library_dom.install(self.ctx) catch return error.EvaluationFailed;
+        testing_library_react.install(self.ctx) catch return error.EvaluationFailed;
     }
 };
 

@@ -48,7 +48,7 @@ Do not remove skips for:
 7. Run the perf guard:
 
    ```sh
-   bun run test:perf:gate --timeout=.15 ../youneedawiki/src/elements/Buttons/Edit.test.tsx
+   bun run test:perf:gate --timeout=.15 ../youneedawiki-zig-dom/src/elements/Buttons/Edit.test.tsx
    ```
 
 8. If WPT passes and the warm perf run stays within the 150ms gate, delete the

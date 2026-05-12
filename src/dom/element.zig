@@ -59,6 +59,7 @@ pub fn installPrototype(ctx: *quickjs.Context, proto: quickjs.Value, comptime ca
     try bindings.installMethod(ctx, proto, "focus", callbacks.focus, 0);
     try bindings.installMethod(ctx, proto, "blur", callbacks.blur, 0);
     try bindings.installMethod(ctx, proto, "select", callbacks.select, 0);
+    try bindings.installMethod(ctx, proto, "setSelectionRange", callbacks.setSelectionRange, 2);
     try bindings.installAccessor(ctx, proto, "value", callbacks.valueGet, callbacks.valueSet);
     try bindings.installAccessor(ctx, proto, "checked", callbacks.checkedGet, callbacks.checkedSet);
     try bindings.installAccessor(ctx, proto, "disabled", callbacks.disabledGet, callbacks.disabledSet);

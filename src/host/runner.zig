@@ -489,6 +489,7 @@ pub const HostRunner = struct {
     }
 
     fn runTestEntry(self: *HostRunner, test_entry: *TestEntry, result: *RunResult, only_mode: bool) !void {
+        self.drainPendingWork(16);
         const auto_restore_spies = autoRestoreSpiesEnabled();
         const spy_checkpoint = if (auto_restore_spies) self.captureSpyCheckpoint() else 0;
 
@@ -545,6 +546,7 @@ pub const HostRunner = struct {
         const after_outcome = try self.runHookList(after_each.items, test_entry.timeout_ms);
         if (runnerProfileActive()) runner_perf_stats.after_each_ns += profileNowNs() - after_start;
         defer if (after_outcome.error_text) |text| self.allocator.free(text);
+        self.drainPendingWork(16);
 
         if (!test_outcome.ok) {
             try self.addFailure(result, full_name, test_outcome.error_text orelse "Test failed", test_outcome.timeout);
@@ -581,6 +583,43 @@ pub const HostRunner = struct {
             );
         }
         try reporter.printPassedLineStdout(self.allocator, self.io, full_name, elapsed_ms);
+    }
+
+    fn drainPendingWork(self: *HostRunner, max_turns: usize) void {
+        var turns: usize = 0;
+        var guard: usize = 0;
+        while (turns < max_turns) : (turns += 1) {
+            var progressed = false;
+
+            while (self.rt.isJobPending()) : (guard += 1) {
+                _ = self.rt.executePendingJob() catch {
+                    clearPendingException(self.ctx);
+                    return;
+                };
+                progressed = true;
+                if (guard > 100_000) return;
+            }
+
+            if (platform.hasPendingNativeTimers()) {
+                progressed = true;
+                const timer_result = platform.runNativeTimerTurn(self.ctx);
+                defer timer_result.deinit(self.ctx);
+                if (timer_result.isException()) {
+                    clearPendingException(self.ctx);
+                    return;
+                }
+                while (platform.hasDueNativeTimers()) {
+                    const due_timer_result = platform.runNativeTimerTurn(self.ctx);
+                    defer due_timer_result.deinit(self.ctx);
+                    if (due_timer_result.isException()) {
+                        clearPendingException(self.ctx);
+                        return;
+                    }
+                }
+            }
+
+            if (!progressed) break;
+        }
     }
 
     fn restoreAllSpies(self: *HostRunner) void {
@@ -669,8 +708,16 @@ pub const HostRunner = struct {
             return .{ .ok = false, .error_text = self.takeExceptionText() };
         }
         if (result.isPromise()) {
+            const start_ts = std.Io.Clock.Timestamp.now(self.io, .awake);
             var iterations: usize = 0;
             while (result.promiseState(self.ctx) == .pending) : (iterations += 1) {
+                if (timeout_ms > 0 and start_ts.untilNow(self.io).raw.toMilliseconds() > timeout_ms) {
+                    return .{
+                        .ok = false,
+                        .timeout = true,
+                        .error_text = try std.fmt.allocPrint(self.allocator, "Exceeded timeout of {d}ms", .{timeout_ms}),
+                    };
+                }
                 if (runnerProfileActive()) runner_perf_stats.promise_iterations += 1;
                 if (self.rt.isJobPending()) {
                     while (self.rt.isJobPending()) {
@@ -1145,7 +1192,21 @@ fn jsRunnerDomCleanup(ctx_opt: ?*quickjs.Context, _: quickjs.Value, _: []const q
     const global = ctx.getGlobalObject();
     defer global.deinit(ctx);
 
+    const clear_mock_timers = global.getPropertyStr(ctx, "__zigClearPendingMockTimers");
+    defer clear_mock_timers.deinit(ctx);
+    if (!clear_mock_timers.isException() and clear_mock_timers.isFunction(ctx)) {
+        const clear_result = clear_mock_timers.call(ctx, global, &.{});
+        defer clear_result.deinit(ctx);
+        if (clear_result.isException()) {
+            clearPendingException(ctx);
+        }
+    } else if (clear_mock_timers.isException()) {
+        clearPendingException(ctx);
+    }
+
     runTestingLibraryCleanup(ctx, global);
+    clearGlobalEventListeners(ctx, global);
+    platform.clearPendingNativeTimers(ctx);
 
     const document = global.getPropertyStr(ctx, "document");
     defer document.deinit(ctx);
@@ -1189,6 +1250,9 @@ fn runTestingLibraryCleanup(ctx: *quickjs.Context, global: quickjs.Value) void {
 }
 
 fn clearDocumentWindowNodes(ctx: *quickjs.Context, document: quickjs.Value) void {
+    clearDocumentSectionInnerHtml(ctx, document, "body");
+    clearDocumentSectionInnerHtml(ctx, document, "head");
+
     const window_handle_value = document.getPropertyStr(ctx, "_windowHandle");
     defer window_handle_value.deinit(ctx);
     if (window_handle_value.isException()) {
@@ -1208,6 +1272,19 @@ fn clearDocumentWindowNodes(ctx: *quickjs.Context, document: quickjs.Value) void
     if (zig_dom.zig_dom_window_head(window_handle, &head_handle) == 0 and head_handle != 0) {
         _ = zig_dom.zig_dom_node_set_inner_html(head_handle, "", 0);
     }
+}
+
+fn clearDocumentSectionInnerHtml(ctx: *quickjs.Context, document: quickjs.Value, comptime section_name: [:0]const u8) void {
+    const section = document.getPropertyStr(ctx, section_name);
+    defer section.deinit(ctx);
+    if (section.isException()) {
+        clearPendingException(ctx);
+        return;
+    }
+    if (!section.isObject()) return;
+    section.setPropertyStr(ctx, "innerHTML", quickjs.Value.initStringLen(ctx, "")) catch {
+        clearPendingException(ctx);
+    };
 }
 
 fn clearStorageObject(ctx: *quickjs.Context, global: quickjs.Value, comptime name: [:0]const u8) void {
@@ -1232,6 +1309,35 @@ fn clearStorageObject(ctx: *quickjs.Context, global: quickjs.Value, comptime nam
     if (clear_result.isException()) {
         clearPendingException(ctx);
     }
+}
+
+fn clearGlobalEventListeners(ctx: *quickjs.Context, global: quickjs.Value) void {
+    const window = global.getPropertyStr(ctx, "window");
+    defer window.deinit(ctx);
+    if (!window.isException() and window.isObject()) {
+        clearEventListenersOnTarget(ctx, window);
+    } else if (window.isException()) {
+        clearPendingException(ctx);
+    }
+
+    const document = global.getPropertyStr(ctx, "document");
+    defer document.deinit(ctx);
+    if (!document.isException() and document.isObject()) {
+        clearEventListenersOnTarget(ctx, document);
+    } else if (document.isException()) {
+        clearPendingException(ctx);
+    }
+}
+
+fn clearEventListenersOnTarget(ctx: *quickjs.Context, target: quickjs.Value) void {
+    const listeners = quickjs.Value.initObject(ctx);
+    if (listeners.isException()) {
+        clearPendingException(ctx);
+        return;
+    }
+    target.setPropertyStr(ctx, "__zigEventListeners", listeners) catch {
+        clearPendingException(ctx);
+    };
 }
 
 fn clearPendingException(ctx: *quickjs.Context) void {

@@ -55,7 +55,13 @@ pub fn transformSource(allocator: Allocator, path: []const u8, source: []const u
     const normalized_using = try replaceAll(allocator, normalized_require, "using ", "const ");
     defer allocator.free(normalized_using);
 
-    const normalized_jsx_keys = try liftAutomaticJsxKeys(allocator, normalized_using);
+    // Large generated modules (for example from build onLoad hooks) can contain
+    // thousands of JSX factory calls; key-lifting becomes disproportionately slow
+    // there and offers little value for those synthetic outputs.
+    const normalized_jsx_keys = if (normalized_using.len > 256 * 1024)
+        try allocator.dupe(u8, normalized_using)
+    else
+        try liftAutomaticJsxKeys(allocator, normalized_using);
     defer allocator.free(normalized_jsx_keys);
 
     if (jsx_runtime == .automatic and

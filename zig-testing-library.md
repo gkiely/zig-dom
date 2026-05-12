@@ -84,7 +84,7 @@ small embedded JS helper strings only for glue, especially for React's
 
 ## Downstream Surface
 
-`../youneedawiki` currently imports a small Testing Library surface from
+`../youneedawiki-zig-dom` currently imports a small Testing Library surface from
 `@testing-library/react`:
 
 - `screen`
@@ -98,9 +98,9 @@ small embedded JS helper strings only for glue, especially for React's
 
 Treat these as first-class compatibility targets. `renderHook`, `waitFor`, and
 `waitForElementToBeRemoved` are required before using
-`../youneedawiki node --run test-dom` as a serious gate.
+`../youneedawiki-zig-dom node --run test-dom` as a serious gate.
 
-`@testing-library/user-event` is present in `youneedawiki/src/test-utils`, but
+`@testing-library/user-event` is present in `youneedawiki-zig-dom/src/test-utils`, but
 that helper already wraps the common fast paths with `fireEvent`. Leave
 `user-event` out of this pass unless the React Testing Library surface is green
 and downstream still needs it.
@@ -273,7 +273,7 @@ bun run test testing-library-role
 
 ## Milestone 5: Async Helpers
 
-Implement the async helpers used by `youneedawiki`:
+Implement the async helpers used by `youneedawiki-zig-dom`:
 
 - `waitFor(callback, options)`
 - `waitForElementToBeRemoved(callbackOrElement, options)`
@@ -369,7 +369,7 @@ Cleanup:
 
 `renderHook(callback, options)` can start as a small React component that stores
 the latest callback result and returns `{ result, rerender, unmount }`. Support
-`options.wrapper`, since `youneedawiki` uses wrapper providers.
+`options.wrapper`, since `youneedawiki-zig-dom` uses wrapper providers.
 
 Acceptance:
 
@@ -401,7 +401,7 @@ node --run test
 Use the real consumer suite before calling this done.
 
 ```sh
-../youneedawiki node --run test-dom
+../youneedawiki-zig-dom node --run test-dom
 ```
 
 If downstream exposes missing Testing Library APIs, add them in the Zig modules
@@ -423,7 +423,7 @@ instead of restoring upstream dependencies or adding test-specific hacks.
 3. Verify with `bun run test <target>`.
 4. Run `bun run test:perf` after query traversal or module-loader changes.
 5. Run `node --run test` before handoff.
-6. Run `../youneedawiki node --run test-dom` before removing upstream packages.
+6. Run `../youneedawiki-zig-dom node --run test-dom` before removing upstream packages.
 
 Keep each milestone independently reviewable. If a query needs a broader DOM
 primitive, fix the DOM primitive in `src/dom/*.zig` and add DOM coverage for it
