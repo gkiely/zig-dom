@@ -1013,7 +1013,7 @@ fn removeNativeTimerAt(ctx: *quickjs.Context, index: usize) void {
 }
 
 fn delayToTimerTurns(delay_ms: f64) u32 {
-    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 16;
+    if (!std.math.isFinite(delay_ms) or delay_ms <= 0) return 15;
     const turns = @as(i64, @intFromFloat(@ceil(delay_ms / 10.0)));
     return @intCast(@max(1, @min(turns, 10_000)));
 }

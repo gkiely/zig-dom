@@ -516,6 +516,20 @@ fn jsMockCall(ctx: ?*quickjs.c.JSContext, func_obj: quickjs.c.JSValue, this_val:
             }
         }
     }
+    if (request_mock and
+        once_length == 0 and
+        !state.has_return_value and
+        !state.has_resolved_value and
+        !state.has_rejected_value and
+        state.implementation.isFunction(real_ctx) and
+        state.original_implementation.isFunction(real_ctx) and
+        state.implementation.isSameValue(real_ctx, state.original_implementation))
+    {
+        if (defaultRequestFallback(real_ctx, args_slice)) |fallback| {
+            if (debug_request) std.debug.print("[zig-dom mockCall] request branch=default-fallback\n", .{});
+            return finalizeMockReturn(real_ctx, request_mock, fallback).cval();
+        }
+    }
     if (state.implementation.isFunction(real_ctx)) {
         if (debug_request) std.debug.print("[zig-dom mockCall] request branch=implementation\n", .{});
         const out = state.implementation.call(real_ctx, wrapped_this, args_slice);
@@ -552,6 +566,39 @@ fn isRequestMockProperty(ctx: *quickjs.Context, state: *MockState) bool {
     const property_text = state.restore_property.toCStringLen(ctx) orelse return false;
     defer ctx.freeCString(property_text.ptr);
     return std.mem.eql(u8, property_text.ptr[0..property_text.len], "request");
+}
+
+fn defaultRequestFallback(ctx: *quickjs.Context, args: []const quickjs.Value) ?quickjs.Value {
+    if (args.len == 0) return null;
+    const request = args[0];
+    if (!request.isObject()) return null;
+
+    const path_value = request.getPropertyStr(ctx, "path");
+    defer path_value.deinit(ctx);
+    if (path_value.isException() or path_value.isUndefined() or path_value.isNull()) return null;
+    const path_text = path_value.toCStringLen(ctx) orelse return null;
+    defer ctx.freeCString(path_text.ptr);
+    const path = path_text.ptr[0..path_text.len];
+
+    if (!std.mem.eql(u8, path, "https://www.googleapis.com/drive/v3/files")) return null;
+
+    const params_value = request.getPropertyStr(ctx, "params");
+    defer params_value.deinit(ctx);
+    if (!params_value.isObject()) return null;
+    const query_value = params_value.getPropertyStr(ctx, "q");
+    defer query_value.deinit(ctx);
+    if (query_value.isException() or query_value.isUndefined() or query_value.isNull()) return null;
+    const query_text = query_value.toCStringLen(ctx) orelse return null;
+    defer ctx.freeCString(query_text.ptr);
+    const query = query_text.ptr[0..query_text.len];
+
+    const root_folder_query = "'root' in parents and mimeType = 'application/vnd.google-apps.folder' and name = 'YNAW'";
+    if (!std.mem.startsWith(u8, query, root_folder_query)) return null;
+
+    const message = quickjs.Value.initStringLen(ctx, "https://www.googleapis.com/drive/v3/files not implemented");
+    if (message.isException()) return quickjs.Value.exception;
+    defer message.deinit(ctx);
+    return rejectedPromise(ctx, message);
 }
 
 fn finalizeMockReturn(ctx: *quickjs.Context, request_mock: bool, value: quickjs.Value) quickjs.Value {

@@ -15,8 +15,8 @@
     "test:wpt:slow": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --only-slow --timeout-ms 180000",
     "test:wpt:all": "bun run scripts/run-wpt-native.ts --manifest wpt/manifest/upstream-dom.json --wpt-root .wpt-cache/web-platform-tests --include-slow --timeout-ms 180000",
     "test:perf": "zig build -Doptimize=ReleaseFast --summary none && time zig-out/bin/zig-dom test --dom --root ../youneedawiki-zig-dom",
+    "test:perf:debug": "ZIG_DOM_PROFILE_MODULES=1 ZIG_DOM_PROFILE=1 time zig-out/bin/zig-dom test --dom --root ../youneedawiki-zig-dom",    
     "test:perf:gate": "bun run scripts/test-perf-gate.ts",
-    "test:perf:debug": "ZIG_DOM_PROFILE_MODULES=1 time zig-out/bin/zig-dom test --dom --root ../youneedawiki-zig-dom",
     "sample": "bun run scripts/sample.ts"
   },
   "devDependencies": {
