@@ -59,3 +59,5 @@
 - In production mode, mocking `react-dom/test-utils` via `mock.module()` in setup is invalid for Bun CJS consumers (`require() async module ... unsupported`) and did not fix zig-dom Tree.
 - A separate preload tmp file that installs a flushSync-backed `React.act` fallback before running `Tree.test.tsx` did not help because `@testing-library/react` had already captured its `act` implementation during module init.
 - The patched QuickJS `__JS_FindAtom` direct-mapped cache fast path regressed warmed components/elements per-file totals (notably `Tree.test.tsx`/`ShareModal.test.tsx`) and was removed.
+- Applying requested-export pruning to normal TS/TSX module sources before transform was invalid for `Tree.test.tsx`: `src/utils/constants.ts` was compiled without later-requested exports such as `defaultScope`, even with a static graph pre-scan.
+- Rewriting all literal dynamic imports to eager static namespace imports wrapped in `Promise.resolve(...)` was invalid: dynamic-only modules evaluated during collection and failed on browser globals such as `DOMMatrix`.

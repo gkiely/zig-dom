@@ -3683,10 +3683,6 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
         };
     }
 
-    if (module_loader_state.profile_enabled) {
-        module_loader_state.printProfileModules();
-    }
-
     const runner_start = if (module_loader_state.profile_enabled) module_loader_state.profileNow() else 0;
     vm.evalScript("<zig-runner-bootstrap>", run_bootstrap_source) catch |err| {
         return failureFromRuntimeException(allocator, path, "failed to start file execution", err, &vm);
@@ -3744,6 +3740,7 @@ pub fn runSingleFile(allocator: Allocator, io: std.Io, path: []const u8, setup_p
     }
     if (module_loader_state.profile_enabled) {
         module_loader_state.profile_runner_ns += module_loader_state.profileNow() - runner_start;
+        module_loader_state.printProfileModules();
     }
 
     const run_error = vm.getGlobalStringDup("__zigRunError") catch try allocator.dupe(u8, "");

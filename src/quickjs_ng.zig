@@ -143,7 +143,6 @@ pub const Runtime = struct {
             .runner_state = null,
             .mocks_state = null,
         };
-
         try runtime.installHostGlobals();
         if (install_dom) {
             try runtime.installNativeDomGlobals();

@@ -501,6 +501,7 @@ fn runFindQuery(
         const elapsed = monotonicNowMs() - start_ms;
         if (elapsed >= timeout_ms) break;
         if (!pumpWaitTurns(ctx, interval_turns)) return quickjs.Value.exception;
+        if (!flushReactAct(ctx)) return quickjs.Value.exception;
     }
 
     const message = if (last_error) |text|
@@ -1543,7 +1544,7 @@ fn callMethod0(ctx: *quickjs.Context, target: quickjs.Value, comptime method_nam
 fn parseWaitTimeout(ctx: *quickjs.Context, options: quickjs.Value) i64 {
     const timeout_value = optionValue(ctx, options, "timeout");
     defer timeout_value.deinit(ctx);
-    if (timeout_value.isUndefined() or timeout_value.isNull()) return 1000;
+    if (timeout_value.isUndefined() or timeout_value.isNull()) return 10000;
     const timeout = timeout_value.toInt64(ctx) catch return 1000;
     if (timeout <= 0) return 1;
     return timeout;
@@ -1674,6 +1675,7 @@ fn jsWaitFor(ctx_opt: ?*quickjs.Context, _: quickjs.Value, args: []const quickjs
         const elapsed = monotonicNowMs() - start_ms;
         if (elapsed >= timeout_ms) break;
         if (!pumpWaitTurns(ctx, interval_turns)) return quickjs.Value.exception;
+        if (!flushReactAct(ctx)) return quickjs.Value.exception;
     }
 
     const message = if (last_error) |text|
